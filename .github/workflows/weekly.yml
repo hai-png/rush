@@ -1,0 +1,28 @@
+name: Weekly checks
+on:
+  schedule: [{ cron: '0 3 * * 1' }] # Monday 03:00 UTC
+  workflow_dispatch: {}
+
+jobs:
+  load-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: grafana/setup-k6-action@v1
+      - run: k6 run infra/k6/payment-flow.js
+        env: { K6_TARGET_URL: https://staging.addisride.et }
+
+  dependency-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - run: bunx audit-ci --moderate
+
+  dast:
+    runs-on: ubuntu-latest
+    steps:
+      - name: OWASP ZAP baseline scan
+        uses: zaproxy/action-baseline@v0.12.0
+        with: { target: 'https://staging.addisride.et' }

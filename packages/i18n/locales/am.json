@@ -1,0 +1,78 @@
+{
+  "nav": { "home": "መነሻ", "trips": "ጉዞዎች", "plans": "ዕቅዶች", "tickets": "ድጋፍ", "account": "መለያ" },
+  "dashboard": {
+    "greeting": "እያንዳንዱ ጉዞ በተረጋገጠ መቀመጫ ይጀምራል።",
+    "activePlan": "ንቁ ዕቅድ",
+    "noSubscription": "ንቁ ምዝገባ የለም",
+    "noSubscriptionDesc": "የዕለት መቀመጫዎን ለማስያዝ ዕቅዶችን ይመልከቱ",
+    "trackShuttle": "የዛሬውን ሚኒባስ ይከታተሉ",
+    "popularRoutes": "ታዋቂ መስመሮች",
+    "seeAll": "ሁሉንም ይመልከቱ"
+  },
+  "plans": {
+    "title": "ዕቅድ ይምረጡ",
+    "continue": "ወደ ክፍያ ይቀጥሉ",
+    "unlimited": "ያልተገደበ ጉዞዎች",
+    "rides": "{count} ጉዞዎች",
+    "days": "{count} ቀናት"
+  },
+  "seatMarket": {
+    "title": "ክፍት መቀመጫዎች",
+    "release": "መቀመጫ ልቀቅ",
+    "claim": "መቀመጫ ውሰድ",
+    "refund": "ሲወሰድ {amount} ይመለስልዎታል",
+    "openSeats": "ክፍት መቀመጫዎች",
+    "noOpenSeats": "አሁን ክፍት መቀመጫ የለም",
+    "noOpenSeatsDesc": "የጉዞ ሰዓትዎ ሲቃረብ እንደገና ይመልከቱ — ተሳፋሪዎች ከመነሳቱ ጥቂት ሰዓታት በፊት መቀመጫ ይለቀቃሉ።"
+  },
+  "errors": { "generic": "የሆነ ስህተት ተከስቷል። እባክዎ እንደገና ይሞክሩ።", "network": "የአውታረ መረብ ስህተት — ግንኙነትዎን ያረጋግጡ።" },
+  "tickets": {
+    "title": "የድጋፍ ጥያቄዎች",
+    "new": "አዲስ ጥያቄ",
+    "empty": "እስካሁን ምንም ጥያቄ የለም",
+    "emptyDesc": "እርዳታ ይፈልጋሉ? ጥያቄ ይክፈቱ፣ ቡድናችን ይመልስልዎታል።",
+    "reply": "መልዕክት ይጻፉ…",
+    "send": "ላክ"
+  },
+  "account": {
+    "title": "መለያ",
+    "save": "ለውጦችን አስቀምጥ",
+    "exportData": "የኔን መረጃ ላውርድ",
+    "deleteAccount": "መለያዬን ሰርዝ",
+    "deleteConfirmTitle": "መለያዎን መሰረዝ ይፈልጋሉ?",
+    "deleteConfirmDesc": "ይህ የ{days}-ቀን የማቆያ ጊዜ ይጀምራል። የክፍያ መዝገቦች በኢትዮጵያ የግብር ህግ መሰረት ለ7 ዓመታት ስም-አልባ ሆነው ይቀመጣሉ።"
+  },
+  "contractor": {
+    "dashboardTitle": "የኮንትራክተር ዳሽቦርድ",
+    "verificationRequired": "ማረጋገጫ ያስፈልጋል",
+    "verificationRequiredDesc": "ጉዞ ለመጀመር ሰነዶችዎን ይስቀሉ።",
+    "startTrip": "ጉዞ ጀምር",
+    "documentsTitle": "የማረጋገጫ ሰነዶች",
+    "uploaded": "ተስቅሏል"
+  },
+  "corporate": {
+    "membersTitle": "አባላት",
+    "approve": "አጽድቅ",
+    "reject": "ውድቅ አድርግ",
+    "subsidy": "ድጎማ",
+    "monthlyAllowance": "ወርሃዊ ጉርሻ"
+  },
+  "admin": {
+    "dashboard": "የመድረክ አጠቃላይ እይታ",
+    "activeSubscriptions": "ንቁ ምዝገባዎች",
+    "openSeatReleases": "ክፍት የተለቀቁ መቀመጫዎች",
+    "pendingContractors": "በመጠባበቅ ላይ ያሉ ኮንትራክተሮች",
+    "revenue30d": "ገቢ (30 ቀን)",
+    "openTickets": "ክፍት ጥያቄዎች",
+    "verify": "አረጋግጥ",
+    "rejectWithReason": "ውድቅ አድርግ",
+    "auditLog": "የኦዲት መዝገብ"
+  },
+  "settings": {
+    "title": "ቅንብሮች",
+    "biometricUnlock": "በባዮሜትሪክ ክፈት",
+    "language": "ቋንቋ",
+    "theme": "ገጽታ",
+    "pendingSync": "{count} ለውጦች ለማመሳሰል በመጠበቅ ላይ"
+  }
+}

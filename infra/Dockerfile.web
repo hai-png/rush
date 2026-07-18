@@ -1,0 +1,7 @@
+FROM oven/bun:1.1-slim AS base
+WORKDIR /app
+COPY . .
+RUN bun install --frozen-lockfile
+RUN bun run --cwd apps/web build
+EXPOSE 3000
+CMD ["bun", "run", "--cwd", "apps/web", "start"]

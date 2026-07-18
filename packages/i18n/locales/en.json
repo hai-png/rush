@@ -1,0 +1,78 @@
+{
+  "nav": { "home": "Home", "trips": "Trips", "plans": "Plans", "tickets": "Support", "account": "Account" },
+  "dashboard": {
+    "greeting": "Every commute starts with a confirmed seat.",
+    "activePlan": "Active plan",
+    "noSubscription": "No active subscription",
+    "noSubscriptionDesc": "Browse plans to reserve your daily seat",
+    "trackShuttle": "Track today's shuttle",
+    "popularRoutes": "Popular routes",
+    "seeAll": "See all"
+  },
+  "plans": {
+    "title": "Choose a plan",
+    "continue": "Continue to payment",
+    "unlimited": "Unlimited rides",
+    "rides": "{count} rides",
+    "days": "{count} days"
+  },
+  "seatMarket": {
+    "title": "Open seats",
+    "release": "Release a seat",
+    "claim": "Claim seat",
+    "refund": "You'll receive {amount} back once claimed",
+    "openSeats": "Open seats",
+    "noOpenSeats": "No open seats right now",
+    "noOpenSeatsDesc": "Check back closer to your commute window — riders release seats up to a few hours before departure."
+  },
+  "errors": { "generic": "Something went wrong. Please try again.", "network": "Network error — check your connection." },
+  "tickets": {
+    "title": "Support tickets",
+    "new": "New ticket",
+    "empty": "No tickets yet",
+    "emptyDesc": "Need help? Create a ticket and our team will respond.",
+    "reply": "Type a message…",
+    "send": "Send"
+  },
+  "account": {
+    "title": "Account",
+    "save": "Save changes",
+    "exportData": "Export my data",
+    "deleteAccount": "Delete my account",
+    "deleteConfirmTitle": "Delete your account?",
+    "deleteConfirmDesc": "This starts a {days}-day grace period. Payment records are retained 7 years per Ethiopian tax law, anonymized."
+  },
+  "contractor": {
+    "dashboardTitle": "Contractor dashboard",
+    "verificationRequired": "Verification required",
+    "verificationRequiredDesc": "Upload your documents to start running trips.",
+    "startTrip": "Start trip",
+    "documentsTitle": "Verification documents",
+    "uploaded": "Uploaded"
+  },
+  "corporate": {
+    "membersTitle": "Members",
+    "approve": "Approve",
+    "reject": "Reject",
+    "subsidy": "Subsidy",
+    "monthlyAllowance": "Monthly allowance"
+  },
+  "admin": {
+    "dashboard": "Platform overview",
+    "activeSubscriptions": "Active subscriptions",
+    "openSeatReleases": "Open seat releases",
+    "pendingContractors": "Pending contractors",
+    "revenue30d": "Revenue (30d)",
+    "openTickets": "Open tickets",
+    "verify": "Verify",
+    "rejectWithReason": "Reject",
+    "auditLog": "Audit log"
+  },
+  "settings": {
+    "title": "Settings",
+    "biometricUnlock": "Biometric unlock",
+    "language": "Language",
+    "theme": "Theme",
+    "pendingSync": "{count} changes pending sync"
+  }
+}

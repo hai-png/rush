@@ -1,0 +1,26 @@
+{
+  "name": "addis-ride",
+  "private": true,
+  "workspaces": ["apps/*", "packages/*", "services/*"],
+  "packageManager": "bun@1.1.42",
+  "scripts": {
+    "dev": "turbo run dev --parallel",
+    "build": "turbo run build",
+    "lint": "turbo run lint && dependency-cruiser --validate .dependency-cruiser.cjs packages apps services",
+    "typecheck": "turbo run typecheck",
+    "test": "turbo run test",
+    "test:integration": "turbo run test:integration",
+    "db:generate": "bun run --cwd packages/db generate",
+    "db:migrate": "bun run --cwd packages/db migrate",
+    "db:seed": "bun run --cwd packages/db seed",
+    "openapi:gen": "bun run --cwd packages/api openapi:gen",
+    "sdk:gen": "openapi-typescript packages/api/openapi.json -o packages/sdk/src/schema.d.ts"
+  },
+  "devDependencies": {
+    "turbo": "^2.3.0",
+    "typescript": "^5.7.0",
+    "dependency-cruiser": "^16.0.0",
+    "vitest": "^2.1.0",
+    "@playwright/test": "^1.49.0"
+  }
+}

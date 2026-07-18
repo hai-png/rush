@@ -1,0 +1,7 @@
+{
+  "name": "@addis/sdk",
+  "scripts": {
+    "generate": "openapi-typescript ../api/openapi.json -o src/schema.d.ts"
+  },
+  "dependencies": { "openapi-fetch": "^0.13.0" }
+}

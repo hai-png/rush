@@ -1,0 +1,26 @@
+'use client';
+import { useState } from 'react';
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { SessionProvider } from 'next-auth/react';
+import { I18nProvider } from '@addis/i18n';
+import { ToastProvider } from '@addis/ui';
+import { ThemeProvider } from './theme-provider';
+
+export function Providers({ children, initialLocale, initialTheme }: {
+  children: React.ReactNode; initialLocale: 'en' | 'am'; initialTheme: 'dark' | 'light';
+}) {
+  const [queryClient] = useState(() => new QueryClient({
+    defaultOptions: { queries: { staleTime: 30_000, retry: 1 }, mutations: { retry: 0 } },
+  }));
+  return (
+    <SessionProvider>
+      <QueryClientProvider client={queryClient}>
+        <ThemeProvider initialTheme={initialTheme}>
+          <I18nProvider initialLocale={initialLocale}>
+            <ToastProvider>{children}</ToastProvider>
+          </I18nProvider>
+        </ThemeProvider>
+      </QueryClientProvider>
+    </SessionProvider>
+  );
+}

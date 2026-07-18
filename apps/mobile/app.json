@@ -1,0 +1,15 @@
+{
+  "expo": {
+    "name": "Addis Ride",
+    "slug": "addis-ride",
+    "scheme": "addisride",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "automatic",
+    "plugins": ["expo-router", "expo-secure-store", "expo-notifications", "expo-background-fetch", "expo-localization"],
+    "ios": { "supportsTablet": true, "bundleIdentifier": "et.addisride.app" },
+    "android": { "package": "et.addisride.app", "adaptiveIcon": { "foregroundImage": "./assets/adaptive-icon.png" } },
+    "extra": { "eas": { "projectId": "addis-ride" } },
+    "updates": { "url": "https://u.expo.dev/addis-ride" }
+  }
+}

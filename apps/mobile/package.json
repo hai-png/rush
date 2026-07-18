@@ -1,0 +1,19 @@
+{
+  "name": "@addis/mobile",
+  "dependencies": {
+    "expo": "~52.0.0",
+    "expo-router": "~4.0.0",
+    "expo-secure-store": "~14.0.0",
+    "expo-notifications": "~0.29.0",
+    "expo-background-fetch": "~13.0.0",
+    "expo-location": "~18.0.0",
+    "expo-local-authentication": "~15.0.0",
+    "react-native-maps": "1.18.0",
+    "nativewind": "^4.1.0",
+    "@tanstack/react-query": "^5.62.0",
+    "zustand": "^5.0.0",
+    "@addis/sdk": "workspace:*",
+    "@addis/shared": "workspace:*",
+    "@addis/i18n": "workspace:*"
+  }
+}

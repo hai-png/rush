@@ -1,0 +1,16 @@
+{
+  "compilerOptions": {
+    "target": "ES2022", "module": "ESNext", "moduleResolution": "Bundler",
+    "strict": true, "noUncheckedIndexedAccess": true, "exactOptionalPropertyTypes": true,
+    "esModuleInterop": true, "skipLibCheck": true, "isolatedModules": true,
+    "resolveJsonModule": true, "declaration": true,
+    "paths": {
+      "@addis/shared": ["packages/shared/src/index.ts"],
+      "@addis/db": ["packages/db/src/index.ts"],
+      "@addis/api": ["packages/api/src/index.ts"],
+      "@addis/sdk": ["packages/sdk/src/index.ts"],
+      "@addis/ui": ["packages/ui/src/index.ts"],
+      "@addis/i18n": ["packages/i18n/src/index.ts"]
+    }
+  }
+}

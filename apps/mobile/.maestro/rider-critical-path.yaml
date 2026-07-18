@@ -1,0 +1,27 @@
+appId: et.addisride.app
+---
+- launchApp
+- tapOn: "Phone number"
+- inputText: "922555999"
+- tapOn: "Password"
+- inputText: "demo12345"
+- tapOn: "Log in"
+- assertVisible: "Every commute starts"
+
+- tapOn: "No active subscription"
+- assertVisible: "Choose a plan"
+- tapOn: "Monthly Unlimited"
+- tapOn: "Continue to payment"
+- tapOn: "telebirr"
+- tapOn: "Continue"
+- assertVisible: "superapp" # telebirr checkout webview loads
+
+- back
+- tapOn: "Track today's shuttle"
+- assertVisible: "Arriving in"
+
+- tapOn: "Support"
+- tapOn: "New ticket"
+- inputText: "Question about my subscription"
+- tapOn: "Submit"
+- assertVisible: "open"
