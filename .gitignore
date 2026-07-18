@@ -1,2 +1,6 @@
-repomix-output.md
+repomix-output.xml
 node_modules
+
+# spec source docs and parse scripts (not part of app)
+docs/
+scripts/
