@@ -13,8 +13,16 @@ import { redis } from '../../infra/redis';
 // key. The env schema now requires a >=32-char non-placeholder string.
 const env = loadEnv();
 const JWT_SECRET = () => new TextEncoder().encode(env.NEXTAUTH_SECRET);
-const ACCESS_TTL = '30m';
+// H2 fix: the JWT exp must match the DB session TTL. The previous ACCESS_TTL
+// was '30m' but SESSION_TTL_MS was 30 days — after 30 minutes, /auth/refresh
+// called verifySession which called jwtVerify (enforcing exp), so refresh
+// failed and the user was forced to re-login despite holding a 30-day session
+// row. Now both are 30 days; the DB session row remains the source of truth
+// for revocation (logout deletes it; verifySession checks it; tokenVersion
+// bump invalidates all JWTs on password change / suspension / deletion).
 const SESSION_TTL_MS = 30 * 24 * 3600_000;
+const ACCESS_TTL_SEC = SESSION_TTL_MS / 1000; // 2592000 seconds = 30 days
+const ACCESS_TTL = `${ACCESS_TTL_SEC}s`;
 
 // Account lockout: per-phone failed-attempt counter in Redis. After 5 failures
 // within 15 minutes, the account is locked for 15 minutes. The previous login

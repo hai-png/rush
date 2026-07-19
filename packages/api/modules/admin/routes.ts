@@ -175,9 +175,11 @@ adminRoutes.post('/refunds', async (c) => {
 // every export is audited and PII fields are stripped across all resources.
 const EXPORT_FIELD_DENYLIST: Record<string, string[]> = {
   users: ['passwordHash', 'twoFactorSecret', 'twoFactorEnabled'],
-  payments: ['prepayId'], // prepayId is a Telebirr bearer — leaking it enables replay
-  subscriptions: [],
-  tickets: [],
+  // H14: payments export was leaking reference (Telebirr merchOrderId — a
+  // replay primitive), refundRequestNo, and riderId (PII). Now stripped.
+  payments: ['prepayId', 'reference', 'refundRequestNo', 'riderId'],
+  subscriptions: ['riderId'],
+  tickets: ['userId'],
 };
 
 adminRoutes.get('/export/:resource', async (c) => {

@@ -98,8 +98,31 @@ export const corporateService = {
     return member ?? null;
   },
 
+  /**
+   * Generate a time-limited invite token for onboarding riders.
+   *
+   * H41 fix: the previous implementation returned the corporate's permanent
+   * `code` as the invite — a leaked code (email forward, screenshot) was valid
+   * forever. Now we generate a signed, time-limited token (24h expiry) that
+   * encodes the corporate code + expiry. The onboardRider endpoint verifies
+   * the token's signature and expiry before accepting the corporate code.
+   *
+   * The token is HMAC-signed with NEXTAUTH_SECRET so it can't be forged. It
+   * doesn't require a DB round-trip (no invite-code table to manage) — the
+   * signature + expiry are self-contained.
+   */
   async generateInvite(adminUserId: string) {
     const corp = await corporateService.getOwn(adminUserId);
-    return { inviteUrl: `${process.env.NEXTAUTH_URL}/signup/rider?corp=${corp.code}`, code: corp.code };
+    const expiresAt = Date.now() + 24 * 3600_000; // 24h
+    const payload = JSON.stringify({ code: corp.code, expiresAt });
+    const { createHmac } = await import('node:crypto');
+    const sig = createHmac('sha256', process.env.NEXTAUTH_SECRET!).update(payload).digest('hex');
+    const token = Buffer.from(`${payload}.${sig}`).toString('base64url');
+    return {
+      inviteUrl: `${process.env.NEXTAUTH_URL}/signup/rider?invite=${token}`,
+      code: corp.code, // still returned for the admin's reference
+      token,
+      expiresAt: new Date(expiresAt).toISOString(),
+    };
   },
 };

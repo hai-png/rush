@@ -64,8 +64,11 @@ const envSchema = z.object({
 
   S3_ENDPOINT: z.string().url(),
   S3_BUCKET: z.string().min(1),
-  S3_ACCESS_KEY_ID: z.string().min(1),
-  S3_SECRET_ACCESS_KEY: z.string().min(1),
+  // H31: enforce a real minimum length. AWS S3 access keys are 20 chars;
+  // secret keys are 40 chars. MinIO uses similar lengths. A 1-char key
+  // would pass the previous min(1) and only fail at runtime.
+  S3_ACCESS_KEY_ID: z.string().min(16, 'S3_ACCESS_KEY_ID must be at least 16 characters'),
+  S3_SECRET_ACCESS_KEY: z.string().min(32, 'S3_SECRET_ACCESS_KEY must be at least 32 characters'),
 
   // BCRYPT_COST must be >= 10 (OWASP minimum as of 2023) and <= 15 (avoid DoS
   // on auth endpoints). The previous code did `Number(process.env.BCRYPT_COST ?? 12)`

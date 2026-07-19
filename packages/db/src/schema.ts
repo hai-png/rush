@@ -501,7 +501,12 @@ export const shuttlePositions = pgTable('shuttle_positions', {
 });
 
 export const telebirrNotifyEvents = pgTable('telebirr_notify_events', {
-  merchOrderId: text('merch_order_id').primaryKey().references(() => payments.reference, { onDelete: 'cascade' }),
+  // ON DELETE RESTRICT (not cascade) — telebirrNotifyEvents is a tamper-evident
+  // audit log of inbound payment notifications. Deleting a payment should NOT
+  // silently destroy the notification record. RESTRICT forces the caller to
+  // explicitly handle the dependency (e.g. by keeping the payment row and
+  // anonymizing its PII instead of deleting it).
+  merchOrderId: text('merch_order_id').primaryKey().references(() => payments.reference, { onDelete: 'restrict' }),
   tradeStatus: text('trade_status').notNull(),
   outRequestNo: text('out_request_no'),
   receivedAt: ts('received_at').notNull().defaultNow(),

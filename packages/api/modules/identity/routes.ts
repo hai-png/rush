@@ -25,7 +25,7 @@ identityRoutes.post('/token', async (c) => {
   const ip = c.req.header('x-forwarded-for');
   const ua = c.req.header('user-agent');
   const { user, accessToken, requiresTosAcceptance } = await identityService.login(phone, password, ua, ip, code);
-  return c.json({ data: { accessToken, expiresIn: 1800, user: { id: user.id, role: user.role, phone: user.phone }, requiresTosAcceptance } });
+  return c.json({ data: { accessToken, expiresIn: 2592000, user: { id: user.id, role: user.role, phone: user.phone }, requiresTosAcceptance } });
 });
 
 identityRoutes.post('/refresh', async (c) => {
@@ -37,7 +37,7 @@ identityRoutes.post('/refresh', async (c) => {
   // implementation left the old session row in place, so a stolen token
   // remained valid for up to 30 minutes even after a legitimate refresh.
   const fresh = await identityService.reissueToken(user.id, jti);
-  return c.json({ data: { accessToken: fresh, expiresIn: 1800 } });
+  return c.json({ data: { accessToken: fresh, expiresIn: 2592000 } });
 });
 
 identityRoutes.post('/logout', async (c) => {

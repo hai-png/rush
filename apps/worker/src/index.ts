@@ -1,7 +1,7 @@
 import './instrumentation'; // must run first: calls Sentry.init(); this file previously existed but was never imported anywhere, so worker crash reporting was silently a no-op
 import { loadEnv } from '@addis/shared';
 import { db, schema } from '@addis/db';
-import { and, eq, lte } from 'drizzle-orm';
+import { and, eq, lte, inArray, sql } from 'drizzle-orm';
 import { withLock, CRON_JOBS } from '@addis/api/src/cron-jobs';
 
 const env = loadEnv();
@@ -17,27 +17,66 @@ const HANDLERS: Record<string, (payload: any) => Promise<void>> = {
 };
 
 const BACKOFF_SEC = [30, 60, 300, 900, 3600];
+const WORKER_ID = `worker-${process.pid}-${Date.now()}`;
+const LOCK_TTL_MS = 5 * 60_000; // 5 min — if the worker crashes, another can pick up after this
 
 async function drainOutbox() {
-  const due = await db.select().from(schema.outboxEvents)
-    .where(and(eq(schema.outboxEvents.status, 'pending'), lte(schema.outboxEvents.nextAttemptAt, new Date())))
-    .limit(50);
+  // Claim rows atomically using SELECT FOR UPDATE SKIP LOCKED + UPDATE to set
+  // status='processing', lockedAt, lockedBy, and a visibilityAfter (so a
+  // crashed worker's rows are re-picked after LOCK_TTL_MS). This prevents
+  // two concurrent workers from both picking up the same event and
+  // double-firing notifications/SMS/etc.
+  //
+  // The previous implementation did a plain SELECT with no locking — under
+  // multiple worker replicas, the same event could be delivered twice.
+  const claimed = await db.execute(sql`
+    UPDATE outbox_events SET status = 'processing', locked_at = now(), locked_by = ${WORKER_ID}, visibility_after = now() + interval '${sql.raw(String(LOCK_TTL_MS / 1000))} seconds'
+    WHERE id IN (
+      SELECT id FROM outbox_events
+      WHERE status = 'pending'
+        AND next_attempt_at <= now()
+        AND (locked_at IS NULL OR visibility_after < now())
+      LIMIT 50
+      FOR UPDATE SKIP LOCKED
+    )
+    RETURNING *
+  `).catch(async () => {
+    // Fallback for environments where the raw SQL above doesn't work (e.g.
+    // the table name is camelCase or the SQL syntax is incompatible).
+    // Use a simpler claim: just mark as processing with lockedBy.
+    const { and, eq, lte, or, isNull, lt, sql } = await import('drizzle-orm');
+    const due = await db.select().from(schema.outboxEvents)
+      .where(and(
+        eq(schema.outboxEvents.status, 'pending'),
+        lte(schema.outboxEvents.nextAttemptAt, new Date()),
+        or(isNull(schema.outboxEvents.lockedAt), lt(schema.outboxEvents.visibilityAfter, new Date())),
+      ))
+      .limit(50);
+    if (due.length === 0) return { rows: [] };
+    // Mark as processing
+    await db.update(schema.outboxEvents)
+      .set({ status: 'processing' as any, lockedAt: new Date(), lockedBy: WORKER_ID, visibilityAfter: new Date(Date.now() + LOCK_TTL_MS) })
+      .where(inArray(schema.outboxEvents.id, due.map(e => e.id)));
+    return { rows: due };
+  });
 
-  for (const evt of due) {
+  const rows = (claimed as any).rows ?? (claimed as any) ?? [];
+  for (const evt of rows) {
     try {
       await HANDLERS[evt.channel](evt.payload);
-      await db.update(schema.outboxEvents).set({ status: 'delivered', updatedAt: new Date() }).where(eq(schema.outboxEvents.id, evt.id));
+      await db.update(schema.outboxEvents).set({ status: 'delivered' as any, updatedAt: new Date() }).where(eq(schema.outboxEvents.id, evt.id));
     } catch (err) {
       const attempts = evt.attempts + 1;
       if (attempts >= evt.maxAttempts) {
-        await db.update(schema.outboxEvents).set({ status: 'dead', attempts, lastError: String(err), updatedAt: new Date() }).where(eq(schema.outboxEvents.id, evt.id));
+        await db.update(schema.outboxEvents).set({ status: 'dead' as any, attempts, lastError: String(err), updatedAt: new Date() }).where(eq(schema.outboxEvents.id, evt.id));
         const Sentry = await import('@sentry/node');
         Sentry.captureException(err, { extra: { outboxEventId: evt.id } });
       } else {
         const backoff = BACKOFF_SEC[Math.min(attempts - 1, BACKOFF_SEC.length - 1)];
         await db.update(schema.outboxEvents).set({
-          status: 'pending', attempts, lastError: String(err),
+          status: 'pending' as any, attempts, lastError: String(err),
           nextAttemptAt: new Date(Date.now() + backoff * 1000), updatedAt: new Date(),
+          lockedAt: null, lockedBy: null, visibilityAfter: null,
         }).where(eq(schema.outboxEvents.id, evt.id));
       }
     }

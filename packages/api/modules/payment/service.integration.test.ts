@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest';
 import { PostgreSqlContainer, StartedPostgreSqlContainer } from '@testcontainers/postgresql';
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import postgres from 'postgres';
@@ -7,21 +7,56 @@ import { eq, and, desc } from 'drizzle-orm';
 import { createId } from '@paralleldrive/cuid2';
 import * as schema from '@addis/db/schema';
 import { Money } from '@addis/shared';
-import { settlePayment, failPayment, scheduleRefund, processRefundRetries } from './service';
-import { marketplaceService } from '../marketplace/service';
-import { transitionSubscription } from '../subscription/state';
+
+/**
+ * Integration test wiring fix:
+ *
+ * The services under test (settlePayment, processRefundRetries, etc.) import
+ * `db` from `@addis/db` — a singleton wired to `process.env.DATABASE_URL`.
+ * Without mocking, the services would query the singleton DB (likely empty
+ * or non-existent in CI) while the test seeds the testcontainer DB — two
+ * different databases, so the assertions would fail.
+ *
+ * Fix: use vi.mock('@addis/db') to replace the singleton with the testcontainer
+ * drizzle instance. The mock is set up in beforeAll() after the container
+ * starts. vi.doMock allows us to set the mock dynamically (the container URI
+ * isn't known until startup).
+ */
 
 let container: StartedPostgreSqlContainer;
 let db: ReturnType<typeof drizzle>;
+// These are imported AFTER the mock is set up (via dynamic import inside tests).
+let settlePayment: typeof import('./service').settlePayment;
+let failPayment: typeof import('./service').failPayment;
+let scheduleRefund: typeof import('./service').scheduleRefund;
+let processRefundRetries: typeof import('./service').processRefundRetries;
+let marketplaceService: typeof import('../marketplace/service').marketplaceService;
+let transitionSubscription: typeof import('../subscription/state').transitionSubscription;
 
 beforeAll(async () => {
   container = await new PostgreSqlContainer('postgres:16').start();
   const client = postgres(container.getConnectionUri());
   db = drizzle(client, { schema });
-  await migrate(db, { migrationsFolder: '../../packages/db/migrations' });
+  // Path is relative to this file's directory (packages/api/modules/payment/).
+  // packages/db/migrations is 3 levels up: payment → modules → api → packages
+  await migrate(db, { migrationsFolder: '../../../packages/db/migrations' });
+
+  // Mock @addis/db so all service imports use the testcontainer db.
+  vi.doMock('@addis/db', () => ({ db, schema, Db: undefined as any, DbOrTx: undefined as any }));
+
+  // Now import the services — they'll get the mocked @addis/db.
+  const serviceMod = await import('./service');
+  settlePayment = serviceMod.settlePayment;
+  failPayment = serviceMod.failPayment;
+  scheduleRefund = serviceMod.scheduleRefund;
+  processRefundRetries = serviceMod.processRefundRetries;
+  const marketplaceMod = await import('../marketplace/service');
+  marketplaceService = marketplaceMod.marketplaceService;
+  const stateMod = await import('../subscription/state');
+  transitionSubscription = stateMod.transitionSubscription;
 }, 60_000);
 
-afterAll(async () => container.stop());
+afterAll(async () => { vi.doUnmock('@addis/db'); await container.stop(); });
 
 function addDays(d: Date, n: number) { const c = new Date(d); c.setDate(c.getDate() + n); return c; }
 

@@ -31,11 +31,15 @@ export const subscriptionRepo = {
   /**
    * Bulk-expire active subscriptions whose endDate has passed.
    *
-   * The previous implementation did a raw UPDATE with no outbox events —
-   * the state machine declared `notify.subscription_expired` and
-   * `audit.subscription_expired` side effects, but they were never fired.
-   * Riders whose subscriptions expired via cron got NO notification. Now
-   * we queue per-subscription outbox events in the same transaction.
+   * H50 fix: the previous implementation did a raw UPDATE that bypassed the
+   * state machine. While the state machine's `transitionSubscription` helper
+   * uses CAS (good for single-row transitions), calling it per-row in a bulk
+   * cron would be N queries instead of 1. Instead, we do the bulk UPDATE
+   * (which is atomic — the WHERE clause includes status='active' so only
+   * genuinely-active rows are transitioned), then queue the side effects
+   * (notifications + audit rows) that the state machine declares for the
+   * `subscription.expired` transition. This gives us the performance of a
+   * bulk UPDATE with the side-effect coverage of the state machine.
    */
   async expireDue(tx = db) {
     const expired = await tx.update(schema.subscriptions)

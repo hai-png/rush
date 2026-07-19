@@ -9,7 +9,18 @@ export const webhookRoutes = new Hono();
 
 webhookRoutes.post('/telebirr/notify', async (c) => {
   const provider = getPaymentProvider('telebirr');
-  const event = await provider.parseWebhook(c.req.raw);
+  let event;
+  try {
+    event = await provider.parseWebhook(c.req.raw);
+  } catch (err) {
+    // parseWebhook throws on invalid signature or stale timestamp. Return
+    // 401 so Telebirr doesn't retry — a replayed or forged notification
+    // should not trigger retries. The previous implementation let the throw
+    // propagate to the error handler, which returned 500 (triggering
+    // Telebirr retries on a bad signature — exactly what the attacker wants).
+    c.get('logger')?.warn({ err: (err as Error).message }, 'telebirr webhook parse/signature failure');
+    return c.text('BAD_SIGNATURE', 401);
+  }
 
   // Signature verification is the single most important security control on a
   // payment webhook: without it, any attacker who can guess/enumerate a
@@ -30,22 +41,50 @@ webhookRoutes.post('/telebirr/notify', async (c) => {
     if (inserted.length === 0) return c.text('SUCCESS'); // already processed
 
     if (event.type === 'payment.settled') {
-      // settlePayment + onClaimPaymentSettled must run in the SAME transaction
-      // so a seat-claim update failure rolls back the payment settlement.
-      // Previously settlePayment committed first, then onClaimPaymentSettled
-      // ran outside — if the latter failed, the payment was 'completed' but
-      // the original subscriber's refund was never scheduled.
+      // 3.28 fix: settlePayment and onClaimPaymentSettled cannot run in the
+      // same transaction because settlePayment opens its own internal
+      // transaction. Instead, we:
+      //   1. Call settlePayment (commits its own tx — payment → completed,
+      //      subscription → active).
+      //   2. If the payment has a seatClaimId, queue a `claim_settlement_pending`
+      //      outbox event so the reconcile-claims cron can pick it up if
+      //      onClaimPaymentSettled fails.
+      //   3. Attempt onClaimPaymentSettled immediately (best-effort). If it
+      //      succeeds, mark the outbox event as delivered. If it fails, the
+      //      cron will retry.
       const settled = await settlePayment(event.merchOrderId, event.amount);
       if (settled) {
         const [payment] = await db.select().from(schema.payments).where(eq(schema.payments.reference, event.merchOrderId));
         if (payment?.seatClaimId) {
+          // Queue a tracking outbox event so the reconcile-claims cron can
+          // detect a failed onClaimPaymentSettled and retry.
+          await db.insert(schema.outboxEvents).values({
+            channel: 'audit',
+            payload: {
+              action: 'claim_settlement_pending',
+              entityId: payment.seatClaimId,
+              paymentId: payment.id,
+            },
+          });
           try {
             await marketplaceService.onClaimPaymentSettled(payment.seatClaimId);
+            // Success — mark the tracking event as resolved.
+            await db.insert(schema.outboxEvents).values({
+              channel: 'audit',
+              payload: {
+                action: 'claim_settlement_completed',
+                entityId: payment.seatClaimId,
+                paymentId: payment.id,
+              },
+            });
           } catch (err) {
-            // Don't swallow silently — surface to logs so the ops team can
-            // reconcile. The settlement itself already committed; this is a
-            // best-effort refund-scheduling step.
-            console.error('[webhook] onClaimPaymentSettled failed', { paymentId: payment.id, seatClaimId: payment.seatClaimId, err });
+            // onClaimPaymentSettled failed — the reconcile-claims cron will
+            // detect the pending settlement and retry. Log for visibility.
+            console.error('[webhook] onClaimPaymentSettled failed — reconcile-claims cron will retry', {
+              paymentId: payment.id,
+              seatClaimId: payment.seatClaimId,
+              err: (err as Error).message,
+            });
           }
         }
       }

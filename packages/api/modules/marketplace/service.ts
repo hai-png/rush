@@ -15,7 +15,15 @@ export const marketplaceService = {
     if (!sub || sub.riderId !== riderId) throw new NotFoundError('Subscription not found');
     if (sub.status !== 'active') throw new ConflictError('Subscription is not active');
     if (!sub.routeId) throw new BadRequestError('Subscription has no route');
-    if (new Date(input.releaseDate) < new Date(new Date().toDateString())) throw new BadRequestError('Release date must be in the future');
+    // H45 fix: timezone-safe date comparison. The previous implementation
+    // compared `new Date(input.releaseDate)` (parsed as UTC midnight for
+    // ISO date-only strings) with `new Date(new Date().toDateString())`
+    // (local midnight) — on a server in UTC+3, a same-day-UTC release was
+    // incorrectly rejected as past. Now both sides use UTC midnight.
+    const releaseDateUTC = new Date(input.releaseDate + 'T00:00:00Z');
+    const todayUTC = new Date();
+    todayUTC.setUTCHours(0, 0, 0, 0);
+    if (releaseDateUTC < todayUTC) throw new BadRequestError('Release date must be in the future');
 
     const [plan] = await db.select().from(schema.subscriptionPlans).where(eq(schema.subscriptionPlans.id, sub.planId));
     const [route] = await db.select().from(schema.routes).where(eq(schema.routes.id, sub.routeId));
