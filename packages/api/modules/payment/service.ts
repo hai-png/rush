@@ -130,7 +130,7 @@ export async function processRefundRetries(limit = 50) {
   // Claim rows with SELECT FOR UPDATE SKIP LOCKED so concurrent workers
   // don't double-process the same refund.
   const claimed = await db.execute(sql`
-    UPDATE refund_reties SET status = 'processing', updated_at = now()
+    UPDATE refund_retries SET status = 'processing', updated_at = now()
     WHERE id IN (
       SELECT id FROM refund_retries
       WHERE status = 'pending' AND next_attempt_at <= now()

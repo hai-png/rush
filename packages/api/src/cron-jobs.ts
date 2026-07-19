@@ -237,6 +237,36 @@ export const CRON_JOBS: ReadonlyArray<{
       return supportService.autoCloseStale();
     },
   },
+  {
+    name: 'reconcile-claims',
+    route: 'reconcile-claims',
+    intervalMs: 30 * 60_000, // 30 min
+    run: async () => {
+      const { and, eq, isNull, sql } = await import('drizzle-orm');
+      // Detect: payments.status = completed AND seatClaimId IS NOT NULL
+      // AND no refund_retry exists for this payment.
+      const { scheduleRefund } = await import('../modules/payment/service');
+      const { marketplaceService } = await import('../modules/marketplace/service');
+      const claims = await db.select().from(schema.payments)
+        .where(and(
+          eq(schema.payments.status, 'completed'),
+          sql`${schema.payments.seatClaimId} IS NOT NULL`,
+          sql`NOT EXISTS (
+            SELECT 1 FROM refund_retries WHERE payment_id = ${schema.payments.id}
+          )`,
+        ));
+      let reconciled = 0;
+      for (const p of claims) {
+        try {
+          await marketplaceService.onClaimPaymentSettled(p.seatClaimId!);
+          reconciled++;
+        } catch (err) {
+          console.error('[reconcile-claims] failed', { paymentId: p.id, seatClaimId: p.seatClaimId, err });
+        }
+      }
+      return { checked: claims.length, reconciled };
+    },
+  },
 ];
 
 /**

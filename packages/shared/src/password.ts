@@ -1,4 +1,5 @@
 import bcrypt from 'bcryptjs';
+import zxcvbn from 'zxcvbn';
 import { loadEnv } from './env';
 
 const CONTROL_CHAR_RE = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/;
@@ -7,13 +8,27 @@ const CONTROL_CHAR_RE = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/;
 // ignored. A user with a 1000-char password believes they have 1000 chars
 // of security, but only the first 72 bytes matter. Cap the input.
 const BCRYPT_MAX_BYTES = 72;
+const MIN_ZXCVBN_SCORE = 3; // 0-4 scale, 3+ = strong enough
+
+export function scorePasswordStrength(pw: string): { score: number; feedback: string[] } {
+  const result = zxcvbn(pw);
+  const feedback: string[] = [];
+  if (result.feedback.warning) feedback.push(result.feedback.warning);
+  if (result.feedback.suggestions) feedback.push(...result.feedback.suggestions);
+  return { score: result.score, feedback };
+}
 
 export function validatePasswordShape(pw: string): void {
   if (pw.length < 10) throw new Error('Password must be at least 10 characters');
-  if (pw.length > 72) throw new Error(`Password too long — bcrypt only considers the first ${BCRYPT_MAX_BYTES} bytes`);
+  if (pw.length > 100) throw new Error('Password must be at most 100 characters');
   // Reject control characters (NEL, BEL, etc.) — invisible but cause
   // subtle bugs in display, copy-paste, and logging.
   if (CONTROL_CHAR_RE.test(pw)) throw new Error('Password contains invalid characters');
+  const { score, feedback } = scorePasswordStrength(pw);
+  if (score < MIN_ZXCVBN_SCORE) {
+    const msg = feedback.length > 0 ? feedback.join(' ') : 'Password is too weak — try adding length, variety, or avoiding common patterns';
+    throw new Error(msg);
+  }
 }
 
 export async function hashPassword(pw: string, cost?: number): Promise<string> {

@@ -103,7 +103,7 @@ export const documentService = {
       // scanStatus is the column tracking clamav result. Values are typically
       // 'pending' | 'clean' | 'infected' | 'error'. Refuse if any doc is
       // not explicitly 'clean'.
-      const uncleared = docs.filter(d => (d as any).scanStatus !== 'clean');
+      const uncleared = docs.filter(d => d.scanStatus !== 'clean');
       if (uncleared.length > 0) {
         throw new ConflictError('Cannot verify: one or more documents are pending or failed malware scan');
       }

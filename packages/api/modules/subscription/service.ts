@@ -53,7 +53,10 @@ export const subscriptionService = {
       corporateMemberId = member.id;
     }
 
-    return db.transaction(async (tx) => {
+    // First transaction: insert pending subscription + payment rows, then commit.
+    // Do NOT hold this transaction open across the provider network call — if Telebirr
+    // takes 5 seconds, the row locks are held for 5 seconds, exhausting the connection pool.
+    const { sub, payment, merchOrderId } = await db.transaction(async (tx) => {
       const [sub] = await tx.insert(schema.subscriptions).values({
         riderId: input.riderId, planId: plan.id, routeId: route.id, corporateMemberId,
         status: 'pending_payment',
@@ -68,17 +71,22 @@ export const subscriptionService = {
         retentionExpiresAt: addYears(new Date(), PAYMENT_RETENTION_YEARS),
       }).returning();
 
-      const provider = getPaymentProvider(input.paymentMethod);
-      const checkout = await provider.createCheckout({
-        merchOrderId, amount: price, description: `Addis Ride — ${plan.name}`,
-        notifyUrl: process.env.TELEBIRR_NOTIFY_URL!, redirectUrl: process.env.TELEBIRR_REDIRECT_URL!,
-      });
-      if (checkout.status === 'checkout') {
-        await tx.update(schema.payments).set({ prepayId: checkout.prepayId }).where(eq(schema.payments.id, payment.id));
-      }
-
-      return { subscription: sub, payment, checkout };
+      return { sub, payment, merchOrderId };
     });
+
+    // Provider call outside the transaction — network latency won't hold DB locks.
+    const provider = getPaymentProvider(input.paymentMethod);
+    const checkout = await provider.createCheckout({
+      merchOrderId, amount: price, description: `Addis Ride — ${plan.name}`,
+      notifyUrl: process.env.TELEBIRR_NOTIFY_URL!, redirectUrl: process.env.TELEBIRR_REDIRECT_URL!,
+    });
+
+    // Second transaction: update prepayId if the provider returned one.
+    if (checkout.status === 'checkout') {
+      await db.update(schema.payments).set({ prepayId: checkout.prepayId }).where(eq(schema.payments.id, payment.id));
+    }
+
+    return { subscription: sub, payment, checkout };
   },
 
   async renew(subscriptionId: string, riderId: string, paymentMethod: 'telebirr' | 'cbe') {

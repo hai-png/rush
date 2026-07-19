@@ -15,7 +15,7 @@ test.describe('Rider critical path', () => {
     await page.getByText('telebirr').click();
     await page.getByRole('button', { name: /continue/i }).click();
     // telebirr redirect is mocked in test env via TELEBIRR_ENV=testbed + stub checkout page
-    await expect(page).toHaveURL(/superapp|telebirr-stub/);
+    await expect(page).toHaveURL(/telebirr-stub/);
 
     // Simulate webhook settlement via test-only endpoint, then confirm active subscription
     await page.goto('/dashboard/rider');
@@ -37,7 +37,7 @@ test.describe('Rider critical path', () => {
     await secondPage.getByRole('button', { name: /log in/i }).click();
     await secondPage.goto('/open-seats');
     await secondPage.getByRole('button', { name: /claim/i }).first().click();
-    await expect(secondPage).toHaveURL(/superapp|telebirr-stub/);
+    await expect(secondPage).toHaveURL(/telebirr-stub/);
 
     // Create a support ticket
     await page.goto('/tickets/new');

@@ -6,6 +6,8 @@ import { idempotencyMiddleware } from './middleware/idempotency';
 import { rateLimitMiddleware } from './middleware/rate-limit';
 import { tosGateMiddleware } from './middleware/tos-gate';
 
+import { csrfProtection } from './middleware/csrf';
+
 import { catalogRoutes } from '../modules/catalog/routes';
 import { identityRoutes } from '../modules/identity/routes';
 import { subscriptionRoutes } from '../modules/subscription/routes';
@@ -27,6 +29,7 @@ export const app = new OpenAPIHono();
 
 app.use('*', requestContext);
 app.use('*', authMiddleware);       // populates c.get('session') if present; does not 401 by default
+app.use('*', csrfProtection);       // CSRF double-submit cookie for cookie-auth'd state-changing requests
 app.use('*', rateLimitMiddleware);  // must run after authMiddleware — several rules rate-limit per-user via c.get('session')
 app.use('*', tosGateMiddleware);    // 409 if authenticated + stale ToS
 app.use('/api/v1/*', idempotencyMiddleware); // POST only, internally

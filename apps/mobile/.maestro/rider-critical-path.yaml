@@ -14,7 +14,7 @@ appId: et.addisride.app
 - tapOn: "Continue to payment"
 - tapOn: "telebirr"
 - tapOn: "Continue"
-- assertVisible: "superapp" # telebirr checkout webview loads
+- assertVisible: "telebirr" # payment checkout loads
 
 - back
 - tapOn: "Track today's shuttle"

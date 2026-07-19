@@ -89,13 +89,9 @@ export const adminService = {
     const token = await new SignJWT({ id: target.id, role: target.role, phone: target.phone, tokenVersion: target.tokenVersion, jti, impersonatedBy: adminId })
       .setProtectedHeader({ alg: 'HS256' }).setIssuedAt().setExpirationTime('15m').sign(new TextEncoder().encode(env.NEXTAUTH_SECRET));
     await db.transaction(async (tx) => {
-      // Mark the session row as an impersonation session via the
-      // userAgent column (prefixed with [impersonated by <adminId>]) so
-      // /sessions listings can distinguish them. If a dedicated
-      // impersonatedBy column is added later, this can move there.
       await tx.insert(schema.sessions).values({
-        userId: target.id, jti,
-        userAgent: `[impersonated by ${adminId}]`,
+        userId: target.id, jti, impersonatedBy: adminId,
+        userAgent: null,
         ipAddress,
         expiresAt: new Date(Date.now() + 15 * 60_000),
       });

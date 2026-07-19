@@ -75,6 +75,7 @@ const envSchema = z.object({
 
   SENTRY_DSN: z.string().url().optional(),
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
+  DPO_EMAIL: z.string().email().default('dpo@addisride.et'),
 
   METRICS_PASSWORD: z.string().min(16).optional(),
 

@@ -1,5 +1,5 @@
 import { createId } from '@paralleldrive/cuid2';
-import { sql } from 'drizzle-orm';
+import { sql, and } from 'drizzle-orm';
 import {
   pgTable, pgEnum, text, boolean, integer, real, decimal, jsonb,
   timestamp, date, index, uniqueIndex, check,
@@ -11,7 +11,7 @@ export const verificationStatus = pgEnum('verification_status', ['unverified', '
 export const subscriptionStatus = pgEnum('subscription_status', ['pending_payment', 'active', 'expired', 'cancelled']);
 export const paymentStatus = pgEnum('payment_status', ['pending', 'completed', 'failed', 'refunded', 'partially_refunded']);
 export const paymentMethod = pgEnum('payment_method', ['telebirr', 'cbe']);
-export const refundStatus = pgEnum('refund_status', ['pending', 'succeeded', 'failed', 'permanent_failure']);
+export const refundStatus = pgEnum('refund_status', ['pending', 'processing', 'succeeded', 'failed', 'permanent_failure']);
 export const tripStatus = pgEnum('trip_status', ['scheduled', 'in_transit', 'completed', 'cancelled']);
 export const rideStatus = pgEnum('ride_status', ['booked', 'boarded', 'completed', 'no_show', 'cancelled']);
 export const seatReleaseStatus = pgEnum('seat_release_status', ['open', 'claimed', 'expired', 'cancelled']);
@@ -32,8 +32,12 @@ export const notificationType = pgEnum('notification_type', [
 export const otpPurpose = pgEnum('otp_purpose', ['signup_verification', 'password_reset', 'phone_change']);
 export const vehicleType = pgEnum('vehicle_type', ['coaster', 'minibus', 'van', 'sedan']);
 export const outboxChannel = pgEnum('outbox_channel', ['notification', 'sms', 'push', 'email', 'refund', 'audit', 'webhook']);
+export const documentScanStatus = pgEnum('document_scan_status', ['pending', 'clean', 'infected', 'error']);
+export const approvalStatus = pgEnum('approval_status', ['pending', 'approved', 'rejected']);
+export const contractorDocumentType = pgEnum('contractor_document_type', ['registration', 'insurance', 'inspection']);
+export const outboxEventStatus = pgEnum('outbox_event_status', ['pending', 'processing', 'delivered', 'failed', 'dead']);
 
-const ts = () => timestamp({ withTimezone: true });
+const ts = (name: string) => timestamp(name, { withTimezone: true });
 const money = (name: string) => decimal(name, { precision: 12, scale: 2 });
 
 // ---------- tables ----------
@@ -46,13 +50,13 @@ export const users = pgTable('users', {
   role: userRole('role').notNull().default('rider'),
   phoneVerified: boolean('phone_verified').notNull().default(false),
   isActive: boolean('is_active').notNull().default(true),
-  deletedAt: ts()('deleted_at'),
+  deletedAt: ts('deleted_at'),
   tokenVersion: integer('token_version').notNull().default(0),
   twoFactorSecret: text('two_factor_secret'),
   twoFactorEnabled: boolean('two_factor_enabled').notNull().default(false),
   tosVersion: text('tos_version'),
-  createdAt: ts()('created_at').notNull().defaultNow(),
-  updatedAt: ts()('updated_at').notNull().defaultNow(),
+  createdAt: ts('created_at').notNull().defaultNow(),
+  updatedAt: ts('updated_at').notNull().defaultNow(),
 }, (t) => ({ activeIdx: index().on(t.isActive, t.deletedAt) }));
 
 export const riderProfiles = pgTable('rider_profiles', {
@@ -60,8 +64,8 @@ export const riderProfiles = pgTable('rider_profiles', {
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }).unique(),
   homeArea: text('home_area').notNull(),
   workArea: text('work_area').notNull(),
-  createdAt: ts()('created_at').notNull().defaultNow(),
-  updatedAt: ts()('updated_at').notNull().defaultNow(),
+  createdAt: ts('created_at').notNull().defaultNow(),
+  updatedAt: ts('updated_at').notNull().defaultNow(),
 });
 
 export const contractorProfiles = pgTable('contractor_profiles', {
@@ -73,21 +77,22 @@ export const contractorProfiles = pgTable('contractor_profiles', {
   verificationStatus: verificationStatus('verification_status').notNull().default('unverified'),
   verificationReason: text('verification_reason'),
   verifiedById: text('verified_by_id').references((): any => users.id, { onDelete: 'set null' }),
-  verifiedAt: ts()('verified_at'),
-  createdAt: ts()('created_at').notNull().defaultNow(),
-  updatedAt: ts()('updated_at').notNull().defaultNow(),
+  verifiedAt: ts('verified_at'),
+  createdAt: ts('created_at').notNull().defaultNow(),
+  updatedAt: ts('updated_at').notNull().defaultNow(),
 });
 
 export const contractorDocuments = pgTable('contractor_documents', {
   id: text('id').primaryKey().$defaultFn(createId),
   contractorId: text('contractor_id').notNull().references(() => contractorProfiles.id, { onDelete: 'cascade' }),
-  type: text('type').notNull(),
+  type: contractorDocumentType('type').notNull(),
   originalFilename: text('original_filename').notNull(),
   storageKey: text('storage_key').notNull(),
   mimeType: text('mime_type').notNull(),
   sizeBytes: integer('size_bytes').notNull(),
   checksumSha256: text('checksum_sha256').notNull(),
-  uploadedAt: ts()('uploaded_at').notNull().defaultNow(),
+  scanStatus: documentScanStatus('scan_status').notNull().default('pending'),
+  uploadedAt: ts('uploaded_at').notNull().defaultNow(),
 }, (t) => ({ contractorIdx: index().on(t.contractorId, t.type) }));
 
 export const corporates = pgTable('corporates', {
@@ -100,9 +105,9 @@ export const corporates = pgTable('corporates', {
   monthlySeatAllowance: integer('monthly_seat_allowance').notNull().default(20),
   adminUserId: text('admin_user_id').notNull().references(() => users.id, { onDelete: 'restrict' }).unique(),
   isActive: boolean('is_active').notNull().default(true),
-  deletedAt: ts()('deleted_at'),
-  createdAt: ts()('created_at').notNull().defaultNow(),
-  updatedAt: ts()('updated_at').notNull().defaultNow(),
+  deletedAt: ts('deleted_at'),
+  createdAt: ts('created_at').notNull().defaultNow(),
+  updatedAt: ts('updated_at').notNull().defaultNow(),
 }, (t) => ({ subsidyCheck: check('subsidy_range', sql`${t.subsidyPercent} between 0 and 100`) }));
 
 export const corporateMembers = pgTable('corporate_members', {
@@ -110,12 +115,13 @@ export const corporateMembers = pgTable('corporate_members', {
   corporateId: text('corporate_id').notNull().references(() => corporates.id, { onDelete: 'cascade' }),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }).unique(),
   employeeId: text('employee_id').notNull(),
-  approvalStatus: text('approval_status').notNull().default('pending'),
+  approvalStatus: approvalStatus('approval_status').notNull().default('pending'),
   ridesUsedThisMonth: integer('rides_used_this_month').notNull().default(0),
-  lastResetAt: ts()('last_reset_at').notNull().defaultNow(),
+  lastResetAt: ts('last_reset_at').notNull().defaultNow(),
   isActive: boolean('is_active').notNull().default(true),
-  createdAt: ts()('created_at').notNull().defaultNow(),
-  updatedAt: ts()('updated_at').notNull().defaultNow(),
+  deletedAt: ts('deleted_at'),
+  createdAt: ts('created_at').notNull().defaultNow(),
+  updatedAt: ts('updated_at').notNull().defaultNow(),
 }, (t) => ({
   corpEmpUniq: uniqueIndex().on(t.corporateId, t.employeeId),
   corpIdx: index().on(t.corporateId),
@@ -137,9 +143,9 @@ export const routes = pgTable('routes', {
   fare: money('fare').notNull(),
   needsShuttle: boolean('needs_shuttle').notNull().default(true),
   isActive: boolean('is_active').notNull().default(true),
-  deletedAt: ts()('deleted_at'),
-  createdAt: ts()('created_at').notNull().defaultNow(),
-  updatedAt: ts()('updated_at').notNull().defaultNow(),
+  deletedAt: ts('deleted_at'),
+  createdAt: ts('created_at').notNull().defaultNow(),
+  updatedAt: ts('updated_at').notNull().defaultNow(),
 });
 
 export const shuttles = pgTable('shuttles', {
@@ -151,8 +157,8 @@ export const shuttles = pgTable('shuttles', {
   capacity: integer('capacity').notNull().default(14),
   contractorId: text('contractor_id').references(() => contractorProfiles.id, { onDelete: 'set null' }),
   isActive: boolean('is_active').notNull().default(true),
-  createdAt: ts()('created_at').notNull().defaultNow(),
-  updatedAt: ts()('updated_at').notNull().defaultNow(),
+  createdAt: ts('created_at').notNull().defaultNow(),
+  updatedAt: ts('updated_at').notNull().defaultNow(),
 });
 
 export const subscriptionPlans = pgTable('subscription_plans', {
@@ -165,8 +171,8 @@ export const subscriptionPlans = pgTable('subscription_plans', {
   isPopular: boolean('is_popular').notNull().default(false),
   isTrial: boolean('is_trial').notNull().default(false),
   isActive: boolean('is_active').notNull().default(true),
-  createdAt: ts()('created_at').notNull().defaultNow(),
-  updatedAt: ts()('updated_at').notNull().defaultNow(),
+  createdAt: ts('created_at').notNull().defaultNow(),
+  updatedAt: ts('updated_at').notNull().defaultNow(),
 });
 
 export const subscriptions = pgTable('subscriptions', {
@@ -179,11 +185,11 @@ export const subscriptions = pgTable('subscriptions', {
   ridesUsed: integer('rides_used').notNull().default(0),
   morningSlot: text('morning_slot'),
   eveningSlot: text('evening_slot'),
-  startDate: ts()('start_date').notNull().defaultNow(),
-  endDate: ts()('end_date').notNull(),
-  cancelledAt: ts()('cancelled_at'),
-  createdAt: ts()('created_at').notNull().defaultNow(),
-  updatedAt: ts()('updated_at').notNull().defaultNow(),
+  startDate: ts('start_date').notNull().defaultNow(),
+  endDate: ts('end_date').notNull(),
+  cancelledAt: ts('cancelled_at'),
+  createdAt: ts('created_at').notNull().defaultNow(),
+  updatedAt: ts('updated_at').notNull().defaultNow(),
 }, (t) => ({
   riderStatusIdx: index().on(t.riderId, t.status),
   statusEndIdx: index().on(t.status, t.endDate),
@@ -196,15 +202,17 @@ export const trips = pgTable('trips', {
   contractorId: text('contractor_id').references(() => contractorProfiles.id, { onDelete: 'set null' }),
   routeId: text('route_id').notNull().references(() => routes.id, { onDelete: 'restrict' }),
   window: seatWindow('window').notNull(),
-  departTime: ts()('depart_time').notNull(),
-  arriveTime: ts()('arrive_time'),
+  departTime: ts('depart_time').notNull(),
+  arriveTime: ts('arrive_time'),
   status: tripStatus('status').notNull().default('scheduled'),
   seatsBooked: integer('seats_booked').notNull().default(0),
-  createdAt: ts()('created_at').notNull().defaultNow(),
-  updatedAt: ts()('updated_at').notNull().defaultNow(),
+  createdAt: ts('created_at').notNull().defaultNow(),
+  updatedAt: ts('updated_at').notNull().defaultNow(),
 }, (t) => ({
   routeDepartIdx: index().on(t.routeId, t.departTime),
   shuttleIdx: index().on(t.shuttleId),
+  shuttleDepartWindowUniq: uniqueIndex().on(t.shuttleId, t.departTime, t.window),
+  seatsBookedCheck: check('seats_booked_non_negative', sql`${t.seatsBooked} >= 0`),
 }));
 
 export const seatReleases = pgTable('seat_releases', {
@@ -216,10 +224,10 @@ export const seatReleases = pgTable('seat_releases', {
   releaseDate: date('release_date').notNull(),
   refundAmount: money('refund_amount').notNull(),
   status: seatReleaseStatus('status').notNull().default('open'),
-  expiresAt: ts()('expires_at').notNull(),
-  cancelledAt: ts()('cancelled_at'),
-  createdAt: ts()('created_at').notNull().defaultNow(),
-  updatedAt: ts()('updated_at').notNull().defaultNow(),
+  expiresAt: ts('expires_at').notNull(),
+  cancelledAt: ts('cancelled_at'),
+  createdAt: ts('created_at').notNull().defaultNow(),
+  updatedAt: ts('updated_at').notNull().defaultNow(),
 }, (t) => ({
   subDateWindowUniq: uniqueIndex().on(t.subscriptionId, t.releaseDate, t.window),
   statusRouteIdx: index().on(t.status, t.routeId),
@@ -237,13 +245,14 @@ export const payments = pgTable('payments', {
   prepayId: text('prepay_id'),
   status: paymentStatus('status').notNull().default('pending'),
   refundAmount: money('refund_amount'),
-  refundedAt: ts()('refunded_at'),
-  retentionExpiresAt: ts()('retention_expires_at').notNull(),
-  createdAt: ts()('created_at').notNull().defaultNow(),
-  updatedAt: ts()('updated_at').notNull().defaultNow(),
+  refundedAt: ts('refunded_at'),
+  retentionExpiresAt: ts('retention_expires_at').notNull(),
+  createdAt: ts('created_at').notNull().defaultNow(),
+  updatedAt: ts('updated_at').notNull().defaultNow(),
 }, (t) => ({
   statusCreatedIdx: index().on(t.status, t.createdAt),
   riderIdx: index().on(t.riderId),
+  refundAmountCheck: check('refund_amount_lte_amount', sql`${t.refundAmount} <= ${t.amount}`),
 }));
 
 export const seatClaims = pgTable('seat_claims', {
@@ -253,11 +262,11 @@ export const seatClaims = pgTable('seat_claims', {
   corporateMemberId: text('corporate_member_id').references(() => corporateMembers.id, { onDelete: 'set null' }),
   routeId: text('route_id').notNull().references(() => routes.id, { onDelete: 'restrict' }),
   window: seatWindow('window').notNull(),
-  claimDate: ts()('claim_date').notNull().defaultNow(),
+  claimDate: ts('claim_date').notNull().defaultNow(),
   paymentId: text('payment_id').references((): any => payments.id, { onDelete: 'set null' }),
   status: seatClaimStatus('status').notNull().default('confirmed'),
-  createdAt: ts()('created_at').notNull().defaultNow(),
-  updatedAt: ts()('updated_at').notNull().defaultNow(),
+  createdAt: ts('created_at').notNull().defaultNow(),
+  updatedAt: ts('updated_at').notNull().defaultNow(),
 }, (t) => ({ riderIdx: index().on(t.riderId) }));
 
 export const rides = pgTable('rides', {
@@ -268,8 +277,8 @@ export const rides = pgTable('rides', {
   seatClaimId: text('seat_claim_id').references(() => seatClaims.id, { onDelete: 'set null' }),
   status: rideStatus('status').notNull().default('booked'),
   pickupStop: text('pickup_stop'),
-  createdAt: ts()('created_at').notNull().defaultNow(),
-  updatedAt: ts()('updated_at').notNull().defaultNow(),
+  createdAt: ts('created_at').notNull().defaultNow(),
+  updatedAt: ts('updated_at').notNull().defaultNow(),
 }, (t) => ({
   tripRiderUniq: uniqueIndex().on(t.tripId, t.riderId),
   riderIdx: index().on(t.riderId),
@@ -284,11 +293,11 @@ export const refundRetries = pgTable('refund_retries', {
   reason: text('reason').notNull(),
   attempts: integer('attempts').notNull().default(0),
   maxAttempts: integer('max_attempts').notNull().default(5),
-  nextAttemptAt: ts()('next_attempt_at').notNull().defaultNow(),
+  nextAttemptAt: ts('next_attempt_at').notNull().defaultNow(),
   lastError: text('last_error'),
   status: refundStatus('status').notNull().default('pending'),
-  createdAt: ts()('created_at').notNull().defaultNow(),
-  updatedAt: ts()('updated_at').notNull().defaultNow(),
+  createdAt: ts('created_at').notNull().defaultNow(),
+  updatedAt: ts('updated_at').notNull().defaultNow(),
 }, (t) => ({ statusNextIdx: index().on(t.status, t.nextAttemptAt) }));
 
 export const supportTickets = pgTable('support_tickets', {
@@ -302,11 +311,12 @@ export const supportTickets = pgTable('support_tickets', {
   subscriptionId: text('subscription_id').references(() => subscriptions.id, { onDelete: 'set null' }),
   paymentId: text('payment_id').references(() => payments.id, { onDelete: 'set null' }),
   assignedToId: text('assigned_to_id').references((): any => users.id, { onDelete: 'set null' }),
-  firstResponseAt: ts()('first_response_at'),
-  resolvedAt: ts()('resolved_at'),
-  closedAt: ts()('closed_at'),
-  createdAt: ts()('created_at').notNull().defaultNow(),
-  updatedAt: ts()('updated_at').notNull().defaultNow(),
+  resolvedById: text('resolved_by_id').references((): any => users.id, { onDelete: 'set null' }),
+  firstResponseAt: ts('first_response_at'),
+  resolvedAt: ts('resolved_at'),
+  closedAt: ts('closed_at'),
+  createdAt: ts('created_at').notNull().defaultNow(),
+  updatedAt: ts('updated_at').notNull().defaultNow(),
 }, (t) => ({
   userStatusIdx: index().on(t.userId, t.status),
   statusCreatedIdx: index().on(t.status, t.createdAt),
@@ -318,7 +328,7 @@ export const ticketMessages = pgTable('ticket_messages', {
   authorId: text('author_id').notNull().references(() => users.id, { onDelete: 'restrict' }),
   body: text('body').notNull(),
   isStaff: boolean('is_staff').notNull().default(false),
-  createdAt: ts()('created_at').notNull().defaultNow(),
+  createdAt: ts('created_at').notNull().defaultNow(),
 }, (t) => ({ ticketIdx: index().on(t.ticketId, t.createdAt) }));
 
 export const notifications = pgTable('notifications', {
@@ -328,8 +338,8 @@ export const notifications = pgTable('notifications', {
   title: text('title').notNull(),
   body: text('body').notNull(),
   link: text('link'),
-  readAt: ts()('read_at'),
-  createdAt: ts()('created_at').notNull().defaultNow(),
+  readAt: ts('read_at'),
+  createdAt: ts('created_at').notNull().defaultNow(),
 }, (t) => ({
   userReadIdx: index().on(t.userId, t.readAt),
   createdIdx: index().on(t.createdAt),
@@ -341,7 +351,7 @@ export const notificationPreferences = pgTable('notification_preferences', {
   prefs: jsonb('prefs').notNull().default({}),
   quietHoursStart: text('quiet_hours_start'),
   quietHoursEnd: text('quiet_hours_end'),
-  updatedAt: ts()('updated_at').notNull().defaultNow(),
+  updatedAt: ts('updated_at').notNull().defaultNow(),
 });
 
 export const devices = pgTable('devices', {
@@ -350,21 +360,24 @@ export const devices = pgTable('devices', {
   pushToken: text('push_token').notNull(),
   platform: text('platform').notNull(),
   userAgent: text('user_agent'),
-  lastSeenAt: ts()('last_seen_at').notNull().defaultNow(),
-  createdAt: ts()('created_at').notNull().defaultNow(),
+  lastSeenAt: ts('last_seen_at').notNull().defaultNow(),
+  createdAt: ts('created_at').notNull().defaultNow(),
 }, (t) => ({ userTokenUniq: uniqueIndex().on(t.userId, t.pushToken) }));
 
 export const outboxEvents = pgTable('outbox_events', {
   id: text('id').primaryKey().$defaultFn(createId),
   channel: outboxChannel('channel').notNull(),
   payload: jsonb('payload').notNull(),
-  status: text('status').notNull().default('pending'),
+  status: outboxEventStatus('status').notNull().default('pending'),
   attempts: integer('attempts').notNull().default(0),
   maxAttempts: integer('max_attempts').notNull().default(5),
-  nextAttemptAt: ts()('next_attempt_at').notNull().defaultNow(),
+  nextAttemptAt: ts('next_attempt_at').notNull().defaultNow(),
   lastError: text('last_error'),
-  createdAt: ts()('created_at').notNull().defaultNow(),
-  updatedAt: ts()('updated_at').notNull().defaultNow(),
+  lockedAt: ts('locked_at'),
+  lockedBy: text('locked_by'),
+  visibilityAfter: ts('visibility_after'),
+  createdAt: ts('created_at').notNull().defaultNow(),
+  updatedAt: ts('updated_at').notNull().defaultNow(),
 }, (t) => ({
   statusNextIdx: index().on(t.status, t.nextAttemptAt),
   channelIdx: index().on(t.channel, t.status),
@@ -378,9 +391,12 @@ export const idempotencyRecords = pgTable('idempotency_records', {
   requestBodyHash: text('request_body_hash').notNull(),
   responseStatus: integer('response_status').notNull(),
   responseBody: jsonb('response_body').notNull(),
-  expiresAt: ts()('expires_at').notNull(),
-  createdAt: ts()('created_at').notNull().defaultNow(),
-});
+  expiresAt: ts('expires_at').notNull(),
+  createdAt: ts('created_at').notNull().defaultNow(),
+}, (t) => ({
+  expiresAtIdx: index().on(t.expiresAt),
+  userIdIdx: index().on(t.userId),
+}));
 
 export const auditLogs = pgTable('audit_logs', {
   id: text('id').primaryKey().$defaultFn(createId),
@@ -394,7 +410,7 @@ export const auditLogs = pgTable('audit_logs', {
   userAgent: text('user_agent'),
   prevHash: text('prev_hash'),
   hash: text('hash').notNull(),
-  createdAt: ts()('created_at').notNull().defaultNow(),
+  createdAt: ts('created_at').notNull().defaultNow(),
 }, (t) => ({
   actorIdx: index().on(t.actorId),
   entityIdx: index().on(t.entityType, t.entityId),
@@ -410,19 +426,22 @@ export const otpCodes = pgTable('otp_codes', {
   userId: text('user_id').references(() => users.id, { onDelete: 'cascade' }),
   attempts: integer('attempts').notNull().default(0),
   maxAttempts: integer('max_attempts').notNull().default(5),
-  expiresAt: ts()('expires_at').notNull(),
+  expiresAt: ts('expires_at').notNull(),
   verified: boolean('verified').notNull().default(false),
-  createdAt: ts()('created_at').notNull().defaultNow(),
-}, (t) => ({ phonePurposeIdx: index().on(t.phone, t.purpose, t.verified, t.expiresAt) }));
+  createdAt: ts('created_at').notNull().defaultNow(),
+}, (t) => ({
+  phonePurposeUniq: uniqueIndex('otp_phone_purpose_active_uniq').on(t.phone, t.purpose).where(and(sql`${t.verified} = false`, sql`${t.expiresAt} > now()`)),
+  phonePurposeIdx: index().on(t.phone, t.purpose, t.verified, t.expiresAt),
+}));
 
 export const passwordResetTokens = pgTable('password_reset_tokens', {
   id: text('id').primaryKey().$defaultFn(createId),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   tokenHash: text('token_hash').notNull().unique(),
-  expiresAt: ts()('expires_at').notNull(),
-  usedAt: ts()('used_at'),
+  expiresAt: ts('expires_at').notNull(),
+  usedAt: ts('used_at'),
   ipAddress: text('ip_address'),
-  createdAt: ts()('created_at').notNull().defaultNow(),
+  createdAt: ts('created_at').notNull().defaultNow(),
 });
 
 export const tosAcceptances = pgTable('tos_acceptances', {
@@ -431,7 +450,7 @@ export const tosAcceptances = pgTable('tos_acceptances', {
   version: text('version').notNull(),
   ipAddress: text('ip_address'),
   userAgent: text('user_agent'),
-  acceptedAt: ts()('accepted_at').notNull().defaultNow(),
+  acceptedAt: ts('accepted_at').notNull().defaultNow(),
 }, (t) => ({ userVersionUniq: uniqueIndex().on(t.userId, t.version) }));
 
 export const faqArticles = pgTable('faq_articles', {
@@ -445,8 +464,8 @@ export const faqArticles = pgTable('faq_articles', {
   helpfulYes: integer('helpful_yes').notNull().default(0),
   helpfulNo: integer('helpful_no').notNull().default(0),
   isActive: boolean('is_active').notNull().default(true),
-  createdAt: ts()('created_at').notNull().defaultNow(),
-  updatedAt: ts()('updated_at').notNull().defaultNow(),
+  createdAt: ts('created_at').notNull().defaultNow(),
+  updatedAt: ts('updated_at').notNull().defaultNow(),
 }, (t) => ({ categorySortIdx: index().on(t.category, t.isActive, t.sortOrder) }));
 
 export const shuttlePositions = pgTable('shuttle_positions', {
@@ -455,14 +474,14 @@ export const shuttlePositions = pgTable('shuttle_positions', {
   lng: real('lng').notNull(),
   heading: real('heading'),
   speed: real('speed'),
-  updatedAt: ts()('updated_at').notNull().defaultNow(),
+  updatedAt: ts('updated_at').notNull().defaultNow(),
 });
 
 export const telebirrNotifyEvents = pgTable('telebirr_notify_events', {
-  merchOrderId: text('merch_order_id').primaryKey(),
+  merchOrderId: text('merch_order_id').primaryKey().references(() => payments.reference, { onDelete: 'cascade' }),
   tradeStatus: text('trade_status').notNull(),
   outRequestNo: text('out_request_no'),
-  receivedAt: ts()('received_at').notNull().defaultNow(),
+  receivedAt: ts('received_at').notNull().defaultNow(),
 });
 
 export const sessions = pgTable('sessions', {
@@ -471,7 +490,12 @@ export const sessions = pgTable('sessions', {
   jti: text('jti').notNull().unique(),
   userAgent: text('user_agent'),
   ipAddress: text('ip_address'),
-  lastSeenAt: ts()('last_seen_at').notNull().defaultNow(),
-  expiresAt: ts()('expires_at').notNull(),
-  createdAt: ts()('created_at').notNull().defaultNow(),
-});
+  impersonatedBy: text('impersonated_by').references(() => users.id, { onDelete: 'set null' }),
+  lastSeenAt: ts('last_seen_at').notNull().defaultNow(),
+  expiresAt: ts('expires_at').notNull(),
+  createdAt: ts('created_at').notNull().defaultNow(),
+}, (t) => ({
+  userIdIdx: index().on(t.userId),
+  expiresAtIdx: index().on(t.expiresAt),
+  userExpiresAtIdx: index().on(t.userId, t.expiresAt),
+}));
