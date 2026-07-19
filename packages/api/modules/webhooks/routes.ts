@@ -20,7 +20,7 @@ webhookRoutes.post('/telebirr/notify', async (c) => {
     if (inserted.length === 0) return c.text('SUCCESS'); // already processed
 
     if (event.type === 'payment.settled') {
-      const settled = await settlePayment(event.merchOrderId);
+      const settled = await settlePayment(event.merchOrderId, event.amount);
       if (settled) {
         const [payment] = await db.select().from(schema.payments).where(eq(schema.payments.reference, event.merchOrderId));
         if (payment?.seatClaimId) await marketplaceService.onClaimPaymentSettled(payment.seatClaimId);

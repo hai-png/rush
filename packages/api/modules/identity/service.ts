@@ -2,7 +2,7 @@ import { eq } from 'drizzle-orm';
 import { SignJWT, jwtVerify } from 'jose';
 import { authenticator } from 'otplib';
 import { db, schema } from '@addis/db';
-import { hashPassword, verifyPassword, ConflictError, UnauthorizedError, NotFoundError, CURRENT_TOS_VERSION } from '@addis/shared';
+import { hashPassword, verifyPassword, isPasswordBreached, ConflictError, UnauthorizedError, NotFoundError, TwoFactorRequiredError, BadRequestError, CURRENT_TOS_VERSION } from '@addis/shared';
 import { createId } from '@paralleldrive/cuid2';
 
 const JWT_SECRET = () => new TextEncoder().encode(process.env.NEXTAUTH_SECRET!);
@@ -12,6 +12,7 @@ export const identityService = {
   async registerRider(input: { phone: string; name: string; password: string; homeArea: string; workArea: string }) {
     const [existing] = await db.select().from(schema.users).where(eq(schema.users.phone, input.phone));
     if (existing) throw new ConflictError('Phone already registered');
+    if (await isPasswordBreached(input.password)) throw new BadRequestError('This password has appeared in a known data breach — please choose a different one');
     return db.transaction(async (tx) => {
       const [user] = await tx.insert(schema.users).values({
         phone: input.phone, name: input.name, passwordHash: await hashPassword(input.password), role: 'rider',
@@ -25,6 +26,7 @@ export const identityService = {
   async registerContractor(input: { phone: string; name: string; password: string; licenseNumber: string; experienceYears: number }) {
     const [existing] = await db.select().from(schema.users).where(eq(schema.users.phone, input.phone));
     if (existing) throw new ConflictError('Phone already registered');
+    if (await isPasswordBreached(input.password)) throw new BadRequestError('This password has appeared in a known data breach — please choose a different one');
     return db.transaction(async (tx) => {
       const [user] = await tx.insert(schema.users).values({
         phone: input.phone, name: input.name, passwordHash: await hashPassword(input.password), role: 'contractor',
@@ -36,10 +38,20 @@ export const identityService = {
     });
   },
 
-  async login(phone: string, password: string, userAgent?: string, ip?: string) {
+  async login(phone: string, password: string, userAgent?: string, ip?: string, twoFactorCode?: string) {
     const [user] = await db.select().from(schema.users).where(eq(schema.users.phone, phone));
     if (!user || !user.isActive || user.deletedAt) throw new UnauthorizedError('Invalid credentials');
     if (!(await verifyPassword(password, user.passwordHash))) throw new UnauthorizedError('Invalid credentials');
+
+    // 2FA setup/verify/disable already exist and are enforced for platform_admin /
+    // corporate_admin, but login previously never checked twoFactorEnabled at all — an
+    // account that had 2FA turned on could still be logged into with just phone + password.
+    if (user.twoFactorEnabled) {
+      if (!twoFactorCode) throw new TwoFactorRequiredError();
+      if (!user.twoFactorSecret || !authenticator.check(twoFactorCode, user.twoFactorSecret)) {
+        throw new UnauthorizedError('Invalid 2FA code');
+      }
+    }
 
     const jti = createId();
     const expiresAt = new Date(Date.now() + 30 * 24 * 3600_000);
@@ -64,6 +76,7 @@ export const identityService = {
     const [user] = await db.select().from(schema.users).where(eq(schema.users.id, userId));
     if (!user) throw new NotFoundError('User not found');
     if (!(await verifyPassword(oldPw, user.passwordHash))) throw new UnauthorizedError('Current password incorrect');
+    if (await isPasswordBreached(newPw)) throw new BadRequestError('This password has appeared in a known data breach — please choose a different one');
     await db.update(schema.users).set({
       passwordHash: await hashPassword(newPw), tokenVersion: user.tokenVersion + 1, updatedAt: new Date(),
     }).where(eq(schema.users.id, userId)); // bumping tokenVersion revokes all other sessions
@@ -82,6 +95,7 @@ export const identityService = {
   async resetPassword(phone: string, newPassword: string) {
     const [user] = await db.select().from(schema.users).where(eq(schema.users.phone, phone));
     if (!user) throw new NotFoundError('User not found');
+    if (await isPasswordBreached(newPassword)) throw new BadRequestError('This password has appeared in a known data breach — please choose a different one');
     await db.update(schema.users).set({ passwordHash: await hashPassword(newPassword), tokenVersion: user.tokenVersion + 1, updatedAt: new Date() }).where(eq(schema.users.id, user.id));
   },
 

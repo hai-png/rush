@@ -25,8 +25,8 @@ import { dashboardRoutes } from '../modules/dashboard/routes';
 export const app = new OpenAPIHono();
 
 app.use('*', requestContext);
-app.use('*', rateLimitMiddleware);
 app.use('*', authMiddleware);       // populates c.get('session') if present; does not 401 by default
+app.use('*', rateLimitMiddleware);  // must run after authMiddleware — several rules rate-limit per-user via c.get('session')
 app.use('*', tosGateMiddleware);    // 409 if authenticated + stale ToS
 app.use('/api/v1/*', idempotencyMiddleware); // POST only, internally
 

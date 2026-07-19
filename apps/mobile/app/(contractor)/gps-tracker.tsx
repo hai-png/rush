@@ -10,7 +10,12 @@ const GPS_TASK = 'addisride-gps-report';
 TaskManager.defineTask(GPS_TASK, async () => {
   const shuttleId = await getActiveShuttleId(); // reads from SecureStore, set when trip starts
   if (!shuttleId) return BackgroundFetch.BackgroundFetchResult.NoData;
-  const loc = await Location.getCurrentPositionAsync({});
+  let loc;
+  try {
+    loc = await Location.getCurrentPositionAsync({});
+  } catch {
+    return BackgroundFetch.BackgroundFetchResult.Failed; // next tick retries
+  }
   await api.POST('/api/v1/shuttle-positions', {
     body: { shuttleId, lat: loc.coords.latitude, lng: loc.coords.longitude, heading: loc.coords.heading ?? undefined, speed: loc.coords.speed ?? undefined },
   }).catch(() => {}); // fail-soft; next tick retries
@@ -27,8 +32,16 @@ export default function ContractorGpsTrackerScreen() {
 
   useEffect(() => {
     (async () => {
-      const { status } = await Location.requestForegroundPermissionsAsync();
-      if (status !== 'granted' || registered.current) return;
+      const fg = await Location.requestForegroundPermissionsAsync();
+      if (fg.status !== 'granted' || registered.current) return;
+      // Foreground permission alone is not sufficient for a task that keeps running while
+      // backgrounded or after the app is terminated (stopOnTerminate: false, startOnBoot:
+      // true, below) — both iOS and Android require the separate "Always"/background location
+      // grant for that. Without it, Location.getCurrentPositionAsync() inside the background
+      // task will typically fail once the app is no longer in the foreground, silently
+      // breaking live tracking for riders on the trip.
+      const bg = await Location.requestBackgroundPermissionsAsync();
+      if (bg.status !== 'granted') return;
       await BackgroundFetch.registerTaskAsync(GPS_TASK, { minimumInterval: 10, stopOnTerminate: false, startOnBoot: true });
       registered.current = true;
     })();

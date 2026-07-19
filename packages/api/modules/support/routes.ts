@@ -1,12 +1,15 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
-import { requireRole } from '../../src/middleware/auth';
+import { requireRole, requireAuth } from '../../src/middleware/auth';
 import { supportService, faqService } from './service';
 
 export const supportRoutes = new Hono();
 
 const CreateTicket = z.object({ subject: z.string().min(3), body: z.string().min(1), category: z.string().default('general'), subscriptionId: z.string().optional(), paymentId: z.string().optional() });
 const Reply = z.object({ body: z.string().min(1) });
+
+supportRoutes.use('/tickets/*', requireAuth);
+supportRoutes.use('/tickets', requireAuth);
 
 supportRoutes.get('/tickets', async (c) => {
   const session = c.get('session');

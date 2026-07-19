@@ -1,10 +1,19 @@
 import { Hono } from 'hono';
+import { z } from 'zod';
+import { requireAuth } from '../../src/middleware/auth';
 import { accountService } from './service';
 
 export const accountRoutes = new Hono();
+accountRoutes.use('*', requireAuth);
+
+const UpdateAccountInput = z.object({
+  name: z.string().min(2).optional(),
+  homeArea: z.string().optional(),
+  workArea: z.string().optional(),
+}).strict();
 
 accountRoutes.get('/', async (c) => c.json({ data: await accountService.get(c.get('session').userId) }));
-accountRoutes.patch('/', async (c) => c.json({ data: await accountService.update(c.get('session').userId, await c.req.json()) }));
+accountRoutes.patch('/', async (c) => c.json({ data: await accountService.update(c.get('session').userId, UpdateAccountInput.parse(await c.req.json())) }));
 accountRoutes.post('/delete', async (c) => { await accountService.requestDeletion(c.get('session').userId); return c.body(null, 202); });
 accountRoutes.get('/export', async (c) => {
   const stream = await accountService.exportZip(c.get('session').userId);

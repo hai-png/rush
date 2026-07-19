@@ -8,6 +8,7 @@ export class AppError extends Error {
 }
 export class BadRequestError extends AppError { constructor(m: string, d?: unknown) { super(400, 'BAD_REQUEST', m, d); } }
 export class UnauthorizedError extends AppError { constructor(m = 'Unauthorized') { super(401, 'UNAUTHORIZED', m); } }
+export class TwoFactorRequiredError extends AppError { constructor(m = 'Two-factor authentication code required') { super(401, 'TWO_FA_REQUIRED', m); } }
 export class ForbiddenError extends AppError { constructor(m = 'Forbidden') { super(403, 'FORBIDDEN', m); } }
 export class NotFoundError extends AppError { constructor(m = 'Not found') { super(404, 'NOT_FOUND', m); } }
 export class ConflictError extends AppError { constructor(m: string, d?: unknown) { super(409, 'CONFLICT', m, d); } }

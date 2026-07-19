@@ -24,3 +24,11 @@ export function requireRole(...roles: string[]): MiddlewareHandler {
     await next();
   };
 }
+
+/** Any authenticated user, regardless of role. Use this — not a bare `c.get('session')` read —
+ *  on every route that needs the caller's identity, so unauthenticated calls get a clean 401
+ *  instead of a 500 from dereferencing an undefined session. */
+export const requireAuth: MiddlewareHandler = async (c, next) => {
+  if (!c.get('session')) throw new UnauthorizedError();
+  await next();
+};

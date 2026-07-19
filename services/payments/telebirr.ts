@@ -21,10 +21,15 @@ export class TelebirrProvider implements PaymentProvider {
     version: '1.0',
   };
 
+  /** Shared by outgoing request signing and incoming webhook verification — both sides of a
+   *  signature MUST canonicalize the payload identically, or verification is meaningless. */
+  private canonicalize(payload: Record<string, unknown>): string {
+    return Object.keys(payload).filter(k => k !== 'sign').sort().map(k => `${k}=${JSON.stringify(payload[k])}`).join('&');
+  }
+
   private sign(payload: Record<string, unknown>): string {
-    const sorted = Object.keys(payload).sort().map(k => `${k}=${JSON.stringify(payload[k])}`).join('&');
     const signer = createSign('RSA-SHA256');
-    signer.update(sorted);
+    signer.update(this.canonicalize(payload));
     return signer.sign(this.env.TELEBIRR_PRIVATE_KEY!, 'base64');
   }
 
@@ -106,8 +111,9 @@ export class TelebirrProvider implements PaymentProvider {
   async parseWebhook(req: Request): Promise<WebhookEvent> {
     const raw = await req.text();
     const payload = JSON.parse(raw);
+    if (typeof payload.sign !== 'string' || !payload.sign) throw new Error('Missing telebirr webhook signature');
     const verifier = createVerify('RSA-SHA256');
-    verifier.update(JSON.stringify({ ...payload, sign: undefined }));
+    verifier.update(this.canonicalize(payload));
     const valid = verifier.verify(this.env.TELEBIRR_PUBLIC_KEY!, payload.sign, 'base64');
     if (!valid) throw new Error('Invalid telebirr webhook signature');
 

@@ -3,9 +3,9 @@ import { z } from 'zod';
 import { EthiopianPhone } from '@addis/shared';
 import { identityService } from './service';
 import { otpService } from './otp';
-import { requireRole } from '../../src/middleware/auth';
+import { requireRole, requireAuth } from '../../src/middleware/auth';
 import { db, schema } from '@addis/db';
-import { eq } from 'drizzle-orm';
+import { eq, and } from 'drizzle-orm';
 
 export const identityRoutes = new Hono();
 
@@ -21,10 +21,10 @@ identityRoutes.post('/register', async (c) => {
 });
 
 identityRoutes.post('/token', async (c) => {
-  const { phone, password } = z.object({ phone: EthiopianPhone, password: z.string() }).parse(await c.req.json());
+  const { phone, password, code } = z.object({ phone: EthiopianPhone, password: z.string(), code: z.string().length(6).optional() }).parse(await c.req.json());
   const ip = c.req.header('x-forwarded-for');
   const ua = c.req.header('user-agent');
-  const { user, accessToken, requiresTosAcceptance } = await identityService.login(phone, password, ua, ip);
+  const { user, accessToken, requiresTosAcceptance } = await identityService.login(phone, password, ua, ip, code);
   return c.json({ data: { accessToken, expiresIn: 1800, user: { id: user.id, role: user.role, phone: user.phone }, requiresTosAcceptance } });
 });
 
@@ -32,7 +32,6 @@ identityRoutes.post('/refresh', async (c) => {
   const bearer = c.req.header('Authorization')?.replace(/^Bearer\s+/i, '');
   if (!bearer) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Missing token', requestId: c.get('requestId') } }, 401);
   const { user } = await identityService.verifySession(bearer);
-  const { accessToken } = await identityService.login(user.phone, '', undefined, undefined).catch(() => ({ accessToken: null }));
   // Refresh reissues without re-checking password: mint a new short-lived token for the same session.
   const fresh = await identityService.reissueToken(user.id);
   return c.json({ data: { accessToken: fresh, expiresIn: 1800 } });
@@ -44,25 +43,27 @@ identityRoutes.post('/logout', async (c) => {
   return c.body(null, 204);
 });
 
-identityRoutes.get('/me', async (c) => {
+identityRoutes.get('/me', requireAuth, async (c) => {
   const session = c.get('session');
   const [user] = await db.select().from(schema.users).where(eq(schema.users.id, session.userId));
-  return c.json({ data: user });
+  if (!user) return c.json({ error: { code: 'NOT_FOUND', message: 'User not found', requestId: c.get('requestId') } }, 404);
+  const { passwordHash: _ph, twoFactorSecret: _tfs, ...safe } = user;
+  return c.json({ data: safe });
 });
 
-identityRoutes.post('/change-password', async (c) => {
+identityRoutes.post('/change-password', requireAuth, async (c) => {
   const session = c.get('session');
   const { oldPassword, newPassword } = z.object({ oldPassword: z.string(), newPassword: z.string().min(10) }).parse(await c.req.json());
   await identityService.changePassword(session.userId, oldPassword, newPassword);
   return c.body(null, 204);
 });
 
-identityRoutes.get('/sessions', async (c) => {
+identityRoutes.get('/sessions', requireAuth, async (c) => {
   const session = c.get('session');
   const rows = await db.select().from(schema.sessions).where(eq(schema.sessions.userId, session.userId));
   return c.json({ data: rows });
 });
-identityRoutes.delete('/sessions/:id', async (c) => {
+identityRoutes.delete('/sessions/:id', requireAuth, async (c) => {
   const session = c.get('session');
   await db.delete(schema.sessions).where(and(eq(schema.sessions.id, c.req.param('id')), eq(schema.sessions.userId, session.userId)));
   return c.body(null, 204);
@@ -101,4 +102,3 @@ identityRoutes.post('/2fa/disable', requireRole('platform_admin', 'corporate_adm
 });
 
 identityRoutes.route('/contractors', (await import('./documents.routes')).documentRoutes);
-import { and } from 'drizzle-orm';

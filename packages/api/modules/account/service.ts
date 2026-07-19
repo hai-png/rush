@@ -10,7 +10,8 @@ export const accountService = {
     const [user] = await db.select().from(schema.users).where(eq(schema.users.id, userId));
     if (!user) throw new NotFoundError('User not found');
     const [profile] = await db.select().from(schema.riderProfiles).where(eq(schema.riderProfiles.userId, userId));
-    return { ...user, passwordHash: undefined, profile };
+    const { passwordHash: _ph, twoFactorSecret: _tfs, ...safeUser } = user;
+    return { ...safeUser, profile };
   },
 
   async update(userId: string, input: { name?: string; homeArea?: string; workArea?: string }) {

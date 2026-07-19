@@ -1,8 +1,15 @@
 import type { MiddlewareHandler } from 'hono';
 import { childLogger } from '../../infra/logger';
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
 export const requestContext: MiddlewareHandler = async (c, next) => {
-  const requestId = c.req.header('x-request-id') ?? crypto.randomUUID();
+  // A client-supplied x-request-id is convenient for correlating client-side and
+  // server-side logs, but it must not be trusted verbatim: an arbitrary string is a log/header
+  // injection surface (newlines, control characters, unbounded length) once echoed back into
+  // logs and the X-Request-Id response header. Only accept it if it's actually a UUID.
+  const clientRequestId = c.req.header('x-request-id');
+  const requestId = clientRequestId && UUID_RE.test(clientRequestId) ? clientRequestId : crypto.randomUUID();
   const start = Date.now();
   c.set('requestId', requestId);
   c.set('logger', childLogger(requestId, { route: c.req.path, method: c.req.method }));

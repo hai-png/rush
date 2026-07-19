@@ -1,7 +1,9 @@
+import './instrumentation'; // must run first: calls Sentry.init(); this file previously existed but was never imported anywhere, so worker crash reporting was silently a no-op
 import { loadEnv } from '@addis/shared';
 import { db, schema } from '@addis/db';
-import { and, eq, lte } from 'drizzle-orm';
+import { and, eq, lte, sql } from 'drizzle-orm';
 import { processRefundRetries } from '@addis/api/modules/payment/service';
+import { writeAudit } from '@addis/api/modules/admin/audit';
 
 const env = loadEnv();
 
@@ -43,21 +45,22 @@ async function drainOutbox() {
   }
 }
 
-/** Cron jobs use pg_advisory_xact_lock so only one worker instance runs each job at a time. */
+/** Cron jobs use pg_advisory_xact_lock so only one worker instance runs each job at a time.
+ *  Mirrors packages/api/modules/cron/routes.ts's withLock — the two are duplicated because
+ *  this process runs the same jobs on a setInterval loop for the self-hosted/docker-compose
+ *  deployment, while the HTTP cron routes serve an external-scheduler (e.g. Vercel Cron)
+ *  deployment. Both use the same advisory-lock names, so running both against the same
+ *  database is safe (whichever gets there first wins the lock), but they are two independent
+ *  copies of this logic that can drift — worth consolidating into a shared helper. */
 async function withLock(name: string, fn: () => Promise<unknown>) {
   return db.transaction(async (tx) => {
-    const { rows } = await tx.execute(sqlAdvisory(name));
-    if (!rows[0]?.locked) return { skipped: true, reason: 'lock-held' };
+    const { rows } = await tx.execute(sql`select pg_try_advisory_xact_lock(hashtext(${name})) as locked`);
+    if (!(rows as any)[0]?.locked) return { skipped: true, reason: 'lock-held' };
     const result = await fn();
-    await tx.insert(schema.auditLogs).values({
-      action: `cron.${name}`, entityType: 'cron', hash: 'n/a', // real impl computes hash chain
-    } as any);
+    // Previously inserted a raw row with hash: 'n/a' — see the same fix in cron/routes.ts.
+    await writeAudit(tx as any, { actorId: null, action: `cron.${name}`, entityType: 'cron', after: result as any });
     return { ok: true, result };
   });
-}
-function sqlAdvisory(name: string) {
-  const { sql } = require('drizzle-orm');
-  return sql`select pg_try_advisory_xact_lock(hashtext(${name})) as locked`;
 }
 
 async function main() {

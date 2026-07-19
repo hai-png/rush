@@ -7,7 +7,7 @@ const envSchema = z.object({
   DATABASE_URL: z.string().url(),
   NEXTAUTH_SECRET: z.string().min(32).refine(s => !PLACEHOLDER_SECRETS.includes(s.toLowerCase())),
   NEXTAUTH_URL: z.string().url(),
-  CRON_SECRET: z.string().min(32).optional(),
+  CRON_SECRET: z.string().min(32).refine(s => !PLACEHOLDER_SECRETS.includes(s.toLowerCase())),
   REDIS_URL: z.string().url().optional(),
 
   TELEBIRR_FABRIC_APP_ID: z.string().optional(),

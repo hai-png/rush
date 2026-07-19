@@ -55,16 +55,26 @@ export const documentService = {
     return db.select().from(schema.contractorDocuments).where(eq(schema.contractorDocuments.contractorId, contractorId));
   },
 
-  async remove(contractorId: string, documentId: string) {
+  async remove(requesterContractorId: string | null, documentId: string) {
     const [doc] = await db.select().from(schema.contractorDocuments).where(eq(schema.contractorDocuments.id, documentId));
-    if (!doc || doc.contractorId !== contractorId) throw new NotFoundError('Document not found');
+    if (!doc) throw new NotFoundError('Document not found');
+    if (requesterContractorId !== null && doc.contractorId !== requesterContractorId) throw new NotFoundError('Document not found');
     await db.delete(schema.contractorDocuments).where(eq(schema.contractorDocuments.id, documentId));
     await s3.deleteObject(doc.storageKey);
   },
 
-  async signedDownloadUrl(documentId: string) {
+  /**
+   * `requesterContractorId` is the caller's own contractor profile id, or `null` for a
+   * platform_admin who is allowed to view any contractor's documents. A non-admin caller
+   * must own the document — otherwise this is an IDOR (any contractor could otherwise read
+   * any other contractor's license/insurance/inspection files by guessing/enumerating ids).
+   */
+  async signedDownloadUrl(documentId: string, requesterContractorId: string | null) {
     const [doc] = await db.select().from(schema.contractorDocuments).where(eq(schema.contractorDocuments.id, documentId));
     if (!doc) throw new NotFoundError('Document not found');
+    if (requesterContractorId !== null && doc.contractorId !== requesterContractorId) {
+      throw new NotFoundError('Document not found'); // 404, not 403 — avoid confirming existence to non-owners
+    }
     return s3.presignGet(doc.storageKey, 15 * 60);
   },
 

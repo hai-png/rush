@@ -1,12 +1,23 @@
 import { createHash } from 'node:crypto';
-import { desc, eq } from 'drizzle-orm';
+import { desc, sql } from 'drizzle-orm';
 import { db, schema } from '@addis/db';
+
+// Constant lock key for the audit chain. Any two writers taking this lock within the same
+// transaction are fully serialized against each other for its duration.
+const AUDIT_CHAIN_LOCK_KEY = 'addis_ride_audit_chain';
 
 /** The single writer for audit rows. Enforces hash-chaining so tampering is detectable. */
 export async function writeAudit(tx: typeof db, entry: {
   actorId: string | null; action: string; entityType: string; entityId?: string | null;
   before?: unknown; after?: unknown; ipAddress?: string | null; userAgent?: string | null;
 }) {
+  // Without this lock, two concurrent writeAudit calls in separate transactions can both read
+  // the same "last" row before either commits, both compute a hash chained off the same
+  // prevHash, and both insert — forking the tamper-evident chain (or making verifyAuditChain's
+  // createdAt-only ordering ambiguous for same-timestamp rows). This must be called inside the
+  // same transaction (`tx`) that performs the insert so the lock is held for its duration.
+  await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${AUDIT_CHAIN_LOCK_KEY}))`);
+
   const [last] = await tx.select().from(schema.auditLogs).orderBy(desc(schema.auditLogs.createdAt)).limit(1);
   const prevHash = last?.hash ?? 'GENESIS';
   const payload = JSON.stringify({ ...entry, prevHash });
@@ -17,7 +28,11 @@ export async function writeAudit(tx: typeof db, entry: {
 
 /** Verifies the entire chain (or a window) — used by the audit-log integrity job / admin UI. */
 export async function verifyAuditChain(limit = 10_000) {
-  const rows = await db.select().from(schema.auditLogs).orderBy(schema.auditLogs.createdAt).limit(limit);
+  // Order by createdAt with `id` as a tiebreaker: rows can share a createdAt timestamp
+  // (millisecond collisions under load), and Postgres does not guarantee a stable secondary
+  // order without an explicit tiebreaker — without one, verification could iterate rows in a
+  // different order than they were actually chained and report a false tamper detection.
+  const rows = await db.select().from(schema.auditLogs).orderBy(schema.auditLogs.createdAt, schema.auditLogs.id).limit(limit);
   let prevHash = 'GENESIS';
   for (const row of rows) {
     const payload = JSON.stringify({

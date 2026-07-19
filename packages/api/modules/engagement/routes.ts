@@ -1,10 +1,12 @@
 import { Hono } from 'hono';
 import { z } from 'zod';
+import { requireAuth } from '../../src/middleware/auth';
 import { engagementService } from './service';
 import { db, schema } from '@addis/db';
 import { eq, and } from 'drizzle-orm';
 
 export const engagementRoutes = new Hono();
+engagementRoutes.use('*', requireAuth);
 
 engagementRoutes.get('/notifications', async (c) => {
   const { rows, cursor } = await engagementService.listForUser(c.get('session').userId, Number(c.req.query('limit') ?? 20), c.req.query('cursor'));

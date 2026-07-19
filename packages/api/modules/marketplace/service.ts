@@ -1,5 +1,5 @@
 import { addHours } from 'date-fns';
-import { and, eq, gt } from 'drizzle-orm';
+import { and, eq, gt, desc } from 'drizzle-orm';
 import { db, schema } from '@addis/db';
 import { Money, ConflictError, BadRequestError, NotFoundError, proratedRideValue, PAYMENT_RETENTION_YEARS } from '@addis/shared';
 import { getPaymentProvider } from '@addis/payments';
@@ -78,11 +78,26 @@ export const marketplaceService = {
     });
 
     const provider = getPaymentProvider(input.paymentMethod);
-    const checkout = await provider.createCheckout({
-      merchOrderId: result.payment.reference, amount: Money.fromDecimal(result.payment.amount),
-      description: 'Addis Ride — claim released seat', notifyUrl: process.env.TELEBIRR_NOTIFY_URL!, redirectUrl: process.env.TELEBIRR_REDIRECT_URL!,
-    });
-    return { ...result, checkout };
+    try {
+      const checkout = await provider.createCheckout({
+        merchOrderId: result.payment.reference, amount: Money.fromDecimal(result.payment.amount),
+        description: 'Addis Ride — claim released seat', notifyUrl: process.env.TELEBIRR_NOTIFY_URL!, redirectUrl: process.env.TELEBIRR_REDIRECT_URL!,
+      });
+      return { ...result, checkout };
+    } catch (err) {
+      // The DB transaction above already committed: the release is 'claimed' and a pending
+      // payment/claim exist. If the checkout call to the provider then fails (network error,
+      // provider outage, etc.), the seat would otherwise be stuck 'claimed' forever with no
+      // way for the claimer to actually pay for it, and no way for anyone else to claim it
+      // either. Reverting here gives the release back to the open pool and marks the
+      // claim/payment as failed so a retry (a fresh claim() call) can proceed cleanly.
+      await db.transaction(async (tx) => {
+        await tx.update(schema.seatReleases).set({ status: 'open', updatedAt: new Date() }).where(eq(schema.seatReleases.id, result.release.id));
+        await tx.update(schema.seatClaims).set({ status: 'refunded', updatedAt: new Date() }).where(eq(schema.seatClaims.id, result.claim.id));
+        await tx.update(schema.payments).set({ status: 'failed', updatedAt: new Date() }).where(eq(schema.payments.id, result.payment.id));
+      });
+      throw err;
+    }
   },
 
   /** Called from settlePayment() when a seat-claim payment settles: pay out the original subscriber. */
@@ -91,7 +106,14 @@ export const marketplaceService = {
     if (!claim) return;
     const [release] = await db.select().from(schema.seatReleases).where(eq(schema.seatReleases.id, claim.seatReleaseId));
     if (!release) return;
-    const [originalPayment] = await db.select().from(schema.payments).where(eq(schema.payments.subscriptionId, release.subscriptionId));
+    // A subscription can have several payments over time (initial + renewals). Selecting
+    // without filtering by status/order picks an arbitrary one — e.g. an old failed payment,
+    // or the wrong renewal — and would refund the wrong charge. The correct target is the
+    // subscriber's most recent *completed* payment for this subscription as of the release.
+    const [originalPayment] = await db.select().from(schema.payments)
+      .where(and(eq(schema.payments.subscriptionId, release.subscriptionId), eq(schema.payments.status, 'completed')))
+      .orderBy(desc(schema.payments.createdAt))
+      .limit(1);
     if (!originalPayment) return;
     await scheduleRefund(originalPayment.id, Money.fromDecimal(release.refundAmount), 'seat_claimed');
     await db.insert(schema.outboxEvents).values({ channel: 'notification', payload: { type: 'seat_claimed', userId: release.riderId } });

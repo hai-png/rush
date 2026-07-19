@@ -4,8 +4,13 @@ import { Money } from '@addis/shared';
 import { getPaymentProvider } from '@addis/payments';
 import { transitionSubscription } from '../subscription/state';
 
-/** Idempotent: returns false if the payment was already settled/failed (webhook replay safe). */
-export async function settlePayment(reference: string): Promise<boolean> {
+/** Idempotent: returns false if the payment was already settled/failed (webhook replay safe).
+ *  `reportedAmount`, when supplied by the caller, is the amount the payment provider's webhook
+ *  is confirming was actually paid — this MUST match what we expected for the payment before
+ *  any subscription/seat benefit is granted. Settling purely because the provider said
+ *  "success", without checking the amount, would let an underpayment (or a malformed/forged
+ *  event that somehow got past signature verification) unlock the full benefit anyway. */
+export async function settlePayment(reference: string, reportedAmount?: Money): Promise<boolean> {
   return db.transaction(async (tx) => {
     const updated = await tx.update(schema.payments)
       .set({ status: 'completed', updatedAt: new Date() })
@@ -13,6 +18,15 @@ export async function settlePayment(reference: string): Promise<boolean> {
       .returning();
     if (updated.length === 0) return false;
     const p = updated[0];
+
+    if (reportedAmount && !reportedAmount.eq(Money.fromDecimal(p.amount))) {
+      await tx.update(schema.payments).set({ status: 'failed', updatedAt: new Date() }).where(eq(schema.payments.id, p.id));
+      await tx.insert(schema.outboxEvents).values({
+        channel: 'audit',
+        payload: { action: 'payment.amount_mismatch', entityId: p.id, expectedAmount: p.amount, reportedAmount: reportedAmount.toString() },
+      });
+      return false;
+    }
 
     if (p.subscriptionId) {
       await transitionSubscription(tx, p.subscriptionId, 'payment.settled');

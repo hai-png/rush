@@ -14,8 +14,20 @@ corporateRoutes.post('/signup', async (c) => {
   return c.json({ data: await corporateService.signup(body) }, 201);
 });
 
+const UpdateCorporateInput = z.object({
+  name: z.string().min(2).optional(),
+  contactEmail: z.string().email().optional(),
+  contactPhone: z.string().optional(),
+  // Deliberately excludes subsidyPercent, monthlySeatAllowance, isActive, adminUserId, code —
+  // a self-service corporate_admin must not be able to raise their own subsidy or flip their
+  // own active/ownership state. The previous handler passed the raw request body straight
+  // into a DB `.set({ ...input })`, which is a mass-assignment vulnerability: any field on the
+  // corporates row could be overwritten by whatever JSON the caller sent, including subsidy
+  // percentage or the admin-user pointer.
+}).strict();
+
 corporateRoutes.get('/', requireRole('corporate_admin'), async (c) => c.json({ data: await corporateService.getOwn(c.get('session').userId) }));
-corporateRoutes.patch('/', requireRole('corporate_admin'), async (c) => c.json({ data: await corporateService.updateOwn(c.get('session').userId, await c.req.json()) }));
+corporateRoutes.patch('/', requireRole('corporate_admin'), async (c) => c.json({ data: await corporateService.updateOwn(c.get('session').userId, UpdateCorporateInput.parse(await c.req.json())) }));
 
 corporateRoutes.get('/members', requireRole('corporate_admin'), async (c) => c.json({ data: await corporateService.listMembers(c.get('session').userId) }));
 corporateRoutes.patch('/members/:id', requireRole('corporate_admin'), async (c) => c.json({ data: await corporateService.updateMember(c.get('session').userId, c.req.param('id'), await c.req.json()) }));

@@ -4,6 +4,14 @@ import { hashPassword, NotFoundError, ConflictError, ForbiddenError } from '@add
 import { createId } from '@paralleldrive/cuid2';
 
 export const corporateService = {
+  /**
+   * Self-service signup creates the corporate_admin account and the corporate record, but the
+   * corporate is left INACTIVE. `onboardRider` (below) already requires `isActive = true`
+   * before it will link a rider for subsidy, so no subsidy can actually be paid out until a
+   * platform_admin reviews and activates the account via `activate()`. Without this, anyone
+   * could self-register a corporate with up to 100% subsidy and immediately start onboarding
+   * "employee" (rider) accounts that ride at the platform's expense with zero human review.
+   */
   async signup(input: { corpName: string; corpCode: string; contactEmail: string; contactPhone: string; adminName: string; adminPassword: string; subsidyPercent: number; monthlySeatAllowance: number }) {
     return db.transaction(async (tx) => {
       const [admin] = await tx.insert(schema.users).values({
@@ -12,9 +20,17 @@ export const corporateService = {
       const [corp] = await tx.insert(schema.corporates).values({
         code: input.corpCode, name: input.corpName, contactEmail: input.contactEmail, contactPhone: input.contactPhone,
         subsidyPercent: input.subsidyPercent, monthlySeatAllowance: input.monthlySeatAllowance, adminUserId: admin.id,
+        isActive: false, // requires platform_admin review — see activate()
       }).returning();
       return { corp, admin };
     });
+  },
+
+  /** Platform-admin-only: reviews and activates a self-registered corporate so onboarding/subsidy can begin. */
+  async activate(corpId: string) {
+    const [corp] = await db.update(schema.corporates).set({ isActive: true, updatedAt: new Date() }).where(eq(schema.corporates.id, corpId)).returning();
+    if (!corp) throw new NotFoundError('Corporate not found');
+    return corp;
   },
 
   async getOwn(adminUserId: string) {

@@ -5,6 +5,7 @@ import { db, schema } from '@addis/db';
 import { subscriptionRepo } from '../subscription/repository';
 import { processRefundRetries } from '../payment/service';
 import { supportService } from '../support/service';
+import { writeAudit } from '../admin/audit';
 import { and, lt, eq } from 'drizzle-orm';
 
 export const cronRoutes = new Hono();
@@ -12,6 +13,12 @@ export const cronRoutes = new Hono();
 cronRoutes.use('*', async (c, next) => {
   const provided = c.req.header('Authorization')?.replace(/^Bearer\s+/i, '') ?? '';
   const expected = process.env.CRON_SECRET ?? '';
+  // Guard explicitly against an unset/misconfigured secret rather than relying only on env
+  // schema validation elsewhere: without this, an empty `expected` and an empty `provided`
+  // (no Authorization header at all) both have length 0 and timingSafeEqual('', '') is true,
+  // which would leave every cron endpoint — including data-deletion and payment-reconciliation
+  // jobs — open with zero authentication.
+  if (expected.length < 32) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Cron secret not configured', requestId: c.get('requestId') } }, 401);
   const ok = provided.length === expected.length && timingSafeEqual(Buffer.from(provided), Buffer.from(expected));
   if (!ok) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Invalid cron secret', requestId: c.get('requestId') } }, 401);
   await next();
@@ -22,7 +29,10 @@ async function withLock(name: string, fn: () => Promise<unknown>) {
     const { rows } = await tx.execute(sql`select pg_try_advisory_xact_lock(hashtext(${name})) as locked`);
     if (!(rows as any)[0]?.locked) return { skipped: true, reason: 'lock-held' };
     const result = await fn();
-    await tx.insert(schema.auditLogs).values({ action: `cron.${name}`, entityType: 'cron', hash: 'n/a' } as any);
+    // Previously inserted a raw row with hash: 'n/a', bypassing writeAudit()'s hash-chaining
+    // entirely — every cron run would then make verifyAuditChain() report the chain broken at
+    // that row. Route every audit write through the single chained writer instead.
+    await writeAudit(tx as any, { actorId: null, action: `cron.${name}`, entityType: 'cron', after: result });
     return { ok: true, result, at: new Date().toISOString() };
   });
 }

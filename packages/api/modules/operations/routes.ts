@@ -56,6 +56,16 @@ operationsRoutes.get('/shuttle-positions', async (c) => {
 
 operationsRoutes.post('/shuttle-positions', requireRole('contractor'), async (c) => {
   const body = z.object({ shuttleId: z.string(), lat: z.number(), lng: z.number(), heading: z.number().optional(), speed: z.number().optional() }).parse(await c.req.json());
+
+  const [profile] = await db.select().from(schema.contractorProfiles).where(eq(schema.contractorProfiles.userId, c.get('session').userId));
+  const [shuttle] = await db.select().from(schema.shuttles).where(eq(schema.shuttles.id, body.shuttleId));
+  // Without this check, any authenticated contractor could POST a position update for ANY
+  // shuttle — not just their own — spoofing another shuttle's live location shown to riders,
+  // or faking their own without actually driving.
+  if (!shuttle || shuttle.contractorId !== profile?.id) {
+    return c.json({ error: { code: 'FORBIDDEN', message: 'Not assigned to this shuttle', requestId: c.get('requestId') } }, 403);
+  }
+
   const rlKey = `rl:gps:${body.shuttleId}`;
   const blocked = await redis.set(rlKey, '1', { nx: true, ex: 5 });
   if (!blocked) return c.json({ error: { code: 'RATE_LIMITED', message: 'GPS reports limited to 1 per 5s', requestId: c.get('requestId') } }, 429);
