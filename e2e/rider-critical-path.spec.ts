@@ -4,7 +4,7 @@ test.describe('Rider critical path', () => {
   test('login → subscribe → release seat → claim from second account → ticket', async ({ page, browser }) => {
     await page.goto('/login');
     await page.getByLabel(/phone number/i).fill('922555999');
-    await page.getByLabel('Password').fill('demo12345');
+    await page.getByLabel('Password').fill('demo123456');
     await page.getByRole('button', { name: /log in/i }).click();
     await expect(page).toHaveURL(/dashboard\/rider/);
 
@@ -33,7 +33,7 @@ test.describe('Rider critical path', () => {
     const secondPage = await second.newPage();
     await secondPage.goto('/login');
     await secondPage.getByLabel(/phone number/i).fill('911222333');
-    await secondPage.getByLabel('Password').fill('demo12345');
+    await secondPage.getByLabel('Password').fill('demo123456');
     await secondPage.getByRole('button', { name: /log in/i }).click();
     await secondPage.goto('/open-seats');
     await secondPage.getByRole('button', { name: /claim/i }).first().click();

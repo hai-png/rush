@@ -13,10 +13,11 @@ const Schema = z.object({
   password: z.string().min(10, 'At least 10 characters'),
   licenseNumber: z.string().min(3, 'Required'),
   experienceYears: z.coerce.number().int().min(0),
+  otp: z.string().length(6, 'Enter the 6-digit code we sent you'),
   tosAccepted: z.literal(true, { errorMap: () => ({ message: 'You must accept the Terms of Service' }) }),
 });
 type FormValues = z.infer<typeof Schema>;
-const STEPS = ['Account', 'License', 'Documents', 'Review'];
+const STEPS = ['Account', 'License', 'Verify', 'Documents', 'Review'];
 
 export default function ContractorSignupPage() {
   const [step, setStep] = useState(0);
@@ -26,22 +27,25 @@ export default function ContractorSignupPage() {
   const { register, handleSubmit, trigger, setValue, watch, formState: { errors, isSubmitting } } =
     useForm<FormValues>({ resolver: zodResolver(Schema), defaultValues: { phone: '+251', experienceYears: 0 } });
 
-  const stepFields: (keyof FormValues)[][] = [['name', 'phone', 'password'], ['licenseNumber', 'experienceYears'], [], ['tosAccepted']];
+  const stepFields: (keyof FormValues)[][] = [['name', 'phone', 'password'], ['licenseNumber', 'experienceYears'], ['otp'], [], ['tosAccepted']];
   const next = async () => { if (await trigger(stepFields[step])) setStep((s) => Math.min(s + 1, STEPS.length - 1)); };
   const back = () => setStep((s) => Math.max(s - 1, 0));
 
+  const sendOtp = async () => {
+    await client.POST('/api/v1/auth/otp/send', { body: { phone: watch('phone'), purpose: 'signup_verification' } });
+  };
+
   const onSubmit = async (data: FormValues) => {
-    const { data: res, error } = await client.POST('/api/v1/auth/register', {
-      body: { kind: 'contractor', name: data.name, phone: data.phone, password: data.password, licenseNumber: data.licenseNumber, experienceYears: data.experienceYears },
+    // Documents cannot be uploaded during signup because the register endpoint does not
+    // return an access token (the user must complete document upload AFTER logging in).
+    // Previously this tried to use `res.accessToken` which was always undefined, so the
+    // Authorization header was `Bearer undefined` and the upload silently 401'd inside a
+    // `.catch(() => {})`. Pending files are now ignored here — the user is prompted to
+    // upload from the contractor dashboard after their first login.
+    const { error } = await client.POST('/api/v1/auth/register', {
+      body: { kind: 'contractor', name: data.name, phone: data.phone, password: data.password, licenseNumber: data.licenseNumber, experienceYears: data.experienceYears, otp: data.otp },
     });
     if (error) return;
-
-    // Upload any documents already selected during signup (optional at this stage — can also be done post-login)
-    for (const [type, file] of Object.entries(pendingFiles)) {
-      const form = new FormData();
-      form.append('type', type); form.append('file', file);
-      await fetch('/api/v1/contractors/documents', { method: 'POST', body: form, headers: { Authorization: `Bearer ${(res as any).accessToken ?? ''}` } }).catch(() => {});
-    }
     router.push('/login?registered=1&role=contractor');
   };
 
@@ -64,13 +68,20 @@ export default function ContractorSignupPage() {
         )}
         {step === 2 && (
           <div className="space-y-4">
+            <p className="text-sm text-muted-foreground">We sent a 6-digit code to {watch('phone')}. Enter it below to verify your number.</p>
+            <Button type="button" variant="outline" onClick={sendOtp}>Send code</Button>
+            <div><Label>Verification code</Label><Input inputMode="numeric" maxLength={6} {...register('otp')} aria-invalid={!!errors.otp} /><FieldError>{errors.otp?.message}</FieldError></div>
+          </div>
+        )}
+        {step === 3 && (
+          <div className="space-y-4">
             <p className="text-sm text-muted-foreground">You can also upload these later from your dashboard.</p>
             <FileDropzone label="Vehicle registration" onFile={(f) => setPendingFiles((p) => ({ ...p, registration: f }))} />
             <FileDropzone label="Insurance certificate" onFile={(f) => setPendingFiles((p) => ({ ...p, insurance: f }))} />
             <FileDropzone label="Inspection certificate" onFile={(f) => setPendingFiles((p) => ({ ...p, inspection: f }))} />
           </div>
         )}
-        {step === 3 && (
+        {step === 4 && (
           <>
             <div className="rounded-xl bg-secondary p-4 text-sm space-y-1">
               <p><strong>{watch('name')}</strong> · {watch('phone')}</p>

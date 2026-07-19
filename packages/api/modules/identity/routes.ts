@@ -10,13 +10,44 @@ import { eq, and } from 'drizzle-orm';
 export const identityRoutes = new Hono();
 
 const RegisterInput = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('rider'), name: z.string().min(2), phone: EthiopianPhone, password: z.string().min(10), homeArea: z.string(), workArea: z.string() }),
-  z.object({ kind: z.literal('contractor'), name: z.string().min(2), phone: EthiopianPhone, password: z.string().min(10), licenseNumber: z.string(), experienceYears: z.number().int().min(0) }),
+  z.object({
+    kind: z.literal('rider'),
+    name: z.string().min(2),
+    phone: EthiopianPhone,
+    password: z.string().min(10),
+    homeArea: z.string(),
+    workArea: z.string(),
+    /** 6-digit OTP the caller must have already had sent via POST /auth/otp/send
+     *  with purpose=signup_verification. The register endpoint verifies it before
+     *  creating the user, otherwise `phoneVerified` was permanently false AND the
+     *  OTP send/verify endpoints were dead code from the signup flow's perspective
+     *  (anyone could register with any phone number they didn't control). */
+    otp: z.string().length(6),
+  }),
+  z.object({
+    kind: z.literal('contractor'),
+    name: z.string().min(2),
+    phone: EthiopianPhone,
+    password: z.string().min(10),
+    licenseNumber: z.string(),
+    experienceYears: z.number().int().min(0),
+    otp: z.string().length(6),
+  }),
 ]);
 
 identityRoutes.post('/register', async (c) => {
   const body = RegisterInput.parse(await c.req.json());
-  const result = body.kind === 'rider' ? await identityService.registerRider(body) : await identityService.registerContractor(body);
+  // Verify the OTP BEFORE creating the user — if verification fails, we don't
+  // leave a half-created user row behind, and we don't leak which phones are
+  // already registered (the verify call throws BadRequestError on bad code,
+  // regardless of whether a user with this phone exists).
+  await otpService.verify(body.phone, 'signup_verification', body.otp);
+  const { otp: _otp, ...rest } = body;
+  const result = body.kind === 'rider'
+    ? await identityService.registerRider(rest as Extract<typeof body, { kind: 'rider' }>)
+    : await identityService.registerContractor(rest as Extract<typeof body, { kind: 'contractor' }>);
+  // Mark the user's phone as verified now that the OTP check passed.
+  await db.update(schema.users).set({ phoneVerified: true, updatedAt: new Date() }).where(eq(schema.users.id, result.user.id));
   return c.json({ data: result }, 201);
 });
 

@@ -47,7 +47,9 @@ function mkRoute(name: string, origin: string, destination: string, distanceKm: 
   };
 }
 async function mkUser(phone: string, name: string, role: 'rider' | 'contractor' | 'corporate_admin') {
-  return { phone, name, role, passwordHash: await hashPassword('demo12345'), phoneVerified: true };
+  // 10+ chars to satisfy validatePasswordShape (was 'demo12345' = 9 chars, which crashed the seed).
+  // 'demo123456' must also be changed in e2e/rider-critical-path.spec.ts and infra/k6/payment-flow.js.
+  return { phone, name, role, passwordHash: await hashPassword('demo123456'), phoneVerified: true };
 }
 
 main().then(() => process.exit(0)).catch((e) => { console.error(e); process.exit(1); });

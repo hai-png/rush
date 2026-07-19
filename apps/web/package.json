@@ -1,0 +1,41 @@
+{
+  "name": "@addis/web",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "tsc --noEmit",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
+  "dependencies": {
+    "@addis/api": "workspace:*",
+    "@addis/db": "workspace:*",
+    "@addis/i18n": "workspace:*",
+    "@addis/sdk": "workspace:*",
+    "@addis/shared": "workspace:*",
+    "@addis/ui": "workspace:*",
+    "@hookform/resolvers": "^3.9.1",
+    "@sentry/nextjs": "^8.47.0",
+    "@tanstack/react-query": "^5.62.0",
+    "hono": "^4.6.14",
+    "next": "^16.0.0",
+    "next-auth": "^5.0.0-beta.25",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "react-hook-form": "^7.54.0",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@testing-library/jest-dom": "^6.6.3",
+    "@testing-library/react": "^16.1.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "jsdom": "^25.0.1",
+    "typescript": "^5.7.0",
+    "vitest": "^2.1.0"
+  }
+}

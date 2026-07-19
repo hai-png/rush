@@ -8,6 +8,7 @@ import { tosGateMiddleware } from './middleware/tos-gate';
 
 import { catalogRoutes } from '../modules/catalog/routes';
 import { identityRoutes } from '../modules/identity/routes';
+import { tosRoutes } from '../modules/tos/routes';
 import { subscriptionRoutes } from '../modules/subscription/routes';
 import { marketplaceRoutes } from '../modules/marketplace/routes';
 import { operationsRoutes } from '../modules/operations/routes';
@@ -32,6 +33,7 @@ app.use('/api/v1/*', idempotencyMiddleware); // POST only, internally
 
 app.route('/api/v1', catalogRoutes);
 app.route('/api/v1/auth', identityRoutes);
+app.route('/api/v1/tos', tosRoutes);
 app.route('/api/v1/subscriptions', subscriptionRoutes);
 app.route('/api/v1', marketplaceRoutes); // seat-releases, seat-claims
 app.route('/api/v1', operationsRoutes);  // trips, rides, shuttle-positions

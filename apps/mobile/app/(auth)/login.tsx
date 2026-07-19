@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { View, Text, TextInput, Pressable, ActivityIndicator } from 'react-native';
 import { router } from 'expo-router';
-import * as LocalAuthentication from 'expo-local-authentication';
 import { api } from '../../src/lib/api';
 import { useAuthStore } from '../../src/lib/auth-store';
 

@@ -13,28 +13,44 @@ const Schema = z.object({
   password: z.string().min(10, 'At least 10 characters'),
   homeArea: z.string().min(2, 'Required'),
   workArea: z.string().min(2, 'Required'),
+  otp: z.string().length(6, 'Enter the 6-digit code we sent you'),
   tosAccepted: z.literal(true, { errorMap: () => ({ message: 'You must accept the Terms of Service' }) }),
 });
 type FormValues = z.infer<typeof Schema>;
-const STEPS = ['Account', 'Commute', 'Review'];
+const STEPS = ['Account', 'Commute', 'Verify', 'Review'];
 
 export default function RiderSignupPage() {
   const [step, setStep] = useState(0);
+  const [serverError, setServerError] = useState<string | null>(null);
+  const [otpSent, setOtpSent] = useState(false);
+  const [sendingOtp, setSendingOtp] = useState(false);
   const router = useRouter();
   const client = useApiClient();
-  const { register, handleSubmit, trigger, setValue, watch, formState: { errors, isSubmitting } } =
-    useForm<FormValues>({ resolver: zodResolver(Schema), defaultValues: { phone: '+251' } });
+  const { register, handleSubmit, trigger, setValue, watch, getValues, formState: { errors, isSubmitting } } =
+    useForm<FormValues>({ resolver: zodResolver(Schema), defaultValues: { phone: '+251', otp: '' } });
 
-  const stepFields: (keyof FormValues)[][] = [['name', 'phone', 'password'], ['homeArea', 'workArea'], ['tosAccepted']];
+  const stepFields: (keyof FormValues)[][] = [['name', 'phone', 'password'], ['homeArea', 'workArea'], ['otp'], ['tosAccepted']];
 
   const next = async () => { if (await trigger(stepFields[step])) setStep((s) => Math.min(s + 1, STEPS.length - 1)); };
   const back = () => setStep((s) => Math.max(s - 1, 0));
 
+  const sendOtp = async () => {
+    setServerError(null);
+    const phone = getValues('phone');
+    if (!/^\+251(9|7)\d{8}$/.test(phone)) { setServerError('Enter a valid phone number first'); return; }
+    setSendingOtp(true);
+    const { error } = await client.POST('/api/v1/auth/otp/send', { body: { phone, purpose: 'signup_verification' } });
+    setSendingOtp(false);
+    if (error) { setServerError('Could not send code. Try again.'); return; }
+    setOtpSent(true);
+  };
+
   const onSubmit = async (data: FormValues) => {
+    setServerError(null);
     const { error } = await client.POST('/api/v1/auth/register', {
-      body: { kind: 'rider', name: data.name, phone: data.phone, password: data.password, homeArea: data.homeArea, workArea: data.workArea },
+      body: { kind: 'rider', name: data.name, phone: data.phone, password: data.password, homeArea: data.homeArea, workArea: data.workArea, otp: data.otp },
     });
-    if (error) return;
+    if (error) { setServerError(error.message ?? 'Could not create account.'); return; }
     router.push('/login?registered=1');
   };
 
@@ -57,6 +73,20 @@ export default function RiderSignupPage() {
         )}
         {step === 2 && (
           <>
+            <p className="text-sm text-muted-foreground">We sent a 6-digit code to {watch('phone')}. Enter it below to verify your number.</p>
+            {!otpSent && (
+              <Button type="button" variant="outline" loading={sendingOtp} onClick={sendOtp}>Send code</Button>
+            )}
+            {otpSent && (
+              <>
+                <div><Label>Verification code</Label><Input inputMode="numeric" maxLength={6} {...register('otp')} aria-invalid={!!errors.otp} /><FieldError>{errors.otp?.message}</FieldError></div>
+                <button type="button" onClick={sendOtp} className="text-xs text-accent">Resend code</button>
+              </>
+            )}
+          </>
+        )}
+        {step === 3 && (
+          <>
             <div className="rounded-xl bg-secondary p-4 text-sm space-y-1">
               <p><strong>{watch('name')}</strong> · {watch('phone')}</p>
               <p>{watch('homeArea')} → {watch('workArea')}</p>
@@ -68,6 +98,8 @@ export default function RiderSignupPage() {
             <FieldError>{errors.tosAccepted?.message as string}</FieldError>
           </>
         )}
+
+        {serverError && <p role="alert" className="text-sm text-destructive text-center">{serverError}</p>}
 
         <div className="flex gap-3 pt-2">
           {step > 0 && <Button type="button" variant="outline" onClick={back}>Back</Button>}

@@ -8,12 +8,17 @@ export default function AccountExportPage() {
 
   const download = async (format: 'json' | 'csv') => {
     setLoading(true);
+    // The API currently always streams a ZIP (archiver) regardless of the ?format= query
+    // parameter, so the local filename is always .zip — but we keep the format param on
+    // the request so a future server-side CSV path can be added without changing the UI.
     const res = await fetch(`/api/v1/account/export?format=${format}`);
     const blob = await res.blob();
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
-    a.href = url; a.download = `addis-ride-export.${format === 'json' ? 'zip' : 'zip'}`;
-    a.click(); URL.revokeObjectURL(url);
+    a.href = url;
+    a.download = `addis-ride-export-${format}.zip`;
+    a.click();
+    URL.revokeObjectURL(url);
     setLoading(false);
   };
 

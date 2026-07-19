@@ -50,9 +50,46 @@ export const dashboardService = {
   async contractor(userId: string) {
     const [profile] = await db.select().from(schema.contractorProfiles).where(eq(schema.contractorProfiles.userId, userId));
     if (!profile) return null;
-    const [{ sum: earnings }] = await db.select({ sum: sql<string>`coalesce(sum(t.seats_booked * r.fare), 0)` })
-      .from(schema.trips).as('t' as any); // simplified placeholder aggregate; real earnings ledger is a future module extension
-    return { verificationStatus: profile.verificationStatus, rating: profile.rating, earningsThisMonth: '0.00' };
+
+    // Sum of (seats booked × route fare) across this contractor's completed trips in the
+    // current calendar month. The previous version referenced `r.fare` without ever
+    // aliasing a `routes` table into the FROM clause, so the query was invalid SQL and
+    // always threw — the catch-all '0.00' literal masked the failure. The contractor
+    // dashboard's "This month" tile always showed ETB 0.00.
+    const earningsRow = await db.execute(sql`
+      select coalesce(sum(t.seats_booked * r.fare), 0)::text as earnings
+      from trips t
+      inner join routes r on r.id = t.route_id
+      where t.contractor_id = ${profile.id}
+        and t.status = 'completed'
+        and date_trunc('month', t.depart_time) = date_trunc('month', now())
+    `);
+    const earnings = (earningsRow.rows[0] as { earnings?: string } | undefined)?.earnings ?? '0.00';
+
+    // The contractor dashboard's "Start trip" button needs a default shuttle + route to
+    // pre-fill the form. Previously the dashboard returned neither, and the page tried to
+    // call `startTrip.mutate({ shuttleId: data.shuttleId, routeId: data.routeId, ... })`
+    // with both undefined, which Zod validation in the API immediately rejected. Surface
+    // the contractor's first active shuttle (most contractors operate a single vehicle)
+    // and a default route so the button is actually clickable.
+    const [shuttle] = await db.select({ id: schema.shuttles.id, plateNumber: schema.shuttles.plateNumber })
+      .from(schema.shuttles)
+      .where(and(eq(schema.shuttles.contractorId, profile.id), eq(schema.shuttles.isActive, true)))
+      .limit(1);
+    const [route] = await db.select({ id: schema.routes.id, name: schema.routes.name })
+      .from(schema.routes)
+      .where(eq(schema.routes.isActive, true))
+      .limit(1);
+
+    return {
+      verificationStatus: profile.verificationStatus,
+      rating: profile.rating,
+      earningsThisMonth: earnings,
+      defaultShuttleId: shuttle?.id ?? null,
+      defaultShuttlePlate: shuttle?.plateNumber ?? null,
+      defaultRouteId: route?.id ?? null,
+      defaultRouteName: route?.name ?? null,
+    };
   },
 
   async corporate(adminUserId: string) {

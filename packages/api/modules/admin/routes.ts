@@ -6,6 +6,8 @@ import { adminCatalogRoutes } from '../catalog/routes';
 import { documentService } from '../identity/documents';
 import { corporateService } from '../corporate/service';
 import { scheduleRefund } from '../payment/service';
+import { faqService } from '../support/service';
+import { settlePayment } from '../payment/service';
 import { Money, ALL_ROLES } from '@addis/shared';
 import { and, eq } from 'drizzle-orm';
 import { db, schema } from '@addis/db';
@@ -50,6 +52,20 @@ adminRoutes.get('/subscriptions', async (c) => {
   return c.json({ data: rows });
 });
 
+/**
+ * Admin support queue — list all tickets (optionally filtered by status).
+ * Previously missing: the admin UI's /admin/tickets page called GET /api/v1/admin/tickets,
+ * which 404'd because no such route existed (only the rider-facing /api/v1/tickets was
+ * available, and it restricts to the caller's own tickets unless the caller is staff).
+ */
+adminRoutes.get('/tickets', async (c) => {
+  const status = c.req.query('status');
+  const rows = await db.select().from(schema.supportTickets)
+    .where(status ? eq(schema.supportTickets.status, status as any) : undefined)
+    .limit(Number(c.req.query('limit') ?? 50));
+  return c.json({ data: rows });
+});
+
 adminRoutes.get('/payments', async (c) => {
   const status = c.req.query('status');
   const rows = await db.select().from(schema.payments)
@@ -57,14 +73,74 @@ adminRoutes.get('/payments', async (c) => {
     .limit(Number(c.req.query('limit') ?? 50));
   return c.json({ data: rows });
 });
+/**
+ * Manually verifies a CBE bank-transfer payment.
+ *
+ * Previously this bypassed settlePayment() entirely — it directly set the row to
+ * 'completed' and called transitionSubscription, skipping the webhook replay-protection
+ * (the merchOrderId-based idempotency check inside settlePayment) and any future
+ * side-effects that settlePayment owns (outbox audit events, seat-claim fan-out).
+ * Routing through settlePayment() means an admin "verify" is functionally identical
+ * to a webhook settlement, including being a no-op if the payment is no longer pending.
+ */
 adminRoutes.post('/payments/:id/verify', async (c) => {
-  const [payment] = await db.update(schema.payments).set({ status: 'completed', updatedAt: new Date() })
-    .where(and(eq(schema.payments.id, c.req.param('id')), eq(schema.payments.status, 'pending'))).returning();
-  if (payment?.subscriptionId) {
-    const { transitionSubscription } = await import('../subscription/state');
-    await db.transaction((tx) => transitionSubscription(tx, payment.subscriptionId!, 'payment.settled'));
-  }
-  return c.json({ data: payment });
+  const [payment] = await db.select().from(schema.payments)
+    .where(and(eq(schema.payments.id, c.req.param('id')), eq(schema.payments.status, 'pending')))
+    .limit(1);
+  if (!payment) return c.json({ error: { code: 'NOT_FOUND', message: 'No pending payment with that id', requestId: c.get('requestId') } }, 404);
+
+  // CBE is manual reconciliation — the admin is attesting that the bank confirmed the
+  // amount was received, so we pass the payment's own amount as the reportedAmount to
+  // satisfy settlePayment's mismatch guard.
+  const settled = await settlePayment(payment.reference, Money.fromDecimal(payment.amount));
+  await db.insert(schema.outboxEvents).values({
+    channel: 'audit',
+    payload: {
+      action: 'admin.payment_manually_verified',
+      entityId: payment.id,
+      actorId: c.get('session').userId,
+    },
+  });
+  const [updated] = await db.select().from(schema.payments).where(eq(schema.payments.id, payment.id)).limit(1);
+  return c.json({ data: updated, meta: { settled } });
+});
+
+/**
+ * Admin FAQ management. Previously missing: the admin FAQ page called
+ * POST /api/v1/admin/faq and DELETE /api/v1/admin/faq/:id, neither of which existed.
+ * The faqService already had create/update/remove implementations — they were just
+ * never wired to admin routes.
+ */
+const CreateFaqInput = z.object({
+  category: z.enum(['billing', 'routes', 'shuttle', 'account', 'corporate', 'general']),
+  question: z.string().min(3),
+  answer: z.string().min(1),
+  questionAm: z.string().optional(),
+  answerAm: z.string().optional(),
+  sortOrder: z.number().int().default(0),
+  isActive: z.boolean().default(true),
+});
+const UpdateFaqInput = CreateFaqInput.partial();
+
+adminRoutes.get('/faq', async (c) => {
+  // Admin sees ALL FAQ articles (including inactive) for management; the public
+  // faqService.list() filters to isActive=true only.
+  const rows = await db.select().from(schema.faqArticles).orderBy(schema.faqArticles.category, schema.faqArticles.sortOrder);
+  return c.json({ data: rows });
+});
+adminRoutes.post('/faq', async (c) => {
+  const body = CreateFaqInput.parse(await c.req.json());
+  return c.json({ data: await faqService.create(body) }, 201);
+});
+adminRoutes.patch('/faq/:id', async (c) => {
+  const body = UpdateFaqInput.parse(await c.req.json());
+  return c.json({ data: await faqService.update(c.req.param('id'), body) });
+});
+adminRoutes.delete('/faq/:id', async (c) => { await faqService.remove(c.req.param('id')); return c.body(null, 204); });
+adminRoutes.post('/faq/:id/vote', async (c) => {
+  const { helpful } = z.object({ helpful: z.boolean() }).parse(await c.req.json());
+  await faqService.vote(c.req.param('id'), helpful);
+  return c.body(null, 204);
 });
 
 adminRoutes.post('/refunds', async (c) => {

@@ -1,8 +1,9 @@
 import { eq } from 'drizzle-orm';
+import { z } from 'zod';
 import { db, schema } from '@addis/db';
 import { NotFoundError, ConflictError } from '@addis/shared';
 import { catalogRepo } from './repository';
-import type { CreateRouteInput, UpdateRouteInput, CreatePlanInput, UpdatePlanInput, CreateShuttleInput, UpdateShuttleInput } from './types';
+import { CreateRouteInput, UpdateRouteInput, CreatePlanInput, UpdatePlanInput, CreateShuttleInput, UpdateShuttleInput } from './types';
 
 export const catalogService = {
   listRoutes: catalogRepo.listRoutes,
@@ -63,4 +64,3 @@ export const catalogService = {
     if (!row) throw new NotFoundError('Shuttle not found');
   },
 };
-import type { z } from 'zod';

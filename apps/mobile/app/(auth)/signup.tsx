@@ -3,18 +3,30 @@ import { View, Text, TextInput, Pressable, ActivityIndicator, ScrollView } from 
 import { router } from 'expo-router';
 import { api } from '../../src/lib/api';
 
-const STEPS = ['Account', 'Commute', 'Review'];
+const STEPS = ['Account', 'Commute', 'Verify', 'Review'];
 
 export default function SignupScreen() {
   const [step, setStep] = useState(0);
-  const [form, setForm] = useState({ name: '', phone: '+251', password: '', homeArea: '', workArea: '', tosAccepted: false });
+  const [form, setForm] = useState({ name: '', phone: '+251', password: '', homeArea: '', workArea: '', otp: '', tosAccepted: false });
   const [loading, setLoading] = useState(false);
+  const [sendingOtp, setSendingOtp] = useState(false);
   const [error, setError] = useState<string | null>(null);
+
+  const sendOtp = async () => {
+    setError(null);
+    setSendingOtp(true);
+    const { error: apiError } = await api.POST('/api/v1/auth/otp/send', { body: { phone: form.phone, purpose: 'signup_verification' } });
+    setSendingOtp(false);
+    if (apiError) { setError('Could not send code. Try again.'); }
+  };
 
   const submit = async () => {
     setLoading(true); setError(null);
+    // The register endpoint now requires an OTP that was sent via /auth/otp/send with
+    // purpose=signup_verification. Without this, the phone number is never actually
+    // verified and `phoneVerified` is permanently false on the user row.
     const { error: apiError } = await api.POST('/api/v1/auth/register', {
-      body: { kind: 'rider', name: form.name, phone: form.phone, password: form.password, homeArea: form.homeArea, workArea: form.workArea },
+      body: { kind: 'rider', name: form.name, phone: form.phone, password: form.password, homeArea: form.homeArea, workArea: form.workArea, otp: form.otp },
     });
     setLoading(false);
     if (apiError) { setError('Could not create account. Check your details.'); return; }
@@ -44,6 +56,20 @@ export default function SignupScreen() {
       )}
       {step === 2 && (
         <View className="gap-3">
+          <Text className="text-sm text-muted-foreground">We sent a 6-digit code to {form.phone}. Enter it below to verify your number.</Text>
+          <Pressable
+            onPress={sendOtp}
+            disabled={sendingOtp}
+            className="h-12 rounded-xl border border-border items-center justify-center"
+          >
+            {sendingOtp ? <ActivityIndicator /> : <Text className="text-foreground">{form.otp ? 'Resend code' : 'Send code'}</Text>}
+          </Pressable>
+          <Field label="Verification code" value={form.otp} onChangeText={(v) => setForm((f) => ({ ...f, otp: v.replace(/\D/g, '').slice(0, 6) }))} keyboardType="number-pad" maxLength={6} />
+          {error && <Text className="text-destructive text-sm">{error}</Text>}
+        </View>
+      )}
+      {step === 3 && (
+        <View className="gap-3">
           <View className="bg-secondary rounded-xl p-4">
             <Text className="text-foreground">{form.name} · {form.phone}</Text>
             <Text className="text-muted-foreground text-sm mt-1">{form.homeArea} → {form.workArea}</Text>
@@ -63,11 +89,11 @@ export default function SignupScreen() {
           </Pressable>
         )}
         <Pressable
-          onPress={() => (step < 2 ? setStep((s) => s + 1) : submit())}
-          disabled={step === 2 && (!form.tosAccepted || loading)}
+          onPress={() => (step < 3 ? setStep((s) => s + 1) : submit())}
+          disabled={step === 3 && (!form.tosAccepted || loading)}
           className="flex-1 h-12 rounded-xl bg-foreground items-center justify-center disabled:opacity-40"
         >
-          {loading ? <ActivityIndicator color="#fff" /> : <Text className="text-background font-medium">{step < 2 ? 'Continue' : 'Create account'}</Text>}
+          {loading ? <ActivityIndicator color="#fff" /> : <Text className="text-background font-medium">{step < 3 ? 'Continue' : 'Create account'}</Text>}
         </Pressable>
       </View>
     </ScrollView>

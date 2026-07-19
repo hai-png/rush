@@ -86,9 +86,18 @@ async function main() {
   setInterval(() => withLock('process-refund-retries', () => processRefundRetries()).catch(console.error), 15 * 60_000);
 
   setInterval(() => withLock('corporate-reset-monthly', async () => {
-    const { lt } = await import('drizzle-orm');
+    // Reset every member whose lastResetAt is before the start of the CURRENT month.
+    //
+    // Previously this used `new Date(new Date().setDate(1))` which keeps the current
+    // time-of-day (e.g. 14:30 on the 1st). That drifts from the cron route's
+    // `date_trunc('month', now())` (which is midnight on the 1st) and means members
+    // whose lastResetAt falls between midnight and 14:30 on the 1st would NOT be
+    // reset by the worker, even though they were due. Using SQL date_trunc keeps
+    // both paths byte-for-byte identical.
+    const { lt, sql } = await import('drizzle-orm');
     return db.update(schema.corporateMembers).set({ ridesUsedThisMonth: 0, lastResetAt: new Date() })
-      .where(lt(schema.corporateMembers.lastResetAt, new Date(new Date().setDate(1))));
+      .where(lt(schema.corporateMembers.lastResetAt, sql`date_trunc('month', now())`))
+      .returning({ id: schema.corporateMembers.id });
   }).catch(console.error), 24 * 3600_000);
 
   console.log('Addis Ride worker started.');

@@ -14,8 +14,19 @@ export const activeSubscriptionsGauge = new Gauge({ name: 'active_subscriptions'
 
 export const metricsRoutes = new Hono();
 metricsRoutes.get('/metrics', async (c) => {
+  // Fail closed if METRICS_PASSWORD is unset: previously, `expected` would then become
+  // `Basic bWV0cmljczp` (base64 of "metrics:"), which is publicly computable — any unauthenticated
+  // caller who guessed the username "metrics" and an empty password would pass the
+  // timingSafeEqual check and gain access to all Prometheus metrics (request rates, payment
+  // counts, outbox depth, etc.). Refuse to serve metrics entirely until the operator sets a
+  // real password.
+  const password = process.env.METRICS_PASSWORD;
+  if (!password || password.length < 16) {
+    return c.text('Metrics endpoint disabled — METRICS_PASSWORD must be set to a value of at least 16 characters', 503);
+  }
   const auth = c.req.header('Authorization') ?? '';
-  const expected = `Basic ${Buffer.from(`metrics:${process.env.METRICS_PASSWORD ?? ''}`).toString('base64')}`;
+  const expected = `Basic ${Buffer.from(`metrics:${password}`).toString('base64')}`;
+  // Length check first: timingSafeEqual throws on mismatched lengths, so we short-circuit.
   const ok = auth.length === expected.length && timingSafeEqual(Buffer.from(auth), Buffer.from(expected));
   if (!ok) return c.text('Unauthorized', 401);
   return c.text(await registry.metrics(), 200, { 'Content-Type': registry.contentType });
