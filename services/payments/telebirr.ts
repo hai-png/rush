@@ -73,13 +73,18 @@ export class TelebirrProvider implements PaymentProvider {
 
   async verifyPayment(reference: string): Promise<PaymentStatusResult> {
     const token = await this.applyFabricToken();
-    const res = await fetch(`${this.base}/payment/v1/merchant/queryOrder?merch_order_id=${reference}`, {
+    const res = await fetch(`${this.base}/payment/v1/merchant/queryOrder?merch_order_id=${encodeURIComponent(reference)}`, {
       headers: { Authorization: `Bearer ${token}` },
     });
     if (!res.ok) return { status: 'pending' };
     const json = await res.json();
     const status = json.trade_status === 'Success' ? 'completed' : json.trade_status === 'Fail' ? 'failed' : 'pending';
-    return { status, raw: json };
+    // Return the provider-confirmed amount when available — settlePayment uses
+    // this to verify the paid amount matches the expected amount (H35 fix).
+    // The amount field name varies by Telebirr API version; try the common ones.
+    const amountStr = json.total_amount ?? json.trade_amount ?? json.amount;
+    const amount = typeof amountStr === 'string' ? Money.fromETBString(amountStr) : undefined;
+    return { status, amount, raw: json };
   }
 
   async refund(req: RefundRequest): Promise<RefundResult> {

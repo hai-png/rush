@@ -85,9 +85,14 @@ export const supportService = {
     const [ticket] = await db.select().from(schema.supportTickets).where(eq(schema.supportTickets.id, ticketId));
     if (!ticket) throw new NotFoundError('Ticket not found');
     const t = ticketState.resolve(ticket.status, event);
+    // Populate resolvedById when transitioning to 'resolved' — the column
+    // was added to the schema but never written by the previous implementation,
+    // leaving the resolver unrecorded. Clear it on reopen so a stale resolver
+    // isn't displayed for a re-opened ticket.
     await db.update(schema.supportTickets).set({
       status: t.to,
       resolvedAt: t.to === 'resolved' ? new Date() : ticket.resolvedAt,
+      resolvedById: t.to === 'resolved' ? adminId : null,
       updatedAt: new Date(),
     }).where(eq(schema.supportTickets.id, ticketId));
     if (t.to === 'resolved') await db.insert(schema.outboxEvents).values({ channel: 'notification', payload: { type: 'support_resolved', userId: ticket.userId } });

@@ -65,7 +65,16 @@ export const corporateService = {
     const corp = await corporateService.getOwn(adminUserId);
     const [member] = await db.select().from(schema.corporateMembers).where(eq(schema.corporateMembers.id, memberId));
     if (!member || member.corporateId !== corp.id) throw new NotFoundError('Member not found');
-    await db.delete(schema.corporateMembers).where(eq(schema.corporateMembers.id, memberId));
+    // Soft-delete (set deletedAt) rather than hard-delete. The deletedAt column
+    // was added to the schema but the previous implementation still called
+    // db.delete(), losing the membership history. Soft-delete preserves the
+    // audit trail and allows historical queries (e.g. "was this user ever a
+    // member of corporate X?"). The unique constraints on (userId) and
+    // (corporateId, employeeId) must be partial (WHERE deleted_at IS NULL)
+    // so a soft-deleted member can re-join a different corporate — see schema.ts.
+    await db.update(schema.corporateMembers)
+      .set({ deletedAt: new Date(), isActive: false, updatedAt: new Date() })
+      .where(eq(schema.corporateMembers.id, memberId));
     await db.insert(schema.outboxEvents).values({ channel: 'notification', payload: { type: 'corporate_member_removed', userId: member.userId } });
   },
 

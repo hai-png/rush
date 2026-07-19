@@ -51,6 +51,16 @@ export const adminService = {
       // Self-protection: an admin changing their own role could lock
       // themselves out of the admin UI (e.g. demoting self to rider).
       if (adminId === userId) throw new ForbiddenError('Cannot change your own role');
+      // H15 fix: forbid escalation to platform_admin. A compromised platform_admin
+      // could otherwise grant platform_admin to any user (or to a second account
+      // they control), establishing persistent backdoor access. Promotions to
+      // platform_admin should require a separate break-glass flow (out of scope
+      // here) — the day-to-day changeRole route must refuse this target role.
+      // Demotions FROM platform_admin are allowed (the self-protection check
+      // above blocks demoting yourself; demoting another admin is fine).
+      if (role === 'platform_admin') {
+        throw new ForbiddenError('Cannot promote to platform_admin via this endpoint — use the break-glass flow');
+      }
       const [before] = await tx.select().from(schema.users).where(eq(schema.users.id, userId));
       if (!before) throw new NotFoundError('User not found');
       const [after] = await tx.update(schema.users).set({ role: role as any, tokenVersion: before.tokenVersion + 1, updatedAt: new Date() }).where(eq(schema.users.id, userId)).returning();

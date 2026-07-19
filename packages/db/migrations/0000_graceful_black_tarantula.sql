@@ -62,7 +62,8 @@ CREATE TABLE "contractor_profiles" (
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
 	CONSTRAINT "contractor_profiles_user_id_unique" UNIQUE("user_id"),
-	CONSTRAINT "contractor_profiles_license_number_unique" UNIQUE("license_number")
+	CONSTRAINT "contractor_profiles_license_number_unique" UNIQUE("license_number"),
+	CONSTRAINT "rating_range" CHECK ("contractor_profiles"."rating" between 0 and 5)
 );
 --> statement-breakpoint
 CREATE TABLE "corporate_members" (
@@ -77,7 +78,6 @@ CREATE TABLE "corporate_members" (
 	"deleted_at" timestamp with time zone,
 	"created_at" timestamp with time zone DEFAULT now() NOT NULL,
 	"updated_at" timestamp with time zone DEFAULT now() NOT NULL,
-	CONSTRAINT "corporate_members_user_id_unique" UNIQUE("user_id")
 );
 --> statement-breakpoint
 CREATE TABLE "corporates" (
@@ -506,7 +506,8 @@ CREATE INDEX "audit_logs_entity_type_entity_id_index" ON "audit_logs" USING btre
 CREATE INDEX "audit_logs_action_index" ON "audit_logs" USING btree ("action");--> statement-breakpoint
 CREATE INDEX "audit_logs_created_at_index" ON "audit_logs" USING btree ("created_at");--> statement-breakpoint
 CREATE INDEX "contractor_documents_contractor_id_type_index" ON "contractor_documents" USING btree ("contractor_id","type");--> statement-breakpoint
-CREATE UNIQUE INDEX "corporate_members_corporate_id_employee_id_index" ON "corporate_members" USING btree ("corporate_id","employee_id");--> statement-breakpoint
+CREATE UNIQUE INDEX "corp_member_corp_emp_active_uniq" ON "corporate_members" USING btree ("corporate_id","employee_id") WHERE ("corporate_members"."deleted_at" IS NULL);
+CREATE UNIQUE INDEX "corp_member_user_active_uniq" ON "corporate_members" USING btree ("user_id") WHERE ("corporate_members"."deleted_at" IS NULL);--> statement-breakpoint
 CREATE INDEX "corporate_members_corporate_id_index" ON "corporate_members" USING btree ("corporate_id");--> statement-breakpoint
 CREATE UNIQUE INDEX "devices_user_id_push_token_index" ON "devices" USING btree ("user_id","push_token");--> statement-breakpoint
 CREATE INDEX "faq_articles_category_is_active_sort_order_index" ON "faq_articles" USING btree ("category","is_active","sort_order");--> statement-breakpoint
@@ -514,7 +515,7 @@ CREATE INDEX "idempotency_records_expires_at_index" ON "idempotency_records" USI
 CREATE INDEX "idempotency_records_user_id_index" ON "idempotency_records" USING btree ("user_id");--> statement-breakpoint
 CREATE INDEX "notifications_user_id_read_at_index" ON "notifications" USING btree ("user_id","read_at");--> statement-breakpoint
 CREATE INDEX "notifications_created_at_index" ON "notifications" USING btree ("created_at");--> statement-breakpoint
-CREATE UNIQUE INDEX "otp_phone_purpose_active_uniq" ON "otp_codes" USING btree ("phone","purpose") WHERE ("otp_codes"."verified" = false and "otp_codes"."expires_at" > now());--> statement-breakpoint
+CREATE UNIQUE INDEX "otp_phone_purpose_active_uniq" ON "otp_codes" USING btree ("phone","purpose") WHERE ("otp_codes"."verified" = false);--> statement-breakpoint
 CREATE INDEX "otp_codes_phone_purpose_verified_expires_at_index" ON "otp_codes" USING btree ("phone","purpose","verified","expires_at");--> statement-breakpoint
 CREATE INDEX "outbox_events_status_next_attempt_at_index" ON "outbox_events" USING btree ("status","next_attempt_at");--> statement-breakpoint
 CREATE INDEX "outbox_events_channel_status_index" ON "outbox_events" USING btree ("channel","status");--> statement-breakpoint

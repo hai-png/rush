@@ -24,6 +24,7 @@ describe('CRON_JOBS registry', () => {
       'expire-seat-releases',
       'expire-subscriptions',
       'process-refund-retries',
+      'reconcile-claims',
       'reconcile-payments',
       'retention-cleanup',
       'send-expiry-reminders',

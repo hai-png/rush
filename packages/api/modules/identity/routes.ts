@@ -93,12 +93,21 @@ identityRoutes.post('/password/reset/confirm', async (c) => {
   return c.body(null, 204);
 });
 
-identityRoutes.post('/2fa/setup', requireRole('platform_admin', 'corporate_admin'), async (c) => c.json({ data: await identityService.setup2fa(c.get('session').userId) }));
-identityRoutes.post('/2fa/verify', requireRole('platform_admin', 'corporate_admin'), async (c) => {
+// H9 fix: 2FA routes are now available to ALL authenticated users (was admin-only).
+// Riders and contractors handle payments and PII — they should be able to opt into
+// 2FA for their own accounts. The requireRole restriction was an unnecessary gate
+// that left rider/contractor accounts less secure than admin accounts.
+identityRoutes.post('/2fa/setup', requireAuth, async (c) => {
+  // currentCode is required ONLY when 2FA is already enabled (rotation flow).
+  // First-time setup does not require it.
+  const { currentCode } = z.object({ currentCode: z.string().length(6).optional() }).parse(await c.req.json());
+  return c.json({ data: await identityService.setup2fa(c.get('session').userId, currentCode) });
+});
+identityRoutes.post('/2fa/verify', requireAuth, async (c) => {
   const { code } = z.object({ code: z.string().length(6) }).parse(await c.req.json());
   return c.json({ data: await identityService.verify2fa(c.get('session').userId, code) });
 });
-identityRoutes.post('/2fa/disable', requireRole('platform_admin', 'corporate_admin'), async (c) => {
+identityRoutes.post('/2fa/disable', requireAuth, async (c) => {
   const { password, code } = z.object({ password: z.string(), code: z.string().length(6).optional() }).parse(await c.req.json());
   await identityService.disable2fa(c.get('session').userId, password, code);
   return c.body(null, 204);

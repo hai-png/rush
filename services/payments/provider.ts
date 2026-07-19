@@ -8,7 +8,14 @@ export type BankTransferInstructions = { accountNumber: string; accountName: str
 export type CheckoutResult =
   | { status: 'checkout'; checkoutUrl: string; prepayId: string }
   | { status: 'manual'; instructions: BankTransferInstructions };
-export type PaymentStatusResult = { status: 'pending' | 'completed' | 'failed'; raw?: unknown };
+export type PaymentStatusResult = {
+  status: 'pending' | 'completed' | 'failed';
+  /** The amount the provider reports was actually paid. Optional because not
+   *  all providers expose this on every status query — when absent, the caller
+   *  (settlePayment) records an audit warning but still proceeds. */
+  amount?: Money;
+  raw?: unknown;
+};
 export type RefundRequest = { merchOrderId: string; refundRequestNo: string; amount: Money; reason: string };
 export type RefundResult =
   | { status: 'succeeded' }

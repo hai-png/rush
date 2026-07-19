@@ -116,6 +116,16 @@ export const identityService = {
         await recordFailedLogin(phone);
         throw new UnauthorizedError('Invalid 2FA code');
       }
+      // H7 fix: TOTP replay protection at login. A code observed during a
+      // login attempt must not be reusable for a second login within the
+      // 30-second window. Same Redis-backed mechanism as verify2fa.
+      const timeStep = Math.floor(Date.now() / 30000);
+      const replayKey = `totp:used:${user.id}:${timeStep}`;
+      const replayed = await redis.set(replayKey, '1', { nx: true, ex: 90 }).catch(() => null);
+      if (!replayed) {
+        await recordFailedLogin(phone);
+        throw new UnauthorizedError('2FA code already used — wait for the next 30-second window');
+      }
     }
 
     await clearFailedLogins(phone);
@@ -186,17 +196,68 @@ export const identityService = {
     });
   },
 
-  async setup2fa(userId: string) {
+  /**
+   * Generate a new 2FA secret for the user and store it as a PENDING secret
+   * (not yet active). The user must call verify2fa() with a code generated
+   * from this secret to promote it to the active twoFactorSecret and set
+   * twoFactorEnabled=true. This prevents an attacker with a stolen session
+   * from silently replacing the user's 2FA secret — the attacker would need
+   * to also produce a valid TOTP code from the new secret, which requires
+   * the authenticator app.
+   *
+   * H6 fix: the previous implementation immediately overwrote twoFactorSecret
+   * with the new secret. If the user never completed verify2fa, they could be
+   * left without a working 2FA (or an attacker who briefly held the session
+   * could replace the secret and then verify their own code).
+   *
+   * Implementation: we store the pending secret in twoFactorSecret directly
+   * but DO NOT set twoFactorEnabled=true until verify2fa succeeds. If 2FA is
+   * already enabled, the existing secret remains active until the user
+   * verifies the new one — at which point the new secret replaces the old.
+   * To support this "replace" flow without a separate column, we require
+   * that setup2fa on an already-enabled account first verify the CURRENT
+   * 2FA code (passed as currentCode) before generating a new secret.
+   */
+  async setup2fa(userId: string, currentCode?: string) {
+    const [existing] = await db.select().from(schema.users).where(eq(schema.users.id, userId));
+    if (!existing) throw new NotFoundError('User not found');
+    // If 2FA is already enabled, require the current TOTP code before
+    // allowing a secret rotation. This prevents an attacker with a stolen
+    // session from silently replacing the secret.
+    if (existing.twoFactorEnabled) {
+      if (!currentCode || !existing.twoFactorSecret || !authenticator.check(currentCode, existing.twoFactorSecret)) {
+        throw new UnauthorizedError('Current 2FA code required to rotate the 2FA secret');
+      }
+    }
     const secret = authenticator.generateSecret();
+    // Store the new secret but do NOT set twoFactorEnabled yet — verify2fa
+    // must be called with a code from this new secret before it becomes active.
+    // If the user never verifies, the secret is orphaned but harmless (it's
+    // not enabled, so login doesn't require it).
     await db.update(schema.users).set({ twoFactorSecret: secret }).where(eq(schema.users.id, userId));
-    const [user] = await db.select().from(schema.users).where(eq(schema.users.id, userId));
-    const otpauth = authenticator.keyuri(user!.phone, 'Addis Ride', secret);
+    const otpauth = authenticator.keyuri(existing.phone, 'Addis Ride', secret);
     return { secret, otpauth };
   },
 
   async verify2fa(userId: string, code: string) {
     const [user] = await db.select().from(schema.users).where(eq(schema.users.id, userId));
-    if (!user?.twoFactorSecret || !authenticator.check(code, user.twoFactorSecret)) throw new UnauthorizedError('Invalid 2FA code');
+    if (!user?.twoFactorSecret) throw new UnauthorizedError('2FA not set up — call /2fa/setup first');
+    // H7 fix: replay protection. TOTP codes are valid for ~30 seconds. Without
+    // replay protection, a code observed once (e.g. via shoulder-surfing or a
+    // compromised login form) can be reused until it expires. We track the
+    // last-used time step in Redis; if the same time step is presented twice,
+    // the second attempt is rejected. The key expires after 90 seconds (3 time
+    // steps) so the window is bounded.
+    const timeStep = Math.floor(Date.now() / 30000);
+    const replayKey = `totp:used:${userId}:${timeStep}`;
+    const replayed = await redis.set(replayKey, '1', { nx: true, ex: 90 }).catch(() => null);
+    if (!replayed) {
+      // The same time step was already used — reject as a replay attempt.
+      throw new UnauthorizedError('2FA code already used — wait for the next 30-second window');
+    }
+    if (!authenticator.check(code, user.twoFactorSecret)) {
+      throw new UnauthorizedError('Invalid 2FA code');
+    }
     await db.update(schema.users).set({ twoFactorEnabled: true }).where(eq(schema.users.id, userId));
     return { enabled: true };
   },

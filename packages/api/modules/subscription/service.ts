@@ -121,21 +121,29 @@ export const subscriptionService = {
       // positive, cumulative ≤ original) rather than inserting into
       // refundRetries directly. This ensures the cancel-path refund goes
       // through the same validation as admin-initiated refunds. (H49 fix.)
+      //
+      // H44 fix: the per-ride value is derived from the ACTUAL PAID AMOUNT
+      // (payment.amount), not from plan.priceETB. A corporate-subsidy
+      // subscriber who paid 40% of the list price must be refunded based on
+      // what they actually paid, not the full list price — otherwise the
+      // refund exceeds the charge (money laundering). For unlimited plans
+      // (ridesIncluded === -1), no per-ride refund is due.
       if (sub.status === 'active') {
         const [plan] = await tx.select().from(schema.subscriptionPlans).where(eq(schema.subscriptionPlans.id, sub.planId));
         const [payment] = await tx.select().from(schema.payments)
           .where(and(eq(schema.payments.subscriptionId, subscriptionId), eq(schema.payments.status, 'completed')))
           .orderBy(desc(schema.payments.createdAt)).limit(1);
-        // plan.ridesIncluded === -1 means unlimited — no per-ride refund due.
         if (plan && payment && plan.ridesIncluded > 0) {
           const unusedRides = Math.max(0, plan.ridesIncluded - sub.ridesUsed);
           if (unusedRides > 0) {
-            const perRide = Money.fromDecimal(plan.priceETB).div(plan.ridesIncluded);
+            // H44: use payment.amount (actual paid), not plan.priceETB (list price).
+            const paidAmount = Money.fromDecimal(payment.amount);
+            const perRide = paidAmount.div(plan.ridesIncluded);
             const refundAmount = perRide.mul(unusedRides);
             // Only schedule if the refund amount is positive and doesn't exceed
             // the payment amount (scheduleRefund enforces both, but we skip
             // the call entirely for zero amounts to avoid a no-op audit row).
-            if (refundAmount.isPositive() && refundAmount.lte(Money.fromDecimal(payment.amount))) {
+            if (refundAmount.isPositive() && refundAmount.lte(paidAmount)) {
               await scheduleRefund(payment.id, refundAmount, 'subscription_cancelled', tx);
             }
           }

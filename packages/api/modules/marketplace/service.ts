@@ -1,5 +1,5 @@
 import { addHours } from 'date-fns';
-import { and, eq, gt, desc } from 'drizzle-orm';
+import { and, eq, gt, desc, lte } from 'drizzle-orm';
 import { db, schema } from '@addis/db';
 import { Money, ConflictError, BadRequestError, NotFoundError, proratedRideValue, PAYMENT_RETENTION_YEARS } from '@addis/shared';
 import { getPaymentProvider } from '@addis/payments';
@@ -100,18 +100,28 @@ export const marketplaceService = {
     }
   },
 
-  /** Called from settlePayment() when a seat-claim payment settles: pay out the original subscriber. */
+  /** Called from settlePayment() when a seat-claim payment settles: pay out the original subscriber.
+   *
+   *  H46 fix: the original implementation selected "most recent completed payment" with no
+   *  upper bound on createdAt — a renewal made AFTER the release would be picked as the
+   *  refund target, refunding the wrong charge. Now we filter to payments created at or
+   *  before the release's createdAt, so the refund targets the payment that was actually
+   *  active when the seat was released. */
   async onClaimPaymentSettled(seatClaimId: string) {
     const [claim] = await db.select().from(schema.seatClaims).where(eq(schema.seatClaims.id, seatClaimId));
     if (!claim) return;
     const [release] = await db.select().from(schema.seatReleases).where(eq(schema.seatReleases.id, claim.seatReleaseId));
     if (!release) return;
-    // A subscription can have several payments over time (initial + renewals). Selecting
-    // without filtering by status/order picks an arbitrary one — e.g. an old failed payment,
-    // or the wrong renewal — and would refund the wrong charge. The correct target is the
-    // subscriber's most recent *completed* payment for this subscription as of the release.
+    // The correct refund target is the most recent *completed* payment for this
+    // subscription AS OF the release's creation. A renewal made after the release
+    // must NOT be picked — that renewal funded a different (future) period and
+    // refunding it would be money laundering (rider effectively gets a free renewal).
     const [originalPayment] = await db.select().from(schema.payments)
-      .where(and(eq(schema.payments.subscriptionId, release.subscriptionId), eq(schema.payments.status, 'completed')))
+      .where(and(
+        eq(schema.payments.subscriptionId, release.subscriptionId),
+        eq(schema.payments.status, 'completed'),
+        lte(schema.payments.createdAt, release.createdAt),
+      ))
       .orderBy(desc(schema.payments.createdAt))
       .limit(1);
     if (!originalPayment) return;

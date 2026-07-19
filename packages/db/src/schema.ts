@@ -80,7 +80,12 @@ export const contractorProfiles = pgTable('contractor_profiles', {
   verifiedAt: ts('verified_at'),
   createdAt: ts('created_at').notNull().defaultNow(),
   updatedAt: ts('updated_at').notNull().defaultNow(),
-});
+}, (t) => ({
+  // §8.1 item 16: rating must be between 0 and 5. Without this check, a bug
+  // could set rating to -100 or 9999, which would render incorrectly in the
+  // rider dashboard and break analytics.
+  ratingCheck: check('rating_range', sql`${t.rating} between 0 and 5`),
+}));
 
 export const contractorDocuments = pgTable('contractor_documents', {
   id: text('id').primaryKey().$defaultFn(createId),
@@ -113,7 +118,11 @@ export const corporates = pgTable('corporates', {
 export const corporateMembers = pgTable('corporate_members', {
   id: text('id').primaryKey().$defaultFn(createId),
   corporateId: text('corporate_id').notNull().references(() => corporates.id, { onDelete: 'cascade' }),
-  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }).unique(),
+  // Note: userId uniqueness is enforced via a PARTIAL unique index below
+  // (corpUserActiveUniq) so that soft-deleted members (deletedAt IS NOT NULL)
+  // can re-join a different corporate. A column-level .unique() would block
+  // re-joining because the old row still exists.
+  userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   employeeId: text('employee_id').notNull(),
   approvalStatus: approvalStatus('approval_status').notNull().default('pending'),
   ridesUsedThisMonth: integer('rides_used_this_month').notNull().default(0),
@@ -123,7 +132,11 @@ export const corporateMembers = pgTable('corporate_members', {
   createdAt: ts('created_at').notNull().defaultNow(),
   updatedAt: ts('updated_at').notNull().defaultNow(),
 }, (t) => ({
-  corpEmpUniq: uniqueIndex().on(t.corporateId, t.employeeId),
+  // Partial unique indexes: only enforce uniqueness for ACTIVE (non-deleted)
+  // members. A soft-deleted member can re-join a different corporate, and
+  // their old employeeId can be reused.
+  corpUserActiveUniq: uniqueIndex('corp_member_user_active_uniq').on(t.userId).where(sql`${t.deletedAt} is null`),
+  corpEmpActiveUniq: uniqueIndex('corp_member_corp_emp_active_uniq').on(t.corporateId, t.employeeId).where(sql`${t.deletedAt} is null`),
   corpIdx: index().on(t.corporateId),
 }));
 
@@ -430,7 +443,17 @@ export const otpCodes = pgTable('otp_codes', {
   verified: boolean('verified').notNull().default(false),
   createdAt: ts('created_at').notNull().defaultNow(),
 }, (t) => ({
-  phonePurposeUniq: uniqueIndex('otp_phone_purpose_active_uniq').on(t.phone, t.purpose).where(and(sql`${t.verified} = false`, sql`${t.expiresAt} > now()`)),
+  // Partial unique index: only one UNVERIFIED OTP per (phone, purpose) at a time.
+  // We deliberately do NOT include `expires_at > now()` in the predicate —
+  // PostgreSQL requires partial-index predicates to be IMMUTABLE, and now()
+  // is STABLE (depends on transaction start time). Including it would cause
+  // `CREATE INDEX` to fail with "functions in index predicate must be marked
+  // IMMUTABLE". The otpService.send() path already invalidates prior
+  // unverified codes (sets verified=true) before inserting a new one, so
+  // the unique constraint on (phone, purpose) WHERE verified=false is
+  // sufficient to prevent duplicate active codes. Expired-but-unverified
+  // codes are cleaned up by the retention-cleanup cron.
+  phonePurposeUniq: uniqueIndex('otp_phone_purpose_active_uniq').on(t.phone, t.purpose).where(sql`${t.verified} = false`),
   phonePurposeIdx: index().on(t.phone, t.purpose, t.verified, t.expiresAt),
 }));
 

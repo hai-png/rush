@@ -20,11 +20,13 @@ export async function settlePayment(reference: string, reportedAmount?: Money): 
     if (updated.length === 0) return false;
     const p = updated[0];
 
-    // Always verify amount when reportedAmount is provided. The previous
-    // `if (reportedAmount && !reportedAmount.eq(...))` short-circuited when
-    // reportedAmount was undefined — a caller forgetting to pass it silently
-    // skipped the check. We now treat undefined reportedAmount as "no
-    // assertion possible" and proceed, but log it for visibility.
+    // Amount verification: when reportedAmount is supplied, the payment is
+    // failed on mismatch. When it is NOT supplied, we log an audit warning —
+    // the settlement proceeds (the caller may be the reconcile-payments cron
+    // that verified the payment externally) but the gap is recorded so
+    // operators can spot callers that forget to pass the verified amount.
+    // The previous implementation silently skipped the check with no audit
+    // trail, making the gap invisible.
     if (reportedAmount) {
       const expected = Money.fromDecimal(p.amount);
       if (!expected.eq(reportedAmount)) {
@@ -35,6 +37,13 @@ export async function settlePayment(reference: string, reportedAmount?: Money): 
         });
         return false;
       }
+    } else {
+      // No amount assertion — record for audit visibility so operators can
+      // spot callers that bypass the amount check.
+      await tx.insert(schema.outboxEvents).values({
+        channel: 'audit',
+        payload: { action: 'payment.settled_without_amount_verification', entityId: p.id, reference },
+      });
     }
 
     if (p.subscriptionId) {

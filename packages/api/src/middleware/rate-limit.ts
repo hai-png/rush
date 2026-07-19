@@ -28,6 +28,13 @@ const RULES: { pattern: RegExp; limit: number; windowSec: number; keyFn: (c: any
   // present (requireAuth runs before rate-limit on these routes via the
   // route-level middleware order).
   { pattern: /\/corporate\/onboard$/, limit: 5, windowSec: 3600, keyFn: c => `user:${c.get('session')?.userId ?? 'anon'}` },
+  // H39 fix: Corporate self-signup (POST /corporate/signup) creates a
+  // corporate_admin user + a corporate row. The previous implementation had
+  // no rule for this path — it fell through to DEFAULT_ANON (60/min per IP),
+  // which (combined with XFF spoofing) enabled unlimited corporate account
+  // creation. Now capped at 3/hour per IP — enough for legitimate self-signup
+  // but blocks spam/enumeration.
+  { pattern: /\/corporate\/signup$/, limit: 3, windowSec: 3600, keyFn: c => `ip:${clientIp(c)}` },
   { pattern: /^\/api\/v1\/subscriptions$/, limit: 10, windowSec: 3600, keyFn: c => `user:${c.get('session')?.userId ?? 'anon'}` },
   { pattern: /\/refunds$/, limit: 5, windowSec: 3600, keyFn: c => `user:${c.get('session')?.userId ?? 'anon'}` },
   // Account export is expensive (8 DB queries + ZIP streaming). Cap tightly.

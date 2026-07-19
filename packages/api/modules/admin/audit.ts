@@ -103,32 +103,66 @@ export async function writeAudit(tx: typeof db, entry: {
   return row;
 }
 
-/** Verifies the entire chain (or a window) — used by the audit-log integrity job / admin UI. */
-export async function verifyAuditChain(limit = 10_000) {
-  // Order by createdAt with `id` as a tiebreaker: rows can share a createdAt timestamp
-  // (millisecond collisions under load), and Postgres does not guarantee a stable secondary
-  // order without an explicit tiebreaker — without one, verification could iterate rows in a
-  // different order than they were actually chained and report a false tamper detection.
-  // Must match the (desc, desc) write order reversed to (asc, asc).
-  const rows = await db.select().from(schema.auditLogs)
-    .orderBy(schema.auditLogs.createdAt, schema.auditLogs.id)
-    .limit(limit);
+/**
+ * Verifies the entire chain (or a window) — used by the audit-log integrity job / admin UI.
+ *
+ * H24 fix: the previous implementation had a hard default limit of 10,000 rows.
+ * With 7-year retention and a busy platform, the audit log exceeds 10k rows
+ * within weeks — verification silently stopped checking the tail, leaving
+ * tampering of older rows undetectable. Now we stream the entire chain in
+ * batches (default 5,000 rows per batch) so the full chain is always
+ * verified regardless of size. Callers can still pass an explicit limit
+ * for spot-checks.
+ */
+export async function verifyAuditChain(limit?: number) {
+  const BATCH_SIZE = 5_000;
   let prevHash = 'GENESIS';
-  for (const row of rows) {
-    const sanitized = {
-      actorId: row.actorId,
-      action: row.action,
-      entityType: row.entityType,
-      entityId: row.entityId ?? null,
-      before: sanitize(row.before ?? null),
-      after: sanitize(row.after ?? null),
-      ipAddress: row.ipAddress ?? null,
-      userAgent: row.userAgent ?? null,
-      prevHash,
-    };
-    const expected = createHash('sha256').update(JSON.stringify(normalizeForHash(sanitized))).digest('hex');
-    if (expected !== row.hash) return { valid: false, brokenAt: row.id };
-    prevHash = row.hash;
+  let lastSeenId: string | undefined;
+  let verified = 0;
+
+  // Stream the chain in batches ordered by (createdAt, id). Each batch
+  // starts after the last row we verified. This avoids loading the entire
+  // table into memory while still checking every row.
+  // eslint-disable-next-line no-constant-condition
+  while (true) {
+    const batchLimit = limit ? Math.min(BATCH_SIZE, limit - verified) : BATCH_SIZE;
+    if (batchLimit <= 0) break;
+
+    const rows = await db.select().from(schema.auditLogs)
+      .orderBy(schema.auditLogs.createdAt, schema.auditLogs.id)
+      .where(lastSeenId
+        ? sql`(created_at, id) > (
+          SELECT created_at, id FROM audit_logs WHERE id = ${lastSeenId}
+        )`
+        : sql`true`
+      )
+      .limit(batchLimit);
+
+    if (rows.length === 0) break;
+
+    for (const row of rows) {
+      const sanitized = {
+        actorId: row.actorId,
+        action: row.action,
+        entityType: row.entityType,
+        entityId: row.entityId ?? null,
+        before: sanitize(row.before ?? null),
+        after: sanitize(row.after ?? null),
+        ipAddress: row.ipAddress ?? null,
+        userAgent: row.userAgent ?? null,
+        prevHash,
+      };
+      const expected = createHash('sha256').update(JSON.stringify(normalizeForHash(sanitized))).digest('hex');
+      if (expected !== row.hash) {
+        return { valid: false, brokenAt: row.id, verified };
+      }
+      prevHash = row.hash;
+      lastSeenId = row.id;
+      verified++;
+    }
+
+    if (rows.length < batchLimit) break; // last batch
   }
-  return { valid: true };
+
+  return { valid: true, verified };
 }

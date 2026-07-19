@@ -113,7 +113,14 @@ export const CRON_JOBS: ReadonlyArray<{
       let settled = 0, failedCount = 0;
       for (const p of stale) {
         const result = await getPaymentProvider('telebirr').verifyPayment(p.reference);
-        if (result.status === 'completed') { await settlePayment(p.reference); settled++; }
+        if (result.status === 'completed') {
+          // Pass the provider-reported amount through to settlePayment so the
+          // amount-mismatch check actually runs. The previous call omitted the
+          // amount, silently skipping the check (H35). If the provider doesn't
+          // return an amount, settlePayment will record an audit warning.
+          await settlePayment(p.reference, result.amount);
+          settled++;
+        }
         else if (result.status === 'failed') { await failPayment(p.reference, result.raw); failedCount++; }
       }
       return { checked: stale.length, settled, failed: failedCount };
@@ -242,7 +249,7 @@ export const CRON_JOBS: ReadonlyArray<{
     route: 'reconcile-claims',
     intervalMs: 30 * 60_000, // 30 min
     run: async () => {
-      const { and, eq, isNull, sql } = await import('drizzle-orm');
+      const { and, eq, sql } = await import("drizzle-orm");
       // Detect: payments.status = completed AND seatClaimId IS NOT NULL
       // AND no refund_retry exists for this payment.
       const { scheduleRefund } = await import('../modules/payment/service');
