@@ -17,23 +17,30 @@ async function main() {
     { name: 'Quarterly Saver', durationDays: 90, ridesIncluded: -1, priceETB: '3000.00', description: 'Best value — unlimited rides for 3 months.' },
   ]);
 
-  const corpAdmins = await db.insert(schema.users).values([
+  // mkUser is async (it hashes the password). Previously the array literal
+  // `[mkUser(...), mkUser(...), mkUser(...)]` passed unresolved Promise objects
+  // into Drizzle's .values() — seeding was broken. Await them in parallel first.
+  const corpAdminRows = await Promise.all([
     mkUser('+251911100001', 'ETH-TEL Admin', 'corporate_admin'),
     mkUser('+251911100002', 'CBE-HQ Admin', 'corporate_admin'),
     mkUser('+251911100003', 'AA-ADM Admin', 'corporate_admin'),
-  ]).returning();
+  ]);
+  const corpAdmins = await db.insert(schema.users).values(corpAdminRows).returning();
 
   await db.insert(schema.corporates).values([
-    { code: 'ETH-TEL', name: 'Ethio Telecom', contactEmail: 'hr@ethiotelecom.et', contactPhone: '+251911100001', subsidyPercent: 60, monthlySeatAllowance: 24, adminUserId: corpAdmins[0].id },
-    { code: 'CBE-HQ', name: 'Commercial Bank of Ethiopia HQ', contactEmail: 'hr@cbe.com.et', contactPhone: '+251911100002', subsidyPercent: 50, monthlySeatAllowance: 20, adminUserId: corpAdmins[1].id },
-    { code: 'AA-ADM', name: 'Addis Ababa Administration', contactEmail: 'hr@addisababa.gov.et', contactPhone: '+251911100003', subsidyPercent: 70, monthlySeatAllowance: 30, adminUserId: corpAdmins[2].id },
+    { code: 'ETH-TEL', name: 'Ethio Telecom', contactEmail: 'hr@ethiotelecom.et', contactPhone: '+251911100001', subsidyPercent: 60, monthlySeatAllowance: 24, adminUserId: corpAdmins[0]!.id },
+    { code: 'CBE-HQ', name: 'Commercial Bank of Ethiopia HQ', contactEmail: 'hr@cbe.com.et', contactPhone: '+251911100002', subsidyPercent: 50, monthlySeatAllowance: 20, adminUserId: corpAdmins[1]!.id },
+    { code: 'AA-ADM', name: 'Addis Ababa Administration', contactEmail: 'hr@addisababa.gov.et', contactPhone: '+251911100003', subsidyPercent: 70, monthlySeatAllowance: 30, adminUserId: corpAdmins[2]!.id },
   ]);
 
-  const rider = await db.insert(schema.users).values(mkUser('+251922555999', 'Demo Rider', 'rider')).returning();
-  await db.insert(schema.riderProfiles).values({ userId: rider[0].id, homeArea: 'Bole', workArea: 'Merkato' });
+  // Same fix for the single-user inserts below — mkUser returns a Promise, must be awaited.
+  const riderRow = await mkUser('+251922555999', 'Demo Rider', 'rider');
+  const rider = await db.insert(schema.users).values(riderRow).returning();
+  await db.insert(schema.riderProfiles).values({ userId: rider[0]!.id, homeArea: 'Bole', workArea: 'Merkato' });
 
-  const contractor = await db.insert(schema.users).values(mkUser('+251911000111', 'Demo Contractor', 'contractor')).returning();
-  await db.insert(schema.contractorProfiles).values({ userId: contractor[0].id, licenseNumber: 'DL-000111', experienceYears: 5, verificationStatus: 'verified' });
+  const contractorRow = await mkUser('+251911000111', 'Demo Contractor', 'contractor');
+  const contractor = await db.insert(schema.users).values(contractorRow).returning();
+  await db.insert(schema.contractorProfiles).values({ userId: contractor[0]!.id, licenseNumber: 'DL-000111', experienceYears: 5, verificationStatus: 'verified' });
 
   console.log('Seed complete.');
 }

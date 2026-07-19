@@ -24,6 +24,11 @@ vi.mock('@addis/db', () => {
     tokenVersion: 0,
     tosVersion: 'v2_0',
   };
+  // insert().values() returns a thenable that also has .catch() — mock it as a
+  // promise so the audit-outbox inserts in login() don't crash.
+  const insertChain = {
+    values: vi.fn(() => Promise.resolve()),
+  };
   return {
     db: {
       select: vi.fn(() => ({
@@ -31,7 +36,7 @@ vi.mock('@addis/db', () => {
           where: vi.fn(() => Promise.resolve([user])),
         })),
       })),
-      insert: vi.fn(() => ({ values: vi.fn() })),
+      insert: vi.fn(() => insertChain),
     },
     schema: new Proxy({}, { get: () => ({}) }),
   };
@@ -121,7 +126,7 @@ describe('identityService.login with 2FA disabled', () => {
             }])),
           })),
         })),
-        insert: vi.fn(() => ({ values: vi.fn() })),
+        insert: vi.fn(() => ({ values: vi.fn(() => Promise.resolve()) })),
       },
       schema: new Proxy({}, { get: () => ({}) }),
     }));

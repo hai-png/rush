@@ -154,13 +154,19 @@ export const CRON_JOBS: ReadonlyArray<{
       const otps = await db.delete(schema.otpCodes).where(lt(schema.otpCodes.createdAt, sql`now() - interval '7 days'`)).returning({ id: schema.otpCodes.id });
       const resets = await db.delete(schema.passwordResetTokens).where(lt(schema.passwordResetTokens.createdAt, sql`now() - interval '7 days'`)).returning({ id: schema.passwordResetTokens.id });
       const notifs = await db.delete(schema.notifications).where(and(sql`${schema.notifications.readAt} is not null`, lt(schema.notifications.createdAt, sql`now() - interval '90 days'`))).returning({ id: schema.notifications.id });
+      // Purge expired sessions — previously never cleaned up, causing the sessions
+      // table to grow without bound. verifySession() already rejects expired
+      // sessions, but keeping them around wastes space and slows session lookups.
+      const sessions = await db.delete(schema.sessions).where(lt(schema.sessions.expiresAt, sql`now()`)).returning({ id: schema.sessions.id });
+      // Purge old idempotency records (past their 24h retention window).
+      const idempotency = await db.delete(schema.idempotencyRecords).where(lt(schema.idempotencyRecords.expiresAt, sql`now()`)).returning({ key: schema.idempotencyRecords.key });
       const deletedUsers = await db.select().from(schema.users).where(and(sql`${schema.users.deletedAt} is not null`, lt(schema.users.deletedAt, sql`now() - interval '30 days'`)));
       for (const u of deletedUsers) {
         await db.update(schema.payments).set({ riderId: null as any }).where(sql`rider_id in (select id from rider_profiles where user_id = ${u.id})`);
         await db.delete(schema.riderProfiles).where(eq(schema.riderProfiles.userId, u.id));
         await db.update(schema.users).set({ name: 'Deleted User', email: null, phone: `deleted-${u.id.slice(0, 8)}` }).where(eq(schema.users.id, u.id));
       }
-      return { otpsDeleted: otps.length, resetsDeleted: resets.length, notificationsDeleted: notifs.length, usersAnonymized: deletedUsers.length };
+      return { otpsDeleted: otps.length, resetsDeleted: resets.length, notificationsDeleted: notifs.length, sessionsDeleted: sessions.length, idempotencyDeleted: idempotency.length, usersAnonymized: deletedUsers.length };
     },
   },
   {

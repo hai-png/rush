@@ -44,24 +44,38 @@ export const identityService = {
 
   async login(phone: string, password: string, userAgent?: string, ip?: string, twoFactorCode?: string) {
     const [user] = await db.select().from(schema.users).where(eq(schema.users.phone, phone));
-    if (!user || !user.isActive || user.deletedAt) throw new UnauthorizedError('Invalid credentials');
-    if (!(await verifyPassword(password, user.passwordHash))) throw new UnauthorizedError('Invalid credentials');
+    if (!user || !user.isActive || user.deletedAt) {
+      // Audit login failure (unknown user / suspended / deleted) — write directly
+      // to outbox rather than writeAudit() because we don't have a tx context and
+      // there's no actor to attribute the audit row to (the user doesn't exist or
+      // is inactive). The outbox audit handler forwards to the audit_logs table.
+      await db.insert(schema.outboxEvents).values({
+        channel: 'audit',
+        payload: { action: 'auth.login_failed', entityId: user?.id ?? null, reason: !user ? 'unknown_user' : !user.isActive ? 'suspended' : 'deleted', phone, ip: ip ?? null },
+      }).catch(() => { /* audit failure must not block the login rejection */ });
+      throw new UnauthorizedError('Invalid credentials');
+    }
+    if (!(await verifyPassword(password, user.passwordHash))) {
+      await db.insert(schema.outboxEvents).values({
+        channel: 'audit',
+        payload: { action: 'auth.login_failed', entityId: user.id, reason: 'wrong_password', ip: ip ?? null },
+      }).catch(() => {});
+      throw new UnauthorizedError('Invalid credentials');
+    }
 
-    // 2FA setup/verify/disable already exist and are enforced for platform_admin /
-    // corporate_admin, but login previously never checked twoFactorEnabled at all — an
-    // account that had 2FA turned on could still be logged into with just phone + password.
     if (user.twoFactorEnabled) {
       if (!twoFactorCode) throw new TwoFactorRequiredError();
       if (!user.twoFactorSecret || !authenticator.check(twoFactorCode, user.twoFactorSecret)) {
+        await db.insert(schema.outboxEvents).values({
+          channel: 'audit',
+          payload: { action: 'auth.login_failed', entityId: user.id, reason: 'wrong_2fa', ip: ip ?? null },
+        }).catch(() => {});
         throw new UnauthorizedError('Invalid 2FA code');
       }
     }
 
     const jti = createId();
     const expiresAt = new Date(Date.now() + 30 * 24 * 3600_000);
-    // userAgent and ip are `string | undefined` from the route handler; the sessions
-    // table's columns are `text | null`. Convert undefined → null so Drizzle's insert
-    // type-checks under exactOptionalPropertyTypes.
     await db.insert(schema.sessions).values({
       userId: user.id, jti,
       userAgent: userAgent ?? null,
@@ -71,6 +85,13 @@ export const identityService = {
 
     const token = await new SignJWT({ id: user.id, role: user.role, phone: user.phone, tokenVersion: user.tokenVersion, jti })
       .setProtectedHeader({ alg: 'HS256' }).setIssuedAt().setExpirationTime(ACCESS_TTL).sign(JWT_SECRET());
+
+    // Audit login success — makes the incident-response runbook's "query audit_logs
+    // for the affected window" step actually useful for account-takeover investigations.
+    await db.insert(schema.outboxEvents).values({
+      channel: 'audit',
+      payload: { action: 'auth.login_success', entityId: user.id, ip: ip ?? null, userAgent: userAgent ?? null },
+    }).catch(() => {});
 
     return { user, accessToken: token, requiresTosAcceptance: user.tosVersion !== CURRENT_TOS_VERSION };
   },

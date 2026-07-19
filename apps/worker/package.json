@@ -13,6 +13,7 @@
   "dependencies": {
     "@addis/api": "workspace:*",
     "@addis/db": "workspace:*",
+    "@addis/email": "workspace:*",
     "@addis/sms": "workspace:*",
     "@addis/shared": "workspace:*",
     "@sentry/node": "^8.47.0",

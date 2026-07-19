@@ -1,22 +1,57 @@
+import { eq } from 'drizzle-orm';
+import { db, schema } from '@addis/db';
+import { s3 } from '@addis/api/infra/s3';
+import { fileTypeFromBuffer } from 'file-type';
+
 /**
- * Generic webhook outbox handler. Used for outgoing webhook delivery to external
- * systems — e.g. malware-scan results from ClamAV, corporate HR system callbacks,
- * or partner integrations. Each payload carries a `kind` discriminator that this
- * handler dispatches on.
+ * Webhook outbox handler. Dispatches on payload.kind:
+ *   - clamav_scan: fetches the object from S3, sniffs its actual file type,
+ *     and flags any document whose sniffed type doesn't match the declared
+ *     MIME (a common malware evasion technique).
  *
- * Currently the only `kind` is `clamav_scan` (raised by documentService.upload()
- * when a contractor uploads a document). The implementation here is a stub — in
- * production this would POST the storage key to a ClamAV-sidecar service that
- * streams the file from S3, scans it, and returns a verdict. For now we just log.
+ * Previously this was a stub that just console.log'd the payload. Now it does
+ * a real basic scan. A full ClamAV sidecar integration would replace the
+ * sniff check with an actual virus signature scan.
  */
-export async function handle(payload: { kind: string; [k: string]: unknown }) {
+export async function handle(payload: { kind: string; storageKey?: string; [k: string]: unknown }) {
   switch (payload.kind) {
-    case 'clamav_scan':
-      // Stub: real implementation would call the ClamAV sidecar.
-      console.log(`[webhook-outbox] clamav_scan storageKey=${payload.storageKey ?? '-'}`);
+    case 'clamav_scan': {
+      if (!payload.storageKey) throw new Error('clamav_scan payload missing storageKey');
+
+      // Look up the declared MIME type from contractor_documents.
+      const [doc] = await db.select().from(schema.contractorDocuments)
+        .where(eq(schema.contractorDocuments.storageKey, payload.storageKey));
+      if (!doc) {
+        // Document may have been deleted between upload and scan — not an error.
+        return;
+      }
+
+      // Fetch the object from S3 to sniff its actual type.
+      const buffer = await s3.getObject(payload.storageKey);
+      if (!buffer) throw new Error(`S3 object not found: ${payload.storageKey}`);
+
+      const sniffed = await fileTypeFromBuffer(buffer);
+      if (!sniffed) {
+        // Unknown file type — could be a text file or a malformed binary. Log but
+        // don't fail the scan; the declared MIME check below only runs if we have
+        // a sniffed type to compare.
+        console.log(`[webhook-outbox] clamav_scan: unknown file type for ${payload.storageKey}`);
+        return;
+      }
+
+      if (doc.mimeType !== sniffed.mime) {
+        // MIME mismatch — flag the document by updating its original filename to
+        // include a SUSPICIOUS prefix. A real system would add a `suspicious`
+        // boolean column and trigger an admin alert; for now the prefix makes
+        // it visible in the admin UI.
+        await db.update(schema.contractorDocuments)
+          .set({ originalFilename: `[SUSPICIOUS: declared ${doc.mimeType}, detected ${sniffed.mime}] ${doc.originalFilename}` })
+          .where(eq(schema.contractorDocuments.id, doc.id));
+        throw new Error(`MIME mismatch for ${payload.storageKey}: declared=${doc.mimeType} sniffed=${sniffed.mime}`);
+      }
       return;
+    }
     default:
-      console.log(`[webhook-outbox] unknown kind=${payload.kind}`);
       throw new Error(`Unknown webhook kind: ${payload.kind}`);
   }
 }

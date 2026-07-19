@@ -1,3 +1,4 @@
+import { parseLimit } from '../../src/limit';
 import { getSession } from '../../src/context';
 import { TypedHono } from '../../src/typed-hono';
 import { z } from 'zod';
@@ -10,7 +11,7 @@ export const engagementRoutes = new TypedHono();
 engagementRoutes.use('*', requireAuth);
 
 engagementRoutes.get('/notifications', async (c) => {
-  const { rows, cursor } = await engagementService.listForUser(getSession(c).userId, Number(c.req.query('limit') ?? 20), c.req.query('cursor'));
+  const { rows, cursor } = await engagementService.listForUser(getSession(c).userId, parseLimit(c.req.query('limit')), c.req.query('cursor'));
   return c.json({ data: rows, meta: { cursor, limit: 20 } });
 });
 engagementRoutes.get('/notifications/unread-count', async (c) => c.json({ data: { count: await engagementService.unreadCount(getSession(c).userId) } }));

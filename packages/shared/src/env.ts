@@ -8,6 +8,12 @@ const envSchema = z.object({
   NEXTAUTH_SECRET: z.string().min(32).refine(s => !PLACEHOLDER_SECRETS.includes(s.toLowerCase())),
   NEXTAUTH_URL: z.string().url(),
   CRON_SECRET: z.string().min(32).refine(s => !PLACEHOLDER_SECRETS.includes(s.toLowerCase())),
+  /**
+   * Redis URL. Optional in development (the in-memory fallback kicks in), but
+   * REQUIRED in production — without it, cross-instance rate limiting, OTP
+   * counters, and SSE live-shuttle-tracking silently degrade to per-instance
+   * state. The refine() below enforces this.
+   */
   REDIS_URL: z.string().url().optional(),
 
   TELEBIRR_FABRIC_APP_ID: z.string().optional(),
@@ -16,7 +22,12 @@ const envSchema = z.object({
   TELEBIRR_MERCHANT_CODE: z.string().optional(),
   TELEBIRR_PRIVATE_KEY: z.string().optional(),
   TELEBIRR_PUBLIC_KEY: z.string().optional(),
-  TELEBIRR_ENV: z.enum(['testbed', 'production']).default('production'),
+  /**
+   * Telebirr environment. Defaults to 'testbed' (sandbox) — previously defaulted
+   * to 'production', which meant a missing env var silently targeted the live
+   * payment gateway. Fail-safe: explicitly set to 'production' when going live.
+   */
+  TELEBIRR_ENV: z.enum(['testbed', 'production']).default('testbed'),
   TELEBIRR_NOTIFY_URL: z.string().url(),
   TELEBIRR_REDIRECT_URL: z.string().url(),
 
@@ -76,7 +87,12 @@ const envSchema = z.object({
     d.TELEBIRR_MERCHANT_CODE, d.TELEBIRR_PRIVATE_KEY, d.TELEBIRR_PUBLIC_KEY];
   const set = t.filter(Boolean).length;
   return set === 0 || set === 6;
-}, { message: 'Telebirr config must be all set or all unset' });
+}, { message: 'Telebirr config must be all set or all unset' })
+.refine(d => {
+  // REDIS_URL is required in production — the in-memory fallback is dev-only.
+  if (d.NODE_ENV === 'production' && !d.REDIS_URL) return false;
+  return true;
+}, { message: 'REDIS_URL must be set in production — the in-memory fallback breaks cross-instance rate limiting, OTP counters, and SSE pub/sub' });
 
 export type Env = z.infer<typeof envSchema>;
 let cached: Env | null = null;

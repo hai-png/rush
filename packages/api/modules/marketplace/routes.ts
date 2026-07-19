@@ -1,3 +1,4 @@
+import { parseLimit } from '../../src/limit';
 import { getSession } from '../../src/context';
 import { TypedHono } from '../../src/typed-hono';
 import { requireRole } from '../../src/middleware/auth';
@@ -12,7 +13,7 @@ export const marketplaceRoutes = new TypedHono();
 marketplaceRoutes.get('/seat-releases', requireRole('rider'), async (c) => {
   const rows = await db.select().from(schema.seatReleases)
     .where(and(eq(schema.seatReleases.status, 'open'), gt(schema.seatReleases.expiresAt, new Date())))
-    .limit(Number(c.req.query('limit') ?? 20));
+    .limit(parseLimit(c.req.query('limit')));
   return c.json({ data: rows });
 });
 marketplaceRoutes.post('/seat-releases', requireRole('rider'), async (c) => {

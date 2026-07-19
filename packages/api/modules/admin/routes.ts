@@ -1,3 +1,4 @@
+import { parseLimit } from '../../src/limit';
 import { getSession } from '../../src/context';
 import { TypedHono } from '../../src/typed-hono';
 import { z } from 'zod';
@@ -18,7 +19,7 @@ adminRoutes.use('*', requireRole('platform_admin'));
 adminRoutes.route('/', adminCatalogRoutes);
 
 adminRoutes.get('/dashboard', async (c) => c.json({ data: await adminService.dashboard() }));
-adminRoutes.get('/users', async (c) => c.json({ data: await adminService.listUsers(Number(c.req.query('limit') ?? 20), c.req.query('q')) }));
+adminRoutes.get('/users', async (c) => c.json({ data: await adminService.listUsers(parseLimit(c.req.query('limit')), c.req.query('q')) }));
 adminRoutes.patch('/users/:id', async (c) => {
   const body = z.object({ action: z.enum(['suspend', 'change_role']), role: z.enum(ALL_ROLES as [string, ...string[]]).optional() }).parse(await c.req.json());
   const ip = c.req.header('x-forwarded-for');
@@ -45,11 +46,11 @@ adminRoutes.get('/corporates/pending', async (c) => {
 adminRoutes.post('/corporates/:id/activate', async (c) => c.json({ data: await corporateService.activate(c.req.param('id')) }));
 
 adminRoutes.get('/audit-logs', async (c) => c.json({
-  data: await adminService.searchAuditLogs({ entityType: c.req.query('entityType'), actorId: c.req.query('actorId'), action: c.req.query('action') }, Number(c.req.query('limit') ?? 50)),
+  data: await adminService.searchAuditLogs({ entityType: c.req.query('entityType'), actorId: c.req.query('actorId'), action: c.req.query('action') }, parseLimit(c.req.query('limit'))),
 }));
 
 adminRoutes.get('/subscriptions', async (c) => {
-  const rows = await db.select().from(schema.subscriptions).limit(Number(c.req.query('limit') ?? 50));
+  const rows = await db.select().from(schema.subscriptions).limit(parseLimit(c.req.query('limit')));
   return c.json({ data: rows });
 });
 
@@ -63,7 +64,7 @@ adminRoutes.get('/tickets', async (c) => {
   const status = c.req.query('status');
   const rows = await db.select().from(schema.supportTickets)
     .where(status ? eq(schema.supportTickets.status, status as any) : undefined)
-    .limit(Number(c.req.query('limit') ?? 50));
+    .limit(parseLimit(c.req.query('limit')));
   return c.json({ data: rows });
 });
 
@@ -71,7 +72,7 @@ adminRoutes.get('/payments', async (c) => {
   const status = c.req.query('status');
   const rows = await db.select().from(schema.payments)
     .where(status ? eq(schema.payments.status, status as any) : undefined)
-    .limit(Number(c.req.query('limit') ?? 50));
+    .limit(parseLimit(c.req.query('limit')));
   return c.json({ data: rows });
 });
 /**
