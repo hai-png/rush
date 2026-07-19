@@ -1,3 +1,4 @@
+import { getSession } from '../../src/context';
 import { TypedHono } from '../../src/typed-hono';
 import { z } from 'zod';
 import { requireRole } from '../../src/middleware/auth';
@@ -26,10 +27,10 @@ const UpdateCorporateInput = z.object({
   // percentage or the admin-user pointer.
 }).strict();
 
-corporateRoutes.get('/', requireRole('corporate_admin'), async (c) => c.json({ data: await corporateService.getOwn(c.get('session').userId) }));
-corporateRoutes.patch('/', requireRole('corporate_admin'), async (c) => c.json({ data: await corporateService.updateOwn(c.get('session').userId, UpdateCorporateInput.parse(await c.req.json())) }));
+corporateRoutes.get('/', requireRole('corporate_admin'), async (c) => c.json({ data: await corporateService.getOwn(getSession(c).userId) }));
+corporateRoutes.patch('/', requireRole('corporate_admin'), async (c) => c.json({ data: await corporateService.updateOwn(getSession(c).userId, UpdateCorporateInput.parse(await c.req.json())) }));
 
-corporateRoutes.get('/members', requireRole('corporate_admin'), async (c) => c.json({ data: await corporateService.listMembers(c.get('session').userId) }));
+corporateRoutes.get('/members', requireRole('corporate_admin'), async (c) => c.json({ data: await corporateService.listMembers(getSession(c).userId) }));
 
 /**
  * Member status update — only approvalStatus and isActive are mutable through this endpoint.
@@ -46,13 +47,13 @@ const UpdateMemberInput = z.object({
   isActive: z.boolean().optional(),
 }).strict();
 
-corporateRoutes.patch('/members/:id', requireRole('corporate_admin'), async (c) => c.json({ data: await corporateService.updateMember(c.get('session').userId, c.req.param('id'), UpdateMemberInput.parse(await c.req.json())) }));
-corporateRoutes.delete('/members/:id', requireRole('corporate_admin'), async (c) => { await corporateService.removeMember(c.get('session').userId, c.req.param('id')); return c.body(null, 204); });
+corporateRoutes.patch('/members/:id', requireRole('corporate_admin'), async (c) => c.json({ data: await corporateService.updateMember(getSession(c).userId, c.req.param('id'), UpdateMemberInput.parse(await c.req.json())) }));
+corporateRoutes.delete('/members/:id', requireRole('corporate_admin'), async (c) => { await corporateService.removeMember(getSession(c).userId, c.req.param('id')); return c.body(null, 204); });
 
-corporateRoutes.post('/invites', requireRole('corporate_admin'), async (c) => c.json({ data: await corporateService.generateInvite(c.get('session').userId) }));
+corporateRoutes.post('/invites', requireRole('corporate_admin'), async (c) => c.json({ data: await corporateService.generateInvite(getSession(c).userId) }));
 
 corporateRoutes.post('/onboard', requireRole('rider'), async (c) => {
   const body = z.object({ corporateCode: z.string(), employeeId: z.string() }).parse(await c.req.json());
-  return c.json({ data: await corporateService.onboardRider(c.get('session').userId, body) }, 201);
+  return c.json({ data: await corporateService.onboardRider(getSession(c).userId, body) }, 201);
 });
-corporateRoutes.get('/me', requireRole('rider'), async (c) => c.json({ data: await corporateService.myMembership(c.get('session').userId) }));
+corporateRoutes.get('/me', requireRole('rider'), async (c) => c.json({ data: await corporateService.myMembership(getSession(c).userId) }));

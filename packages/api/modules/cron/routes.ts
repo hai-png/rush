@@ -1,4 +1,3 @@
-import { Hono } from 'hono';
 import { timingSafeEqual } from 'node:crypto';
 import { TypedHono } from '../../src/typed-hono';
 import { withLock, CRON_JOBS_BY_NAME } from '../../src/cron-jobs';

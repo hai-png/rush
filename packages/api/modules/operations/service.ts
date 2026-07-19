@@ -48,8 +48,29 @@ export const operationsService = {
   async bookRide(riderId: string, input: { tripId: string; subscriptionId?: string | undefined; seatClaimId?: string | undefined; pickupStop?: string | undefined }) {
     const [trip] = await db.select().from(schema.trips).where(eq(schema.trips.id, input.tripId));
     if (!trip || trip.status !== 'scheduled') throw new BadRequestError('Trip not open for booking');
+
+    // Verify the subscription belongs to this rider (IDOR defence — without this,
+    // a rider could book a ride "on" someone else's subscription and consume
+    // their included rides).
+    if (input.subscriptionId) {
+      const [sub] = await db.select().from(schema.subscriptions).where(eq(schema.subscriptions.id, input.subscriptionId));
+      if (!sub || sub.riderId !== riderId) throw new BadRequestError('Subscription not found');
+      if (sub.status !== 'active') throw new BadRequestError('Subscription is not active');
+    }
+    // Same for seat claim — a rider could otherwise ride on someone else's claimed seat.
+    if (input.seatClaimId) {
+      const [claim] = await db.select().from(schema.seatClaims).where(eq(schema.seatClaims.id, input.seatClaimId));
+      if (!claim || claim.riderId !== riderId) throw new BadRequestError('Seat claim not found');
+    }
+
     try {
-      const [ride] = await db.insert(schema.rides).values({ riderId, ...input, status: 'booked' }).returning();
+      // Only attach optional keys that are present — Drizzle's insert values type
+      // rejects `undefined` under exactOptionalPropertyTypes.
+      const values: Record<string, unknown> = { riderId, tripId: input.tripId, status: 'booked' };
+      if (input.subscriptionId !== undefined) values.subscriptionId = input.subscriptionId;
+      if (input.seatClaimId !== undefined) values.seatClaimId = input.seatClaimId;
+      if (input.pickupStop !== undefined) values.pickupStop = input.pickupStop;
+      const [ride] = await db.insert(schema.rides).values(values as any).returning();
       await db.update(schema.trips).set({ seatsBooked: trip.seatsBooked + 1 }).where(eq(schema.trips.id, trip.id));
       return ride;
     } catch (e: any) {
@@ -73,9 +94,21 @@ export const operationsService = {
     if (existing && haversineMeters([existing.lat, existing.lng], [pos.lat, pos.lng]) < MIN_GPS_MOVE_METERS) {
       return existing; // dedup: no meaningful movement
     }
+    // Build the SET clause without spreading `...pos` (which carries `heading?: number | undefined`
+    // and `speed?: number | undefined` from the input type — those trip exactOptionalPropertyTypes
+    // on Drizzle's update set source). Only attach the keys that are actually present.
+    const setClause: Record<string, unknown> = { updatedAt: new Date() };
+    if (pos.lat !== undefined) setClause.lat = pos.lat;
+    if (pos.lng !== undefined) setClause.lng = pos.lng;
+    if (pos.heading !== undefined) setClause.heading = pos.heading;
+    if (pos.speed !== undefined) setClause.speed = pos.speed;
+    // lat and lng are required (NOT NULL) on the shuttle_positions table; always include them.
+    const insertValues: Record<string, unknown> = { shuttleId, lat: pos.lat, lng: pos.lng, updatedAt: new Date() };
+    if (pos.heading !== undefined) insertValues.heading = pos.heading;
+    if (pos.speed !== undefined) insertValues.speed = pos.speed;
     const [row] = await db.insert(schema.shuttlePositions)
-      .values({ shuttleId, ...pos, updatedAt: new Date() })
-      .onConflictDoUpdate({ target: schema.shuttlePositions.shuttleId, set: { ...pos, updatedAt: new Date() } })
+      .values(insertValues as any)
+      .onConflictDoUpdate({ target: schema.shuttlePositions.shuttleId, set: setClause })
       .returning();
     return row;
   },

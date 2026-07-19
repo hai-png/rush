@@ -1,3 +1,4 @@
+import { getSession } from '../../src/context';
 import { TypedHono } from '../../src/typed-hono';
 import { z } from 'zod';
 import { requireRole } from '../../src/middleware/auth';
@@ -17,12 +18,12 @@ async function contractorIdForUser(userId: string) {
 }
 
 documentRoutes.get('/documents', requireRole('contractor'), async (c) => {
-  const contractorId = await contractorIdForUser(c.get('session').userId);
+  const contractorId = await contractorIdForUser(getSession(c).userId);
   return c.json({ data: await documentService.list(contractorId) });
 });
 
 documentRoutes.post('/documents', requireRole('contractor'), async (c) => {
-  const contractorId = await contractorIdForUser(c.get('session').userId);
+  const contractorId = await contractorIdForUser(getSession(c).userId);
   const form = await c.req.formData();
   const file = form.get('file') as File;
   if (!file) throw new BadRequestError('Missing file');
@@ -33,7 +34,7 @@ documentRoutes.post('/documents', requireRole('contractor'), async (c) => {
 });
 
 documentRoutes.get('/documents/:id', requireRole('contractor', 'platform_admin'), async (c) => {
-  const session = c.get('session');
+  const session = getSession(c);
   // platform_admin may view any contractor's documents; a contractor may only view their own.
   const requesterContractorId = session.role === 'platform_admin' ? null : await contractorIdForUser(session.userId);
   const url = await documentService.signedDownloadUrl(c.req.param('id'), requesterContractorId);
@@ -41,7 +42,7 @@ documentRoutes.get('/documents/:id', requireRole('contractor', 'platform_admin')
 });
 
 documentRoutes.delete('/documents/:id', requireRole('contractor', 'platform_admin'), async (c) => {
-  const session = c.get('session');
+  const session = getSession(c);
   const requesterContractorId = session.role === 'platform_admin' ? null : await contractorIdForUser(session.userId);
   await documentService.remove(requesterContractorId, c.req.param('id'));
   return c.body(null, 204);

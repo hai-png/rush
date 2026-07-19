@@ -66,7 +66,7 @@ describe('withLock', () => {
       db: {
         transaction: vi.fn(async (fn: (tx: any) => Promise<any>) => {
           const tx = {
-            execute: vi.fn(async () => ({ rows: [{ locked: false }] })),
+            execute: vi.fn(async () => [{ locked: false }]),
           };
           return fn(tx);
         }),
@@ -86,7 +86,9 @@ describe('withLock', () => {
       db: {
         transaction: vi.fn(async (fn: (tx: any) => Promise<any>) => {
           const tx = {
-            execute: vi.fn(async () => ({ rows: [{ locked: true }] })),
+            // withLock now casts the execute() result directly to an array;
+            // return the array shape (not { rows: [...] }).
+            execute: vi.fn(async () => [{ locked: true }]),
           };
           return fn(tx);
         }),

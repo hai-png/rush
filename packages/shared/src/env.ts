@@ -56,6 +56,18 @@ const envSchema = z.object({
    */
   METRICS_PASSWORD: z.string().min(16).optional(),
 
+  /** Bcrypt cost factor for password hashing. Defaults to 12 in password.ts. */
+  BCRYPT_COST: z.coerce.number().int().min(8).max(15).optional(),
+
+  /** TTL (hours) for open seat releases in the marketplace. Defaults to 4. */
+  SEAT_RELEASE_TTL_HOURS: z.coerce.number().int().positive().default(4),
+
+  /** Redis auth token (for Upstash Redis). Optional — only needed when REDIS_URL points at Upstash. */
+  REDIS_TOKEN: z.string().optional(),
+
+  /** Mobile app API URL (Expo public env var — bundled into the app at build time). */
+  EXPO_PUBLIC_API_URL: z.string().url().optional(),
+
   NEXT_PUBLIC_TILE_SERVER_URL: z.string().url().optional(),
   NEXT_PUBLIC_CARTO_API_KEY: z.string().optional(),
   NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN: z.string().optional(),

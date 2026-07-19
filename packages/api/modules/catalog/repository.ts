@@ -24,5 +24,8 @@ export const catalogRepo = {
 function paginate<T extends { id: string }>(rows: T[], limit: number) {
   const hasMore = rows.length > limit;
   const page = hasMore ? rows.slice(0, limit) : rows;
-  return { rows: page, cursor: hasMore ? encodeCursor(page[page.length - 1].id) : undefined };
+  // page[page.length - 1] is possibly undefined under noUncheckedIndexedAccess, but
+  // hasMore guarantees page has at least `limit` (>=1) elements here, and if !hasMore
+  // we don't read the last element at all. The non-null assertion is safe.
+  return { rows: page, cursor: hasMore ? encodeCursor(page[page.length - 1]!.id) : undefined };
 }

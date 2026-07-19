@@ -1,7 +1,9 @@
+import { getSession } from '../../src/context';
 import { TypedHono } from '../../src/typed-hono';
 import { z } from 'zod';
 import { requireRole } from '../../src/middleware/auth';
 import { operationsService } from './service';
+import { getRiderProfileId, getContractorProfileId } from '../identity/profile-resolver';
 import { db, schema } from '@addis/db';
 import { eq, and } from 'drizzle-orm';
 import { redis } from '../../infra/redis';
@@ -9,38 +11,38 @@ import { redis } from '../../infra/redis';
 export const operationsRoutes = new TypedHono();
 
 operationsRoutes.get('/trips', requireRole('contractor'), async (c) => {
-  const [profile] = await db.select().from(schema.contractorProfiles).where(eq(schema.contractorProfiles.userId, c.get('session').userId));
-  const rows = await db.select().from(schema.trips).where(eq(schema.trips.contractorId, profile!.id));
+  const contractorId = await getContractorProfileId(getSession(c).userId);
+  const rows = await db.select().from(schema.trips).where(eq(schema.trips.contractorId, contractorId));
   return c.json({ data: rows });
 });
 operationsRoutes.post('/trips', requireRole('contractor'), async (c) => {
-  const [profile] = await db.select().from(schema.contractorProfiles).where(eq(schema.contractorProfiles.userId, c.get('session').userId));
+  const contractorId = await getContractorProfileId(getSession(c).userId);
   const body = z.object({ shuttleId: z.string(), routeId: z.string(), window: z.enum(['morning', 'evening']), departTime: z.coerce.date() }).parse(await c.req.json());
-  const trip = await operationsService.startTrip(profile!.id, body);
+  const trip = await operationsService.startTrip(contractorId, body);
   return c.json({ data: trip }, 201);
 });
 operationsRoutes.patch('/trips/:id', requireRole('contractor'), async (c) => {
-  const [profile] = await db.select().from(schema.contractorProfiles).where(eq(schema.contractorProfiles.userId, c.get('session').userId));
+  const contractorId = await getContractorProfileId(getSession(c).userId);
   const { event } = z.object({ event: z.literal('complete') }).parse(await c.req.json());
-  const trip = event === 'complete' ? await operationsService.completeTrip(profile!.id, c.req.param('id')) : null;
+  const trip = event === 'complete' ? await operationsService.completeTrip(contractorId, c.req.param('id')) : null;
   return c.json({ data: trip });
 });
 
 operationsRoutes.get('/rides', requireRole('rider'), async (c) => {
-  const [profile] = await db.select().from(schema.riderProfiles).where(eq(schema.riderProfiles.userId, c.get('session').userId));
-  const rows = await db.select().from(schema.rides).where(eq(schema.rides.riderId, profile!.id));
+  const riderId = await getRiderProfileId(getSession(c).userId);
+  const rows = await db.select().from(schema.rides).where(eq(schema.rides.riderId, riderId));
   return c.json({ data: rows });
 });
 operationsRoutes.post('/rides', requireRole('rider'), async (c) => {
-  const [profile] = await db.select().from(schema.riderProfiles).where(eq(schema.riderProfiles.userId, c.get('session').userId));
+  const riderId = await getRiderProfileId(getSession(c).userId);
   const body = z.object({ tripId: z.string(), subscriptionId: z.string().optional(), seatClaimId: z.string().optional(), pickupStop: z.string().optional() }).parse(await c.req.json());
-  const ride = await operationsService.bookRide(profile!.id, body);
+  const ride = await operationsService.bookRide(riderId, body);
   return c.json({ data: ride }, 201);
 });
 operationsRoutes.patch('/rides/:id', requireRole('rider'), async (c) => {
-  const [profile] = await db.select().from(schema.riderProfiles).where(eq(schema.riderProfiles.userId, c.get('session').userId));
+  const riderId = await getRiderProfileId(getSession(c).userId);
   const { event } = z.object({ event: z.literal('board') }).parse(await c.req.json());
-  const ride = event === 'board' ? await operationsService.board(profile!.id, c.req.param('id')) : null;
+  const ride = event === 'board' ? await operationsService.board(riderId, c.req.param('id')) : null;
   return c.json({ data: ride });
 });
 
@@ -57,7 +59,7 @@ operationsRoutes.get('/shuttle-positions', async (c) => {
 operationsRoutes.post('/shuttle-positions', requireRole('contractor'), async (c) => {
   const body = z.object({ shuttleId: z.string(), lat: z.number(), lng: z.number(), heading: z.number().optional(), speed: z.number().optional() }).parse(await c.req.json());
 
-  const [profile] = await db.select().from(schema.contractorProfiles).where(eq(schema.contractorProfiles.userId, c.get('session').userId));
+  const [profile] = await db.select().from(schema.contractorProfiles).where(eq(schema.contractorProfiles.userId, getSession(c).userId));
   const [shuttle] = await db.select().from(schema.shuttles).where(eq(schema.shuttles.id, body.shuttleId));
   // Without this check, any authenticated contractor could POST a position update for ANY
   // shuttle — not just their own — spoofing another shuttle's live location shown to riders,
@@ -71,6 +73,9 @@ operationsRoutes.post('/shuttle-positions', requireRole('contractor'), async (c)
   if (!blocked) return c.json({ error: { code: 'RATE_LIMITED', message: 'GPS reports limited to 1 per 5s', requestId: c.get('requestId') } }, 429);
 
   const row = await operationsService.reportPosition(body.shuttleId, body);
+  if (!row) {
+    return c.json({ error: { code: 'INTERNAL', message: 'Failed to report position', requestId: c.get('requestId') } }, 500);
+  }
   await redis.hset(`shuttle:pos:${body.shuttleId}`, { lat: row.lat, lng: row.lng, heading: row.heading, updatedAt: row.updatedAt });
   await redis.expire(`shuttle:pos:${body.shuttleId}`, 300);
   await redis.publish(`shuttle:updates:${body.shuttleId}`, JSON.stringify(row));
@@ -79,17 +84,45 @@ operationsRoutes.post('/shuttle-positions', requireRole('contractor'), async (c)
 
 operationsRoutes.get('/shuttle-positions/stream', requireRole('rider'), async (c) => {
   const ids = (c.req.query('shuttleIds') ?? '').split(',').filter(Boolean);
+  /**
+   * Server-Sent Events stream of live shuttle positions.
+   *
+   * The previous implementation called `redis.duplicate()` and `sub.subscribe()` —
+   * ioredis-style APIs that do not exist on @upstash/redis (which is HTTP-based, not
+   * connection-based). The code would have thrown at runtime the first time a rider
+   * opened the live-trip screen.
+   *
+   * We now poll the cached positions from Redis every 5s and push them as SSE events.
+   * This is less efficient than true pub/sub (5s of latency vs. instant) but works
+   * with the existing @upstash/redis client. A future optimisation is to switch to
+   * a Redis client that supports pub/sub (e.g. ioredis or node-redis) for this
+   * endpoint only, keeping @upstash/redis for the rate-limit/OTP counters.
+   */
   return new Response(new ReadableStream({
     async start(controller) {
       const encoder = new TextEncoder();
-      const heartbeat = setInterval(() => controller.enqueue(encoder.encode(':heartbeat\n\n')), 15000);
-      const sub = redis.duplicate();
-      for (const id of ids) {
-        await sub.subscribe(`shuttle:updates:${id}`, (message) => {
-          controller.enqueue(encoder.encode(`data: ${message}\n\n`));
-        });
-      }
-      c.req.raw.signal.addEventListener('abort', () => { clearInterval(heartbeat); sub.disconnect(); controller.close(); });
+      const closed = { value: false };
+
+      const pushPositions = async () => {
+        if (closed.value) return;
+        const positions = await Promise.all(ids.map((id) => redis.hgetall(`shuttle:pos:${id}`)));
+        const valid = positions.filter(Boolean);
+        if (valid.length) {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(valid)}\n\n`));
+        } else {
+          controller.enqueue(encoder.encode(':heartbeat\n\n'));
+        }
+      };
+
+      // Initial push, then poll every 5s.
+      await pushPositions();
+      const interval = setInterval(pushPositions, 5000);
+
+      c.req.raw.signal.addEventListener('abort', () => {
+        closed.value = true;
+        clearInterval(interval);
+        controller.close();
+      });
     },
   }), { headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' } });
 });

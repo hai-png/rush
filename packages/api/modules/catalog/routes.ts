@@ -1,12 +1,17 @@
 import { createRoute } from '@hono/zod-openapi';
 import { z } from 'zod';
-import { TypedHono } from '../../src/typed-hono';
+import { TypedOpenAPIHono } from '../../src/typed-hono';
 import { requireRole } from '../../src/middleware/auth';
 import { catalogService } from './service';
 import { CreateRouteInput, UpdateRouteInput, CreatePlanInput, UpdatePlanInput, CreateShuttleInput, UpdateShuttleInput } from './types';
 import { envelope } from '@addis/shared';
 
-export const catalogRoutes = new TypedHono();
+/**
+ * Both catalogRoutes and adminCatalogRoutes use TypedOpenAPIHono because every route
+ * is declared via createRoute() and registered via .openapi() — this populates the
+ * generated OpenAPI spec with auth requirements, request schemas, and response shapes.
+ */
+export const catalogRoutes = new TypedOpenAPIHono();
 
 // ---------- Schemas ----------
 const RouteSchema = z.object({
@@ -93,10 +98,12 @@ catalogRoutes.openapi(listPlansSpec, async (c) => c.json({ data: await catalogSe
  *
  * `requireRole('platform_admin')` is applied at the router level via .use('*').
  */
-export const adminCatalogRoutes = new TypedHono();
+export const adminCatalogRoutes = new TypedOpenAPIHono();
 adminCatalogRoutes.use('*', requireRole('platform_admin'));
 
-const adminSecurity = [{ bearerAuth: [] }, { cookieAuth: [] }] as const;
+/** Security schemes for admin routes — mutable array, not `as const`, so it satisfies
+ *  the SecurityRequirementObject[] type expected by @hono/zod-openapi. */
+const adminSecurity: Array<{ bearerAuth: [] } | { cookieAuth: [] }> = [{ bearerAuth: [] }, { cookieAuth: [] }];
 
 const adminListRoutesSpec = createRoute({
   method: 'get', path: '/routes', security: adminSecurity,

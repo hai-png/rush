@@ -17,7 +17,8 @@ export async function settlePayment(reference: string, reportedAmount?: Money): 
       .where(and(eq(schema.payments.reference, reference), eq(schema.payments.status, 'pending')))
       .returning();
     if (updated.length === 0) return false;
-    const p = updated[0];
+    // updated.length > 0 guarantees updated[0] is defined.
+    const p = updated[0]!;
 
     if (reportedAmount && !reportedAmount.eq(Money.fromDecimal(p.amount))) {
       await tx.update(schema.payments).set({ status: 'failed', updatedAt: new Date() }).where(eq(schema.payments.id, p.id));
@@ -50,7 +51,7 @@ export async function failPayment(reference: string, reasonRaw: unknown): Promis
       .where(and(eq(schema.payments.reference, reference), eq(schema.payments.status, 'pending')))
       .returning();
     if (updated.length === 0) return false;
-    const p = updated[0];
+    const p = updated[0]!;
     if (p.subscriptionId) await transitionSubscription(tx, p.subscriptionId, 'payment.failed');
     if (p.seatClaimId) {
       // claimer payment failed -> claim cancelled -> seat reopens for others
@@ -64,7 +65,7 @@ export async function failPayment(reference: string, reasonRaw: unknown): Promis
 }
 
 /** Queue a refund; retried by process-refund-retries cron with exponential backoff. */
-export async function scheduleRefund(paymentId: string, amount: Money, reason: string, tx = db) {
+export async function scheduleRefund(paymentId: string, amount: Money, reason: string, tx: import('@addis/db').DbOrTx = db) {
   const [payment] = await tx.select().from(schema.payments).where(eq(schema.payments.id, paymentId));
   if (!payment) throw new Error(`Payment ${paymentId} not found`);
   const refundRequestNo = `RF${paymentId}${Date.now()}`;
@@ -109,7 +110,7 @@ export async function processRefundRetries(limit = 50) {
           await tx.update(schema.refundRetries).set({ status: 'permanent_failure', attempts, updatedAt: new Date() }).where(eq(schema.refundRetries.id, retry.id));
           await tx.insert(schema.outboxEvents).values({ channel: 'notification', payload: { type: 'refund_failed', userId: payment.riderId } });
         } else {
-          const backoffMin = BACKOFF_MIN[Math.min(attempts - 1, BACKOFF_MIN.length - 1)];
+          const backoffMin = BACKOFF_MIN[Math.min(attempts - 1, BACKOFF_MIN.length - 1)] ?? 15;
           await tx.update(schema.refundRetries).set({
             attempts, nextAttemptAt: new Date(Date.now() + backoffMin * 60_000),
             lastError: result.status === 'failed' ? result.error : null, updatedAt: new Date(),

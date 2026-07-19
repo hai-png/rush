@@ -35,7 +35,15 @@ export async function writeAudit(tx: typeof db, entry: AuditEntry) {
   const prevHash = last?.hash ?? 'GENESIS';
   const payload = JSON.stringify({ ...entry, prevHash });
   const hash = createHash('sha256').update(payload).digest('hex');
-  const [row] = await tx.insert(schema.auditLogs).values({ ...entry, prevHash, hash }).returning();
+  // Strip undefined fields — Drizzle's insert values type rejects `undefined` under
+  // exactOptionalPropertyTypes. We only attach keys that have a non-undefined value.
+  const values: Record<string, unknown> = { prevHash, hash, actorId: entry.actorId, action: entry.action, entityType: entry.entityType };
+  if (entry.entityId !== undefined) values.entityId = entry.entityId;
+  if (entry.before !== undefined) values.before = entry.before;
+  if (entry.after !== undefined) values.after = entry.after;
+  if (entry.ipAddress !== undefined) values.ipAddress = entry.ipAddress;
+  if (entry.userAgent !== undefined) values.userAgent = entry.userAgent;
+  const [row] = await tx.insert(schema.auditLogs).values(values as any).returning();
   return row;
 }
 

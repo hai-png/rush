@@ -9,10 +9,23 @@ export const webhookRoutes = new TypedHono();
 
 webhookRoutes.post('/telebirr/notify', async (c) => {
   const provider = getPaymentProvider('telebirr');
-  const event = await provider.parseWebhook(c.req.raw);
+
+  // parseWebhook verifies the RSA signature; a signature failure or malformed
+  // payload throws. We must return 400 (not 500) so Telebirr doesn't retry the
+  // webhook indefinitely — and we must NOT return 'SUCCESS' for a bad signature,
+  // otherwise an attacker could forge webhooks. Log the error via the request
+  // logger and return 400.
+  let event;
+  try {
+    event = await provider.parseWebhook(c.req.raw);
+  } catch (err) {
+    c.get('logger')?.warn({ err }, 'telebirr webhook signature/parse failure');
+    return c.text('BAD_SIGNATURE', 400);
+  }
 
   if (event.type === 'payment.settled' || event.type === 'payment.failed') {
-    // replay protection
+    // replay protection — merchOrderId is the primary key, so duplicate webhook
+    // deliveries are no-ops.
     const inserted = await db.insert(schema.telebirrNotifyEvents)
       .values({ merchOrderId: event.merchOrderId, tradeStatus: event.type })
       .onConflictDoNothing()

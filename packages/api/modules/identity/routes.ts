@@ -1,3 +1,4 @@
+import { getSession } from '../../src/context';
 import { TypedHono } from '../../src/typed-hono';
 import { z } from 'zod';
 import { EthiopianPhone } from '@addis/shared';
@@ -69,13 +70,13 @@ identityRoutes.post('/refresh', async (c) => {
 });
 
 identityRoutes.post('/logout', async (c) => {
-  const session = c.get('session');
+  const session = getSession(c);
   if (session?.jti) await db.delete(schema.sessions).where(eq(schema.sessions.jti, session.jti));
   return c.body(null, 204);
 });
 
 identityRoutes.get('/me', requireAuth, async (c) => {
-  const session = c.get('session');
+  const session = getSession(c);
   const [user] = await db.select().from(schema.users).where(eq(schema.users.id, session.userId));
   if (!user) return c.json({ error: { code: 'NOT_FOUND', message: 'User not found', requestId: c.get('requestId') } }, 404);
   const { passwordHash: _ph, twoFactorSecret: _tfs, ...safe } = user;
@@ -83,19 +84,19 @@ identityRoutes.get('/me', requireAuth, async (c) => {
 });
 
 identityRoutes.post('/change-password', requireAuth, async (c) => {
-  const session = c.get('session');
+  const session = getSession(c);
   const { oldPassword, newPassword } = z.object({ oldPassword: z.string(), newPassword: z.string().min(10) }).parse(await c.req.json());
   await identityService.changePassword(session.userId, oldPassword, newPassword);
   return c.body(null, 204);
 });
 
 identityRoutes.get('/sessions', requireAuth, async (c) => {
-  const session = c.get('session');
+  const session = getSession(c);
   const rows = await db.select().from(schema.sessions).where(eq(schema.sessions.userId, session.userId));
   return c.json({ data: rows });
 });
 identityRoutes.delete('/sessions/:id', requireAuth, async (c) => {
-  const session = c.get('session');
+  const session = getSession(c);
   await db.delete(schema.sessions).where(and(eq(schema.sessions.id, c.req.param('id')), eq(schema.sessions.userId, session.userId)));
   return c.body(null, 204);
 });
@@ -121,14 +122,14 @@ identityRoutes.post('/password/reset/confirm', async (c) => {
   return c.body(null, 204);
 });
 
-identityRoutes.post('/2fa/setup', requireRole('platform_admin', 'corporate_admin'), async (c) => c.json({ data: await identityService.setup2fa(c.get('session').userId) }));
+identityRoutes.post('/2fa/setup', requireRole('platform_admin', 'corporate_admin'), async (c) => c.json({ data: await identityService.setup2fa(getSession(c).userId) }));
 identityRoutes.post('/2fa/verify', requireRole('platform_admin', 'corporate_admin'), async (c) => {
   const { code } = z.object({ code: z.string().length(6) }).parse(await c.req.json());
-  return c.json({ data: await identityService.verify2fa(c.get('session').userId, code) });
+  return c.json({ data: await identityService.verify2fa(getSession(c).userId, code) });
 });
 identityRoutes.post('/2fa/disable', requireRole('platform_admin', 'corporate_admin'), async (c) => {
   const { password } = z.object({ password: z.string() }).parse(await c.req.json());
-  await identityService.disable2fa(c.get('session').userId, password);
+  await identityService.disable2fa(getSession(c).userId, password);
   return c.body(null, 204);
 });
 

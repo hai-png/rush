@@ -27,7 +27,11 @@ export default function AdminShuttlesPage() {
     { key: 'plateNumber', header: 'Plate' }, { key: 'model', header: 'Model' },
     { key: 'vehicleType', header: 'Type' }, { key: 'capacity', header: 'Capacity' },
     { key: 'isActive', header: 'Status', render: (s) => (
-      <button onClick={() => toggleActive.mutate({ id: s.id, isActive: !s.isActive })}>
+      <button
+        onClick={() => toggleActive.mutate({ id: s.id, isActive: !s.isActive })}
+        aria-label={`${s.isActive ? 'Deactivate' : 'Activate'} shuttle ${s.plateNumber}`}
+        title={s.isActive ? 'Deactivate' : 'Activate'}
+      >
         <Badge variant={s.isActive ? 'success' : 'secondary'}>{s.isActive ? 'Active' : 'Inactive'}</Badge>
       </button>
     ) },

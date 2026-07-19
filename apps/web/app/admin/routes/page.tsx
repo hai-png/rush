@@ -36,7 +36,11 @@ export default function AdminRoutesPage() {
     { key: 'destination', header: 'Destination' },
     { key: 'fare', header: 'Fare (ETB)' },
     { key: 'isActive', header: 'Status', render: (r) => (
-      <button onClick={() => toggleActive.mutate({ id: r.id, isActive: !r.isActive })}>
+      <button
+        onClick={() => toggleActive.mutate({ id: r.id, isActive: !r.isActive })}
+        aria-label={`${r.isActive ? 'Deactivate' : 'Activate'} route ${r.name}`}
+        title={r.isActive ? 'Deactivate' : 'Activate'}
+      >
         <Badge variant={r.isActive ? 'success' : 'secondary'}>{r.isActive ? 'Active' : 'Inactive'}</Badge>
       </button>
     ) },

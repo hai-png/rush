@@ -9,6 +9,272 @@
     "parameters": {}
   },
   "paths": {
+    "/api/v1/routes": {
+      "get": {
+        "security": [],
+        "parameters": [
+          {
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 100,
+              "default": 20
+            },
+            "required": false,
+            "name": "limit",
+            "in": "query"
+          },
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": false,
+            "name": "cursor",
+            "in": "query"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Paginated list of active routes",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "origin": {
+                            "type": "string"
+                          },
+                          "destination": {
+                            "type": "string"
+                          },
+                          "fare": {
+                            "type": "string"
+                          },
+                          "durationMin": {
+                            "type": "number"
+                          },
+                          "isActive": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "name",
+                          "origin",
+                          "destination",
+                          "fare",
+                          "durationMin",
+                          "isActive"
+                        ]
+                      }
+                    },
+                    "meta": {
+                      "type": "object",
+                      "properties": {
+                        "cursor": {
+                          "type": "string"
+                        },
+                        "limit": {
+                          "type": "number"
+                        },
+                        "total": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "limit"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/v1/routes/{id}": {
+      "get": {
+        "security": [],
+        "parameters": [
+          {
+            "schema": {
+              "type": "string"
+            },
+            "required": true,
+            "name": "id",
+            "in": "path"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Route",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string"
+                        },
+                        "name": {
+                          "type": "string"
+                        },
+                        "origin": {
+                          "type": "string"
+                        },
+                        "destination": {
+                          "type": "string"
+                        },
+                        "fare": {
+                          "type": "string"
+                        },
+                        "durationMin": {
+                          "type": "number"
+                        },
+                        "isActive": {
+                          "type": "boolean"
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "name",
+                        "origin",
+                        "destination",
+                        "fare",
+                        "durationMin",
+                        "isActive"
+                      ]
+                    },
+                    "meta": {
+                      "type": "object",
+                      "properties": {
+                        "cursor": {
+                          "type": "string"
+                        },
+                        "limit": {
+                          "type": "number"
+                        },
+                        "total": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "limit"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Route not found"
+          }
+        }
+      }
+    },
+    "/api/v1/plans": {
+      "get": {
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "All active subscription plans",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "name": {
+                            "type": "string"
+                          },
+                          "durationDays": {
+                            "type": "number"
+                          },
+                          "ridesIncluded": {
+                            "type": "number"
+                          },
+                          "priceETB": {
+                            "type": "string"
+                          },
+                          "isPopular": {
+                            "type": "boolean"
+                          },
+                          "isTrial": {
+                            "type": "boolean"
+                          },
+                          "isActive": {
+                            "type": "boolean"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "name",
+                          "durationDays",
+                          "ridesIncluded",
+                          "priceETB",
+                          "isPopular",
+                          "isTrial",
+                          "isActive"
+                        ]
+                      }
+                    },
+                    "meta": {
+                      "type": "object",
+                      "properties": {
+                        "cursor": {
+                          "type": "string"
+                        },
+                        "limit": {
+                          "type": "number"
+                        },
+                        "total": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "limit"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/v1/subscriptions": {
       "post": {
         "security": [
@@ -210,6 +476,93 @@
                   },
                   "required": [
                     "error"
+                  ]
+                }
+              }
+            }
+          }
+        }
+      },
+      "get": {
+        "security": [
+          {
+            "bearerAuth": []
+          },
+          {
+            "cookieAuth": []
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "List",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": {
+                            "type": "string"
+                          },
+                          "riderId": {
+                            "type": "string"
+                          },
+                          "planId": {
+                            "type": "string"
+                          },
+                          "routeId": {
+                            "type": "string",
+                            "nullable": true
+                          },
+                          "status": {
+                            "type": "string"
+                          },
+                          "ridesUsed": {
+                            "type": "number"
+                          },
+                          "startDate": {
+                            "type": "string"
+                          },
+                          "endDate": {
+                            "type": "string"
+                          }
+                        },
+                        "required": [
+                          "id",
+                          "riderId",
+                          "planId",
+                          "routeId",
+                          "status",
+                          "ridesUsed",
+                          "startDate",
+                          "endDate"
+                        ]
+                      }
+                    },
+                    "meta": {
+                      "type": "object",
+                      "properties": {
+                        "cursor": {
+                          "type": "string"
+                        },
+                        "limit": {
+                          "type": "number"
+                        },
+                        "total": {
+                          "type": "number"
+                        }
+                      },
+                      "required": [
+                        "limit"
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data"
                   ]
                 }
               }

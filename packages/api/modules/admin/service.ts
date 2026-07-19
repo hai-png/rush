@@ -7,13 +7,19 @@ import { writeAudit } from './audit';
 
 export const adminService = {
   async dashboard() {
-    const [activeSubs] = await db.select({ n: sql<number>`count(*)::int` }).from(schema.subscriptions).where(eq(schema.subscriptions.status, 'active'));
-    const [openSeats] = await db.select({ n: sql<number>`count(*)::int` }).from(schema.seatReleases).where(eq(schema.seatReleases.status, 'open'));
-    const [pendingContractors] = await db.select({ n: sql<number>`count(*)::int` }).from(schema.contractorProfiles).where(eq(schema.contractorProfiles.verificationStatus, 'pending'));
-    const [revenue30d] = await db.select({ sum: sql<string>`coalesce(sum(amount), 0)` }).from(schema.payments)
-      .where(and(eq(schema.payments.status, 'completed'), gte(schema.payments.createdAt, sql`now() - interval '30 days'`)));
-    const [openTickets] = await db.select({ n: sql<number>`count(*)::int` }).from(schema.supportTickets).where(eq(schema.supportTickets.status, 'open'));
-    return { activeSubscriptions: activeSubs.n, openSeatReleases: openSeats.n, pendingContractorVerifications: pendingContractors.n, revenueLast30dETB: revenue30d.sum, openTickets: openTickets.n };
+    const [activeSubs] = (await db.select({ n: sql<number>`count(*)::int` }).from(schema.subscriptions).where(eq(schema.subscriptions.status, 'active')));
+    const [openSeats] = (await db.select({ n: sql<number>`count(*)::int` }).from(schema.seatReleases).where(eq(schema.seatReleases.status, 'open')));
+    const [pendingContractors] = (await db.select({ n: sql<number>`count(*)::int` }).from(schema.contractorProfiles).where(eq(schema.contractorProfiles.verificationStatus, 'pending')));
+    const [revenue30d] = (await db.select({ sum: sql<string>`coalesce(sum(amount), 0)` }).from(schema.payments)
+      .where(and(eq(schema.payments.status, 'completed'), gte(schema.payments.createdAt, sql`now() - interval '30 days'`))));
+    const [openTickets] = (await db.select({ n: sql<number>`count(*)::int` }).from(schema.supportTickets).where(eq(schema.supportTickets.status, 'open')));
+    return {
+      activeSubscriptions: activeSubs?.n ?? 0,
+      openSeatReleases: openSeats?.n ?? 0,
+      pendingContractorVerifications: pendingContractors?.n ?? 0,
+      revenueLast30dETB: revenue30d?.sum ?? '0',
+      openTickets: openTickets?.n ?? 0,
+    };
   },
 
   async listUsers(limit: number, search?: string) {

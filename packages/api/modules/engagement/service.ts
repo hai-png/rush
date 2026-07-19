@@ -30,9 +30,15 @@ export const engagementService = {
     const locale = envelope.locale ?? 'en';
     const rendered = envelope.title && envelope.body ? { title: envelope.title, body: envelope.body } : renderTemplate(envelope.type, locale, envelope.data);
 
-    const [row] = await db.insert(schema.notifications).values({
-      userId: envelope.userId, type: envelope.type, title: rendered.title, body: rendered.body, link: envelope.link,
-    }).returning();
+    // Only attach link if present — Drizzle's insert values type rejects `undefined`
+    // under exactOptionalPropertyTypes.
+    const notifValues: Record<string, unknown> = {
+      userId: envelope.userId, type: envelope.type,
+      title: rendered.title, body: rendered.body,
+    };
+    if (envelope.link !== undefined) notifValues.link = envelope.link;
+    const [row] = await db.insert(schema.notifications).values(notifValues as any).returning();
+    const notifRow = row!;
 
     const prefsRow = await engagementService.getPreferences(envelope.userId);
     const typePrefs = { ...DEFAULT_PREFS, ...(prefsRow.prefs as any)?.[envelope.type] };
@@ -43,7 +49,7 @@ export const engagementService = {
     if (typePrefs.sms && (critical || !quiet)) await db.insert(schema.outboxEvents).values({ channel: 'sms', payload: { userId: envelope.userId, body: `${rendered.title}: ${rendered.body}` } });
     if (typePrefs.email && (critical || !quiet)) await db.insert(schema.outboxEvents).values({ channel: 'email', payload: { userId: envelope.userId, subject: rendered.title, body: rendered.body } });
 
-    return row;
+    return notifRow;
   },
 
   async listForUser(userId: string, limit: number, cursor?: string) {
@@ -54,12 +60,12 @@ export const engagementService = {
       .orderBy(sql`${schema.notifications.createdAt} desc`).limit(limit + 1);
     const hasMore = rows.length > limit;
     const page = hasMore ? rows.slice(0, limit) : rows;
-    return { rows: page, cursor: hasMore ? encodeCursor(page[page.length - 1].id) : undefined };
+    return { rows: page, cursor: hasMore ? encodeCursor(page[page.length - 1]!.id) : undefined };
   },
   async unreadCount(userId: string) {
-    const [{ count }] = await db.select({ count: sql<number>`count(*)::int` }).from(schema.notifications)
+    const rows = await db.select({ count: sql<number>`count(*)::int` }).from(schema.notifications)
       .where(and(eq(schema.notifications.userId, userId), isNull(schema.notifications.readAt)));
-    return count;
+    return rows[0]?.count ?? 0;
   },
   async markRead(userId: string, id: string) {
     await db.update(schema.notifications).set({ readAt: new Date() }).where(and(eq(schema.notifications.id, id), eq(schema.notifications.userId, userId)));

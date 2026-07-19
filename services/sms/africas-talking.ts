@@ -1,4 +1,5 @@
 import { loadEnv } from '@addis/shared';
+import type { SmsProvider } from './provider';
 export class AfricasTalkingProvider implements SmsProvider {
   private env = loadEnv();
   async send(phone: string, message: string): Promise<boolean> {

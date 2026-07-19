@@ -57,7 +57,8 @@ export const marketplaceService = {
         .returning();
       if (claimed.length === 0) throw new ConflictError('Seat already claimed, cancelled, or expired');
 
-      const release = claimed[0];
+      // claimed.length > 0 guarantees claimed[0] is defined.
+      const release = claimed[0]!;
       if (release.riderId === claimerId) throw new BadRequestError('Cannot claim your own released seat');
 
       const merchOrderId = generateMerchOrderId();
@@ -65,16 +66,19 @@ export const marketplaceService = {
         riderId: claimerId, amount: release.refundAmount, method: input.paymentMethod,
         reference: merchOrderId, status: 'pending', retentionExpiresAt: addYears(new Date(), PAYMENT_RETENTION_YEARS),
       }).returning();
+      // .returning() on a successful insert always yields exactly one row.
+      const paymentRow = payment!;
 
       const [claim] = await tx.insert(schema.seatClaims).values({
         seatReleaseId: input.seatReleaseId, riderId: claimerId, routeId: release.routeId,
-        window: release.window, paymentId: payment.id, status: 'confirmed',
+        window: release.window, paymentId: paymentRow.id, status: 'confirmed',
       }).returning();
+      const claimRow = claim!;
 
-      await tx.update(schema.payments).set({ seatClaimId: claim.id }).where(eq(schema.payments.id, payment.id));
+      await tx.update(schema.payments).set({ seatClaimId: claimRow.id }).where(eq(schema.payments.id, paymentRow.id));
 
       // Find original subscriber's payment to refund once claimer pays (queued on settle, not here)
-      return { release, claim, payment };
+      return { release, claim: claimRow, payment: paymentRow };
     });
 
     const provider = getPaymentProvider(input.paymentMethod);

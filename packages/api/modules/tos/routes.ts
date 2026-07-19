@@ -1,3 +1,4 @@
+import { getSession } from '../../src/context';
 import { TypedHono } from '../../src/typed-hono';
 import { z } from 'zod';
 import { eq } from 'drizzle-orm';
@@ -17,7 +18,7 @@ export const tosRoutes = new TypedHono();
  * and bumps the user's tosVersion so subsequent requests pass the gate.
  */
 tosRoutes.post('/', requireAuth, async (c) => {
-  const session = c.get('session');
+  const session = getSession(c);
   const { version } = z.object({ version: z.string() }).parse(await c.req.json());
   if (version !== CURRENT_TOS_VERSION) {
     return c.json(
@@ -52,7 +53,7 @@ tosRoutes.post('/', requireAuth, async (c) => {
 
 /** Returns the caller's ToS acceptance history (newest first). Used by the account page. */
 tosRoutes.get('/', requireAuth, async (c) => {
-  const session = c.get('session');
+  const session = getSession(c);
   const rows = await db
     .select()
     .from(schema.tosAcceptances)

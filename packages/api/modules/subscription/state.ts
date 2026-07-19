@@ -14,7 +14,7 @@ export const subscriptionState = defineStateMachine<SubscriptionStatus>({
 
 /** Applies a transition to a row inside an existing transaction. Throws InvalidTransitionError if illegal. */
 export async function transitionSubscription(
-  tx: import('@addis/db').Db, subscriptionId: string, event: string,
+  tx: import('@addis/db').DbOrTx, subscriptionId: string, event: string,
 ) {
   const { schema } = await import('@addis/db');
   const { eq } = await import('drizzle-orm');

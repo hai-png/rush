@@ -4,6 +4,169 @@
  */
 
 export interface paths {
+    "/api/v1/routes": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: {
+                    limit?: number;
+                    cursor?: string;
+                };
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Paginated list of active routes */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            data: {
+                                id: string;
+                                name: string;
+                                origin: string;
+                                destination: string;
+                                fare: string;
+                                durationMin: number;
+                                isActive: boolean;
+                            }[];
+                            meta?: {
+                                cursor?: string;
+                                limit: number;
+                                total?: number;
+                            };
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/routes/{id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path: {
+                    id: string;
+                };
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description Route */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            data: {
+                                id: string;
+                                name: string;
+                                origin: string;
+                                destination: string;
+                                fare: string;
+                                durationMin: number;
+                                isActive: boolean;
+                            };
+                            meta?: {
+                                cursor?: string;
+                                limit: number;
+                                total?: number;
+                            };
+                        };
+                    };
+                };
+                /** @description Route not found */
+                404: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content?: never;
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/api/v1/plans": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description All active subscription plans */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            data: {
+                                id: string;
+                                name: string;
+                                durationDays: number;
+                                ridesIncluded: number;
+                                priceETB: string;
+                                isPopular: boolean;
+                                isTrial: boolean;
+                                isActive: boolean;
+                            }[];
+                            meta?: {
+                                cursor?: string;
+                                limit: number;
+                                total?: number;
+                            };
+                        };
+                    };
+                };
+            };
+        };
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/api/v1/subscriptions": {
         parameters: {
             query?: never;
@@ -11,7 +174,42 @@ export interface paths {
             path?: never;
             cookie?: never;
         };
-        get?: never;
+        get: {
+            parameters: {
+                query?: never;
+                header?: never;
+                path?: never;
+                cookie?: never;
+            };
+            requestBody?: never;
+            responses: {
+                /** @description List */
+                200: {
+                    headers: {
+                        [name: string]: unknown;
+                    };
+                    content: {
+                        "application/json": {
+                            data: {
+                                id: string;
+                                riderId: string;
+                                planId: string;
+                                routeId: string | null;
+                                status: string;
+                                ridesUsed: number;
+                                startDate: string;
+                                endDate: string;
+                            }[];
+                            meta?: {
+                                cursor?: string;
+                                limit: number;
+                                total?: number;
+                            };
+                        };
+                    };
+                };
+            };
+        };
         put?: never;
         post: {
             parameters: {

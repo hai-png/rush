@@ -16,8 +16,9 @@ export const dashboardService = {
       .where(and(eq(schema.subscriptions.riderId, profile.id), eq(schema.subscriptions.status, 'active')))
       .orderBy(desc(schema.subscriptions.createdAt)).limit(1);
 
-    const [{ count: unread }] = await db.select({ count: sql<number>`count(*)::int` }).from(schema.notifications)
+    const unreadRow = await db.select({ count: sql<number>`count(*)::int` }).from(schema.notifications)
       .where(and(eq(schema.notifications.userId, userId), sql`${schema.notifications.readAt} is null`));
+    const unread = unreadRow[0]?.count ?? 0;
 
     return {
       activeSubscription: sub ? { id: sub.id, status: sub.status, ridesUsed: sub.ridesUsed, plan: { name: sub.planName, ridesIncluded: sub.ridesIncluded }, route: { name: sub.routeName, id: sub.routeId } } : null,
@@ -64,7 +65,9 @@ export const dashboardService = {
         and t.status = 'completed'
         and date_trunc('month', t.depart_time) = date_trunc('month', now())
     `);
-    const earnings = (earningsRow.rows[0] as { earnings?: string } | undefined)?.earnings ?? '0.00';
+    // postgres-js returns rows as an array; the type is RowList<unknown[]> so we cast.
+    const earningsRows = earningsRow as unknown as Array<{ earnings?: string }>;
+    const earnings = earningsRows[0]?.earnings ?? '0.00';
 
     // The contractor dashboard's "Start trip" button needs a default shuttle + route to
     // pre-fill the form. Previously the dashboard returned neither, and the page tried to
@@ -95,9 +98,11 @@ export const dashboardService = {
   async corporate(adminUserId: string) {
     const [corp] = await db.select().from(schema.corporates).where(eq(schema.corporates.adminUserId, adminUserId));
     if (!corp) return null;
-    const [{ count: memberCount }] = await db.select({ count: sql<number>`count(*)::int` }).from(schema.corporateMembers).where(eq(schema.corporateMembers.corporateId, corp.id));
-    const [{ count: pendingCount }] = await db.select({ count: sql<number>`count(*)::int` }).from(schema.corporateMembers)
+    const memberRows = await db.select({ count: sql<number>`count(*)::int` }).from(schema.corporateMembers).where(eq(schema.corporateMembers.corporateId, corp.id));
+    const memberCount = memberRows[0]?.count ?? 0;
+    const pendingRows = await db.select({ count: sql<number>`count(*)::int` }).from(schema.corporateMembers)
       .where(and(eq(schema.corporateMembers.corporateId, corp.id), eq(schema.corporateMembers.approvalStatus, 'pending')));
+    const pendingCount = pendingRows[0]?.count ?? 0;
     return { corporate: corp, memberCount, pendingApprovals: pendingCount };
   },
 };

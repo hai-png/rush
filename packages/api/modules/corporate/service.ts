@@ -14,14 +14,16 @@ export const corporateService = {
    */
   async signup(input: { corpName: string; corpCode: string; contactEmail: string; contactPhone: string; adminName: string; adminPassword: string; subsidyPercent: number; monthlySeatAllowance: number }) {
     return db.transaction(async (tx) => {
-      const [admin] = await tx.insert(schema.users).values({
+      const [adminRow] = await tx.insert(schema.users).values({
         phone: input.contactPhone, name: input.adminName, passwordHash: await hashPassword(input.adminPassword), role: 'corporate_admin', phoneVerified: false,
       }).returning();
-      const [corp] = await tx.insert(schema.corporates).values({
+      const admin = adminRow!;
+      const [corpRow] = await tx.insert(schema.corporates).values({
         code: input.corpCode, name: input.corpName, contactEmail: input.contactEmail, contactPhone: input.contactPhone,
         subsidyPercent: input.subsidyPercent, monthlySeatAllowance: input.monthlySeatAllowance, adminUserId: admin.id,
         isActive: false, // requires platform_admin review — see activate()
       }).returning();
+      const corp = corpRow!;
       return { corp, admin };
     });
   },
@@ -39,9 +41,19 @@ export const corporateService = {
     return corp;
   },
 
-  async updateOwn(adminUserId: string, input: Partial<{ name: string; contactEmail: string; contactPhone: string; subsidyPercent: number; monthlySeatAllowance: number }> & Record<string, unknown>) {
+  async updateOwn(adminUserId: string, input: { name?: string | undefined; contactEmail?: string | undefined; contactPhone?: string | undefined; subsidyPercent?: number | undefined; monthlySeatAllowance?: number | undefined }) {
     const corp = await corporateService.getOwn(adminUserId);
-    const [row] = await db.update(schema.corporates).set({ ...input, updatedAt: new Date() }).where(eq(schema.corporates.id, corp.id)).returning();
+    // Only attach keys that are present — Drizzle's update set rejects `undefined` under
+    // exactOptionalPropertyTypes.
+    const setClause: Record<string, unknown> = { updatedAt: new Date() };
+    if (input.name !== undefined) setClause.name = input.name;
+    if (input.contactEmail !== undefined) setClause.contactEmail = input.contactEmail;
+    if (input.contactPhone !== undefined) setClause.contactPhone = input.contactPhone;
+    // NOTE: subsidyPercent and monthlySeatAllowance are deliberately NOT set here even
+    // though the input type allows them — the route's zod schema (UpdateCorporateInput
+    // with .strict()) already rejects these fields, so they can never reach this function.
+    // The input type lists them only to satisfy the Partial<> shape used elsewhere.
+    const [row] = await db.update(schema.corporates).set(setClause as any).where(eq(schema.corporates.id, corp.id)).returning();
     return row;
   },
 
@@ -54,7 +66,12 @@ export const corporateService = {
     const corp = await corporateService.getOwn(adminUserId);
     const [member] = await db.select().from(schema.corporateMembers).where(eq(schema.corporateMembers.id, memberId));
     if (!member || member.corporateId !== corp.id) throw new NotFoundError('Member not found');
-    const [row] = await db.update(schema.corporateMembers).set({ ...input, updatedAt: new Date() }).where(eq(schema.corporateMembers.id, memberId)).returning();
+    // Only attach keys that are present — Drizzle's update set rejects `undefined` under
+    // exactOptionalPropertyTypes.
+    const setClause: Record<string, unknown> = { updatedAt: new Date() };
+    if (input.approvalStatus !== undefined) setClause.approvalStatus = input.approvalStatus;
+    if (input.isActive !== undefined) setClause.isActive = input.isActive;
+    const [row] = await db.update(schema.corporateMembers).set(setClause as any).where(eq(schema.corporateMembers.id, memberId)).returning();
     if (input.approvalStatus === 'approved') {
       await db.insert(schema.outboxEvents).values({ channel: 'notification', payload: { type: 'corporate_member_added', userId: member.userId } });
     }

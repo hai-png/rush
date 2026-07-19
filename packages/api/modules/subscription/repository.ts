@@ -1,5 +1,5 @@
 import { and, eq, lt, sql } from 'drizzle-orm';
-import { db, schema } from '@addis/db';
+import { db, schema, type DbOrTx } from '@addis/db';
 
 export const subscriptionRepo = {
   async findById(id: string) {
@@ -19,13 +19,13 @@ export const subscriptionRepo = {
       .where(and(eq(schema.subscriptions.riderId, riderId), eq(schema.subscriptions.planId, trialPlanId)));
     return rows.length > 0;
   },
-  async expireDue(tx = db) {
+  async expireDue(tx: DbOrTx = db) {
     return tx.update(schema.subscriptions)
       .set({ status: 'expired', updatedAt: new Date() })
       .where(and(eq(schema.subscriptions.status, 'active'), lt(schema.subscriptions.endDate, sql`now()`)))
       .returning({ id: schema.subscriptions.id, riderId: schema.subscriptions.riderId });
   },
-  async cancelStalePending(tx = db, olderThanHours = 2) {
+  async cancelStalePending(tx: DbOrTx = db, olderThanHours = 2) {
     return tx.update(schema.subscriptions)
       .set({ status: 'cancelled', cancelledAt: new Date(), updatedAt: new Date() })
       .where(and(
@@ -35,12 +35,12 @@ export const subscriptionRepo = {
       .returning({ id: schema.subscriptions.id });
   },
   /** CAS decrement used by refund settlement — never goes below 0. */
-  async decrementRidesUsed(tx = db, subscriptionId: string) {
+  async decrementRidesUsed(tx: DbOrTx = db, subscriptionId: string) {
     await tx.update(schema.subscriptions)
       .set({ ridesUsed: sql`greatest(${schema.subscriptions.ridesUsed} - 1, 0)`, updatedAt: new Date() })
       .where(eq(schema.subscriptions.id, subscriptionId));
   },
-  async incrementRidesUsed(tx = db, subscriptionId: string) {
+  async incrementRidesUsed(tx: DbOrTx = db, subscriptionId: string) {
     await tx.update(schema.subscriptions)
       .set({ ridesUsed: sql`${schema.subscriptions.ridesUsed} + 1`, updatedAt: new Date() })
       .where(eq(schema.subscriptions.id, subscriptionId));

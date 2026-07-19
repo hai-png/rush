@@ -10,7 +10,10 @@ export default function NotificationsPage() {
   const qc = useQueryClient();
   const { data, isLoading } = useQuery({ queryKey: ['notifications'], queryFn: async () => (await client.GET('/api/v1/notifications')).data });
   const markRead = useMutation({
-    mutationFn: (id: string) => client.PATCH('/api/v1/notifications/{id}', { params: { path: { id } }, body: { readAt: new Date().toISOString() } }),
+    // The API's PATCH /notifications/:id marks the notification as read (sets readAt
+    // server-side) — no body is needed. The previous call sent { readAt: ... } which
+    // the API ignored.
+    mutationFn: (id: string) => client.PATCH('/api/v1/notifications/{id}', { params: { path: { id } } }),
     onSuccess: () => qc.invalidateQueries({ queryKey: ['notifications'] }),
   });
 

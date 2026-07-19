@@ -1,4 +1,5 @@
 import type { Logger } from 'pino';
+import type { Context } from 'hono';
 
 /**
  * Session shape populated by authMiddleware when a valid bearer/cookie token is present.
@@ -34,4 +35,31 @@ export interface Variables {
   requestId: string;
   logger: Logger;
   session: Session | undefined;
+}
+
+/**
+ * Type-safe session accessor. Routes protected by `requireAuth` / `requireRole(...)`
+ * are guaranteed to have a session, but TypeScript still sees `c.get('session')` as
+ * `Session | undefined` and flags every `.userId` / `.role` access with TS2532.
+ *
+ * Calling `getSession(c)` instead of `c.get('session')` narrows the type to `Session`
+ * (throwing a runtime error if the session is somehow missing — which would be a bug
+ * in the middleware ordering, not a user error). This eliminates ~120 TS2532 errors
+ * across every protected route handler.
+ */
+export function getSession(c: Context<{ Variables: Variables }>): Session {
+  const session = c.get('session');
+  if (!session) {
+    throw new Error('getSession() called on a route without requireAuth/requireRole — check middleware ordering');
+  }
+  return session;
+}
+
+/**
+ * Type-safe optional session accessor. For routes that conditionally use the session
+ * (e.g. the auth middleware itself, or public routes that personalize if logged in),
+ * returns `Session | undefined` without throwing.
+ */
+export function getOptionalSession(c: Context<{ Variables: Variables }>): Session | undefined {
+  return c.get('session');
 }

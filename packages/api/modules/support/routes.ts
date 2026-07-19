@@ -1,3 +1,4 @@
+import { getSession } from '../../src/context';
 import { TypedHono } from '../../src/typed-hono';
 import { z } from 'zod';
 import { eq } from 'drizzle-orm';
@@ -15,21 +16,21 @@ supportRoutes.use('/tickets/*', requireAuth);
 supportRoutes.use('/tickets', requireAuth);
 
 supportRoutes.get('/tickets', async (c) => {
-  const session = c.get('session');
+  const session = getSession(c);
   const isStaff = session.role === 'platform_admin';
   return c.json({ data: await supportService.listForUser(session.userId, isStaff) });
 });
 supportRoutes.post('/tickets', async (c) => {
-  const session = c.get('session');
+  const session = getSession(c);
   const body = CreateTicket.parse(await c.req.json());
   return c.json({ data: await supportService.createTicket(session.userId, body) }, 201);
 });
 supportRoutes.get('/tickets/:id', async (c) => {
-  const session = c.get('session');
+  const session = getSession(c);
   return c.json({ data: await supportService.getTicket(session.userId, session.role === 'platform_admin', c.req.param('id')) });
 });
 supportRoutes.get('/tickets/:id/messages', async (c) => {
-  const session = c.get('session');
+  const session = getSession(c);
   // Reuse getTicket() so non-staff callers can only read messages for their OWN ticket —
   // otherwise this would be an IDOR into every other user's support conversation.
   await supportService.getTicket(session.userId, session.role === 'platform_admin', c.req.param('id'));
@@ -39,7 +40,7 @@ supportRoutes.get('/tickets/:id/messages', async (c) => {
   return c.json({ data: rows });
 });
 supportRoutes.post('/tickets/:id/messages', async (c) => {
-  const session = c.get('session');
+  const session = getSession(c);
   const body = Reply.parse(await c.req.json());
   await supportService.reply(session.userId, session.role === 'platform_admin', c.req.param('id'), body.body);
   return c.body(null, 201);
@@ -55,7 +56,7 @@ supportRoutes.post('/tickets/:id/messages', async (c) => {
  * dead from the API's perspective.
  */
 supportRoutes.patch('/tickets/:id', async (c) => {
-  const session = c.get('session');
+  const session = getSession(c);
   const { event } = TicketEventInput.parse(await c.req.json());
   if (event === 'staff.resolved' && session.role !== 'platform_admin') {
     return c.json({ error: { code: 'FORBIDDEN', message: 'Only staff may resolve tickets', requestId: c.get('requestId') } }, 403);

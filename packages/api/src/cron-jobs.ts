@@ -20,8 +20,10 @@ export async function withLock<T>(name: string, fn: () => Promise<T>): Promise<
   | { skipped: true; reason: 'lock-held' }
 > {
   return db.transaction(async (tx) => {
-    const { rows } = await tx.execute(sql`select pg_try_advisory_xact_lock(hashtext(${name})) as locked`);
-    if (!(rows as Array<{ locked?: boolean }>)[0]?.locked) {
+    const lockResult = await tx.execute(sql`select pg_try_advisory_xact_lock(hashtext(${name})) as locked`);
+    // postgres-js returns an array-like with rows; cast to extract the locked boolean.
+    const rows = lockResult as unknown as Array<{ locked?: boolean }>;
+    if (!rows[0]?.locked) {
       return { skipped: true, reason: 'lock-held' as const };
     }
     const result = await fn();
@@ -112,7 +114,7 @@ export const CRON_JOBS: ReadonlyArray<{
     route: 'cleanup-stale-payments',
     intervalMs: 60 * 60_000, // 1 hour
     run: async () => {
-      const { and, lt } = await import('drizzle-orm');
+      const { and, lt, eq } = await import('drizzle-orm');
       return db.update(schema.payments).set({ status: 'failed', updatedAt: new Date() })
         .where(and(eq(schema.payments.status, 'pending'), lt(schema.payments.createdAt, sql`now() - interval '24 hours'`)))
         .returning({ id: schema.payments.id });

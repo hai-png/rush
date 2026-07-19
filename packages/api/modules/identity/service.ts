@@ -14,10 +14,12 @@ export const identityService = {
     if (existing) throw new ConflictError('Phone already registered');
     if (await isPasswordBreached(input.password)) throw new BadRequestError('This password has appeared in a known data breach — please choose a different one');
     return db.transaction(async (tx) => {
-      const [user] = await tx.insert(schema.users).values({
+      const [userRow] = await tx.insert(schema.users).values({
         phone: input.phone, name: input.name, passwordHash: await hashPassword(input.password), role: 'rider',
       }).returning();
-      const [profile] = await tx.insert(schema.riderProfiles).values({ userId: user.id, homeArea: input.homeArea, workArea: input.workArea }).returning();
+      const user = userRow!;
+      const [profileRow] = await tx.insert(schema.riderProfiles).values({ userId: user.id, homeArea: input.homeArea, workArea: input.workArea }).returning();
+      const profile = profileRow!;
       await tx.insert(schema.outboxEvents).values({ channel: 'sms', payload: { phone: input.phone, purpose: 'signup_verification' } });
       return { user, profile };
     });
@@ -28,12 +30,14 @@ export const identityService = {
     if (existing) throw new ConflictError('Phone already registered');
     if (await isPasswordBreached(input.password)) throw new BadRequestError('This password has appeared in a known data breach — please choose a different one');
     return db.transaction(async (tx) => {
-      const [user] = await tx.insert(schema.users).values({
+      const [userRow] = await tx.insert(schema.users).values({
         phone: input.phone, name: input.name, passwordHash: await hashPassword(input.password), role: 'contractor',
       }).returning();
-      const [profile] = await tx.insert(schema.contractorProfiles).values({
+      const user = userRow!;
+      const [profileRow] = await tx.insert(schema.contractorProfiles).values({
         userId: user.id, licenseNumber: input.licenseNumber, experienceYears: input.experienceYears, verificationStatus: 'unverified',
       }).returning();
+      const profile = profileRow!;
       return { user, profile };
     });
   },
@@ -55,7 +59,15 @@ export const identityService = {
 
     const jti = createId();
     const expiresAt = new Date(Date.now() + 30 * 24 * 3600_000);
-    await db.insert(schema.sessions).values({ userId: user.id, jti, userAgent, ipAddress: ip, expiresAt });
+    // userAgent and ip are `string | undefined` from the route handler; the sessions
+    // table's columns are `text | null`. Convert undefined → null so Drizzle's insert
+    // type-checks under exactOptionalPropertyTypes.
+    await db.insert(schema.sessions).values({
+      userId: user.id, jti,
+      userAgent: userAgent ?? null,
+      ipAddress: ip ?? null,
+      expiresAt,
+    });
 
     const token = await new SignJWT({ id: user.id, role: user.role, phone: user.phone, tokenVersion: user.tokenVersion, jti })
       .setProtectedHeader({ alg: 'HS256' }).setIssuedAt().setExpirationTime(ACCESS_TTL).sign(JWT_SECRET());

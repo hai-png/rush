@@ -1,3 +1,4 @@
+import { getSession } from '../../src/context';
 import { TypedHono } from '../../src/typed-hono';
 import { z } from 'zod';
 import { requireRole } from '../../src/middleware/auth';
@@ -21,20 +22,20 @@ adminRoutes.get('/users', async (c) => c.json({ data: await adminService.listUse
 adminRoutes.patch('/users/:id', async (c) => {
   const body = z.object({ action: z.enum(['suspend', 'change_role']), role: z.enum(ALL_ROLES as [string, ...string[]]).optional() }).parse(await c.req.json());
   const ip = c.req.header('x-forwarded-for');
-  if (body.action === 'suspend') return c.json({ data: await adminService.suspendUser(c.get('session').userId, c.req.param('id'), ip) });
+  if (body.action === 'suspend') return c.json({ data: await adminService.suspendUser(getSession(c).userId, c.req.param('id'), ip) });
   if (!body.role) return c.json({ error: { code: 'BAD_REQUEST', message: 'role is required for change_role', requestId: c.get('requestId') } }, 400);
-  return c.json({ data: await adminService.changeRole(c.get('session').userId, c.req.param('id'), body.role, ip) });
+  return c.json({ data: await adminService.changeRole(getSession(c).userId, c.req.param('id'), body.role, ip) });
 });
-adminRoutes.post('/users/:id/impersonate', async (c) => c.json({ data: await adminService.impersonate(c.get('session').userId, c.req.param('id'), c.req.header('x-forwarded-for')) }));
+adminRoutes.post('/users/:id/impersonate', async (c) => c.json({ data: await adminService.impersonate(getSession(c).userId, c.req.param('id'), c.req.header('x-forwarded-for')) }));
 
 adminRoutes.get('/contractors/pending', async (c) => {
   const rows = await db.select().from(schema.contractorProfiles).where(eq(schema.contractorProfiles.verificationStatus, 'pending'));
   return c.json({ data: rows });
 });
-adminRoutes.post('/contractors/:id/verify', async (c) => c.json({ data: await documentService.verify(c.get('session').userId, c.req.param('id')) }));
+adminRoutes.post('/contractors/:id/verify', async (c) => c.json({ data: await documentService.verify(getSession(c).userId, c.req.param('id')) }));
 adminRoutes.post('/contractors/:id/reject', async (c) => {
   const { reason } = z.object({ reason: z.string().min(3) }).parse(await c.req.json());
-  return c.json({ data: await documentService.reject(c.get('session').userId, c.req.param('id'), reason) });
+  return c.json({ data: await documentService.reject(getSession(c).userId, c.req.param('id'), reason) });
 });
 
 adminRoutes.get('/corporates/pending', async (c) => {
@@ -98,7 +99,7 @@ adminRoutes.post('/payments/:id/verify', async (c) => {
     payload: {
       action: 'admin.payment_manually_verified',
       entityId: payment.id,
-      actorId: c.get('session').userId,
+      actorId: getSession(c).userId,
     },
   });
   const [updated] = await db.select().from(schema.payments).where(eq(schema.payments.id, payment.id)).limit(1);
@@ -172,7 +173,10 @@ adminRoutes.get('/export/:resource', async (c) => {
 
 function toCsv(rows: Record<string, unknown>[]): string {
   if (!rows.length) return '';
-  const headers = Object.keys(rows[0]);
+  // rows[0] is possibly undefined under noUncheckedIndexedAccess, but !rows.length
+  // being false guarantees rows[0] exists.
+  const first = rows[0]!;
+  const headers = Object.keys(first);
   // Guard against CSV/formula injection: a value starting with =, +, -, @, tab, or CR
   // will be interpreted as a formula by Excel/Sheets when the export is opened. Prefixing
   // with a single quote neutralizes it while keeping the value legible.
