@@ -33,7 +33,31 @@ export default function AdminContractorsPage() {
       key: 'id', header: 'Actions',
       render: (c) => (
         <div className="flex gap-2">
-          <Button size="sm" loading={verify.isPending} onClick={() => verify.mutate(c.id)}>Verify</Button>
+          {/* Link to view documents before verifying — the previous
+              implementation had Verify/Reject buttons with no way to view
+              the uploaded documents. Admins were verifying blind. */}
+          <a
+            href={`/admin/contractors/${c.id}`}
+            className="text-sm text-accent underline"
+            target="_blank"
+            rel="noopener"
+          >
+            View docs
+          </a>
+          <Button
+            size="sm"
+            loading={verify.isPending && verify.variables === c.id}
+            onClick={() => {
+              // Confirm before verifying — manual verification is a fraud-
+              // prone action. Adding a confirmation step gives the admin a
+              // chance to double-check the documents.
+              if (window.confirm(`Verify contractor ${c.licenseNumber}? Make sure you've reviewed their documents.`)) {
+                verify.mutate(c.id);
+              }
+            }}
+          >
+            Verify
+          </Button>
           <Button size="sm" variant="outline" onClick={() => setRejectingId(c.id)}>Reject</Button>
         </div>
       ),

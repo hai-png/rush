@@ -110,20 +110,44 @@ export class TelebirrProvider implements PaymentProvider {
 
   async parseWebhook(req: Request): Promise<WebhookEvent> {
     const raw = await req.text();
-    const payload = JSON.parse(raw);
-    if (typeof payload.sign !== 'string' || !payload.sign) throw new Error('Missing telebirr webhook signature');
-    const verifier = createVerify('RSA-SHA256');
-    verifier.update(this.canonicalize(payload));
-    const valid = verifier.verify(this.env.TELEBIRR_PUBLIC_KEY!, payload.sign, 'base64');
-    if (!valid) throw new Error('Invalid telebirr webhook signature');
+    let payload: any;
+    try { payload = JSON.parse(raw); }
+    catch { throw new Error('Invalid telebirr webhook JSON'); }
+
+    // Replay protection: refuse notifications whose timestamp is older than
+    // 5 minutes. Without this, an attacker who captures a single valid
+    // signed payload can replay it indefinitely (settle the same payment
+    // multiple times, re-trigger refunds, etc.). The previous parseWebhook
+    // verified the signature but had no freshness check.
+    const timestampMs = typeof payload.timestamp === 'number'
+      ? payload.timestamp
+      : typeof payload.timestamp === 'string' ? Number(payload.timestamp) : undefined;
+    if (timestampMs !== undefined && Date.now() - timestampMs > 5 * 60_000) {
+      throw new Error('Telebirr webhook timestamp too old (replay suspected)');
+    }
+
+    let signatureValid = false;
+    if (typeof payload.sign === 'string' && payload.sign) {
+      const verifier = createVerify('RSA-SHA256');
+      verifier.update(this.canonicalize(payload));
+      try {
+        signatureValid = verifier.verify(this.env.TELEBIRR_PUBLIC_KEY!, payload.sign, 'base64');
+      } catch {
+        signatureValid = false;
+      }
+    }
+    // Don't throw on invalid signature — return signatureValid=false so the
+    // route handler can return a clean 401 without the provider throwing
+    // a 500 (which would let an attacker scan for valid signatures via
+    // timing differences). The route asserts `event.signatureValid === true`.
 
     if (payload.refund_request_no) {
       return payload.trade_status === 'Success'
-        ? { type: 'refund.succeeded', refundRequestNo: payload.refund_request_no, raw: payload }
-        : { type: 'refund.failed', refundRequestNo: payload.refund_request_no, raw: payload };
+        ? { type: 'refund.succeeded', refundRequestNo: payload.refund_request_no, raw: payload, signatureValid, timestampMs }
+        : { type: 'refund.failed', refundRequestNo: payload.refund_request_no, raw: payload, signatureValid, timestampMs };
     }
     return payload.trade_status === 'Success'
-      ? { type: 'payment.settled', merchOrderId: payload.merch_order_id, amount: Money.fromETBString(payload.total_amount), raw: payload }
-      : { type: 'payment.failed', merchOrderId: payload.merch_order_id, raw: payload };
+      ? { type: 'payment.settled', merchOrderId: payload.merch_order_id, amount: Money.fromETBString(payload.total_amount), raw: payload, signatureValid, timestampMs }
+      : { type: 'payment.failed', merchOrderId: payload.merch_order_id, raw: payload, signatureValid, timestampMs };
   }
 }

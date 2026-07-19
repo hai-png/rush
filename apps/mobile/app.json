@@ -6,10 +6,65 @@
     "version": "1.0.0",
     "orientation": "portrait",
     "userInterfaceStyle": "automatic",
-    "plugins": ["expo-router", "expo-secure-store", "expo-notifications", "expo-background-fetch", "expo-localization"],
-    "ios": { "supportsTablet": true, "bundleIdentifier": "et.addisride.app" },
-    "android": { "package": "et.addisride.app", "adaptiveIcon": { "foregroundImage": "./assets/adaptive-icon.png" } },
-    "extra": { "eas": { "projectId": "addis-ride" } },
-    "updates": { "url": "https://u.expo.dev/addis-ride" }
+    "icon": "./assets/icon.png",
+    "splash": { "image": "./assets/splash.png", "resizeMode": "contain", "backgroundColor": "#0a0a0a" },
+    "plugins": [
+      "expo-router",
+      "expo-secure-store",
+      "expo-notifications",
+      "expo-background-fetch",
+      "expo-localization",
+      [
+        "expo-location",
+        {
+          "locationAlwaysAndWhenInUsePermission": "Addis Ride uses your location to track the shuttle you're on and to navigate to your stop.",
+          "locationWhenInUsePermission": "Addis Ride uses your location to track the shuttle you're on."
+        }
+      ],
+      [
+        "expo-local-authentication",
+        { "faceIDPermission": "Addis Ride uses Face ID to unlock the app." }
+      ]
+    ],
+    "ios": {
+      "supportsTablet": true,
+      "bundleIdentifier": "et.addisride.app",
+      "infoPlist": {
+        "NSLocationAlwaysAndWhenInUseUsageDescription": "Addis Ride uses your location to track the shuttle you're on and to navigate to your stop.",
+        "NSLocationWhenInUseUsageDescription": "Addis Ride uses your location to track the shuttle you're on.",
+        "NSLocationAlwaysUsageDescription": "Addis Ride uses your location in the background to report shuttle positions for riders waiting at stops.",
+        "NSFaceIDUsageDescription": "Addis Ride uses Face ID to unlock the app for your security.",
+        "UIBackgroundModes": ["location", "remote-notification", "fetch"]
+      }
+    },
+    "android": {
+      "package": "et.addisride.app",
+      "adaptiveIcon": { "foregroundImage": "./assets/adaptive-icon.png", "backgroundColor": "#0a0a0a" },
+      "permissions": [
+        "ACCESS_FINE_LOCATION",
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_BACKGROUND_LOCATION",
+        "FOREGROUND_SERVICE",
+        "FOREGROUND_SERVICE_LOCATION",
+        "POST_NOTIFICATIONS",
+        "USE_BIOMETRIC",
+        "USE_FINGERPRINT",
+        "VIBRATE",
+        "WAKE_LOCK",
+        "RECEIVE_BOOT_COMPLETED"
+      ]
+    },
+    "extra": {
+      "eas": {
+        "projectId": "REPLACE_WITH_REAL_EAS_PROJECT_UUID"
+      }
+    },
+    "updates": {
+      "url": "https://u.expo.dev/REPLACE_WITH_REAL_EAS_PROJECT_UUID"
+    },
+    "newArchEnabled": true,
+    "runtimeVersion": {
+      "policy": "appVersion"
+    }
   }
 }

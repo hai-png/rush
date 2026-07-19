@@ -26,6 +26,14 @@ documentRoutes.post('/documents', requireRole('contractor'), async (c) => {
   const form = await c.req.formData();
   const file = form.get('file') as File;
   if (!file) throw new BadRequestError('Missing file');
+  // Check size BEFORE allocating the buffer — the previous code did
+  // `Buffer.from(await file.arrayBuffer())` first, which would allocate a
+  // 1GB buffer for a 1GB upload, then reject. Concurrent uploads could OOM
+  // the process.
+  const MAX_SIZE_BYTES = 10 * 1024 * 1024;
+  if (file.size > MAX_SIZE_BYTES) {
+    throw new BadRequestError('File exceeds 10MB limit');
+  }
   const type = DocType.parse(form.get('type')); // never trust the client-declared doc type as-is
   const buffer = Buffer.from(await file.arrayBuffer());
   const doc = await documentService.upload(contractorId, { type, filename: file.name, buffer });

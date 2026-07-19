@@ -31,9 +31,12 @@ identityRoutes.post('/token', async (c) => {
 identityRoutes.post('/refresh', async (c) => {
   const bearer = c.req.header('Authorization')?.replace(/^Bearer\s+/i, '');
   if (!bearer) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Missing token', requestId: c.get('requestId') } }, 401);
-  const { user } = await identityService.verifySession(bearer);
-  // Refresh reissues without re-checking password: mint a new short-lived token for the same session.
-  const fresh = await identityService.reissueToken(user.id);
+  const { user, jti } = await identityService.verifySession(bearer);
+  // Refresh reissues without re-checking password: mint a new short-lived token
+  // for a NEW session, deleting the old session row (rotation). The previous
+  // implementation left the old session row in place, so a stolen token
+  // remained valid for up to 30 minutes even after a legitimate refresh.
+  const fresh = await identityService.reissueToken(user.id, jti);
   return c.json({ data: { accessToken: fresh, expiresIn: 1800 } });
 });
 
@@ -96,8 +99,8 @@ identityRoutes.post('/2fa/verify', requireRole('platform_admin', 'corporate_admi
   return c.json({ data: await identityService.verify2fa(c.get('session').userId, code) });
 });
 identityRoutes.post('/2fa/disable', requireRole('platform_admin', 'corporate_admin'), async (c) => {
-  const { password } = z.object({ password: z.string() }).parse(await c.req.json());
-  await identityService.disable2fa(c.get('session').userId, password);
+  const { password, code } = z.object({ password: z.string(), code: z.string().length(6).optional() }).parse(await c.req.json());
+  await identityService.disable2fa(c.get('session').userId, password, code);
   return c.body(null, 204);
 });
 

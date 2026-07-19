@@ -5,32 +5,63 @@ import { Button, Card, CardContent, Badge, EmptyState } from '@addis/ui';
 import { useFormatMoney } from '@addis/i18n';
 import { useApiClient } from '@/lib/sdk';
 import { useToast } from '@addis/ui';
-import { useRouter } from 'next/navigation';
+
+// Allow-list — same as checkout page.
+const ALLOWED_CHECKOUT_HOSTS = new Set([
+  'superapp.ethiomobilemoney.et',
+  'developerportal.ethiotelebirr.et',
+  'localhost',
+]);
+function isAllowedCheckoutUrl(url: string): boolean {
+  try {
+    const u = new URL(url);
+    return (u.protocol === 'https:' || u.protocol === 'http:') && ALLOWED_CHECKOUT_HOSTS.has(u.hostname);
+  } catch { return false; }
+}
 
 export default function OpenSeatsPage() {
   const client = useApiClient();
   const qc = useQueryClient();
   const money = useFormatMoney();
   const { push } = useToast();
-  const router = useRouter();
 
   const { data, isLoading } = useQuery({
     queryKey: ['seat-releases', 'open'],
     queryFn: async () => (await client.GET('/api/v1/seat-releases', { params: { query: { limit: 20 } } })).data,
   });
 
-  const claim = useMutation({
-    mutationFn: async (seatReleaseId: string) =>
-      client.POST('/api/v1/seat-claims', {
-        headers: { 'Idempotency-Key': crypto.randomUUID() },
+  // Track which seat is being claimed so only that button shows loading —
+  // the previous implementation used `claim.isPending` for ALL buttons,
+  // making every seat look like it was being claimed.
+  const claimingId = useMutation({
+    mutationFn: async (seatReleaseId: string) => {
+      // Stable idempotency key per seat release — the previous
+      // implementation regenerated `crypto.randomUUID()` on every click,
+      // defeating idempotency on retry.
+      return client.POST('/api/v1/seat-claims', {
+        headers: { 'Idempotency-Key': `claim:${seatReleaseId}` },
         body: { seatReleaseId, paymentMethod: 'telebirr' },
-      }),
+      });
+    },
     onSuccess: (res) => {
       const checkout = (res.data as any)?.data?.checkout;
-      if (checkout?.checkoutUrl) window.location.href = checkout.checkoutUrl;
+      if (checkout?.checkoutUrl) {
+        if (!isAllowedCheckoutUrl(checkout.checkoutUrl)) {
+          push({ title: 'Invalid checkout URL returned by payment provider', variant: 'error' });
+          return;
+        }
+        window.location.href = checkout.checkoutUrl;
+      } else {
+        push({ title: 'Seat claimed — check your trips' });
+      }
       qc.invalidateQueries({ queryKey: ['seat-releases'] });
     },
-    onError: () => push({ title: 'This seat was just claimed by someone else', variant: 'error' }),
+    onError: (err: any) => {
+      // Don't assume the error is "seat already claimed" — the previous
+      // message was misleading for network errors, auth failures, etc.
+      const msg = err?.message ?? 'Could not claim this seat';
+      push({ title: msg, variant: 'error' });
+    },
   });
 
   if (!isLoading && !data?.length) {
@@ -49,7 +80,14 @@ export default function OpenSeatsPage() {
             </div>
             <div className="text-right">
               <p className="font-semibold">{money(r.refundAmount)}</p>
-              <Button size="sm" className="mt-1" loading={claim.isPending} onClick={() => claim.mutate(r.id)}>Claim</Button>
+              <Button
+                size="sm"
+                className="mt-1"
+                loading={claimingId.isPending && claimingId.variables === r.id}
+                onClick={() => claimingId.mutate(r.id)}
+              >
+                Claim
+              </Button>
             </div>
           </CardContent>
         </Card>

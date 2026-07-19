@@ -31,9 +31,17 @@ supportRoutes.post('/tickets/:id/messages', async (c) => {
   await supportService.reply(session.userId, session.role === 'platform_admin', c.req.param('id'), body.body);
   return c.body(null, 201);
 });
-supportRoutes.patch('/tickets/:id', requireRole('platform_admin'), async (c) => {
+supportRoutes.patch('/tickets/:id', async (c) => {
+  // Users can trigger `user.reopened`; only platform_admin can trigger
+  // `staff.resolved`. The previous implementation required platform_admin
+  // for BOTH events, so users couldn't reopen their own resolved tickets —
+  // contradicting the state machine's `user.reopened` event name.
+  const session = c.get('session');
   const { event } = z.object({ event: z.enum(['staff.resolved', 'user.reopened']) }).parse(await c.req.json());
-  return c.json({ data: await supportService.setStatus(c.get('session').userId, c.req.param('id'), event) });
+  if (event === 'staff.resolved' && session.role !== 'platform_admin') {
+    return c.json({ error: { code: 'FORBIDDEN', message: 'Only staff can resolve tickets', requestId: c.get('requestId') } }, 403);
+  }
+  return c.json({ data: await supportService.setStatus(session.userId, c.req.param('id'), event) });
 });
 
 supportRoutes.get('/faq', async (c) => c.json({ data: await faqService.list(c.req.query('category')) }));

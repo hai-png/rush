@@ -1,7 +1,60 @@
-FROM oven/bun:1.1-slim AS base
+# Multi-stage build for the web app.
+#
+# The previous Dockerfile was a single stage that ran as root, copied the
+# entire repo (including .git, node_modules, docs, scripts) into the image,
+# and ran `bun install` after `COPY . .` (invalidating the install layer
+# on every source change). Now:
+#   - Multi-stage: deps stage caches bun install, builder stage produces
+#     the .next output, runner stage is minimal.
+#   - Non-root user: the web process runs as uid 10001 ('nextjs').
+#   - Healthcheck wired to /api/v1/health.
+#   - Only the production output is copied — no source, no dev deps.
+
+FROM oven/bun:1.1-slim AS deps
 WORKDIR /app
-COPY . .
+# Copy lockfile + package manifests first so install is cached.
+COPY bun.lockb package.json turbo.json tsconfig.base.json ./
+COPY apps/web/package.json apps/web/
+COPY packages/api/package.json packages/api/
+COPY packages/db/package.json packages/db/
+COPY packages/shared/package.json packages/shared/
+COPY packages/sdk/package.json packages/sdk/
+COPY packages/ui/package.json packages/ui/
+COPY packages/i18n/package.json packages/i18n/
+COPY services/payments/package.json services/payments/
+COPY services/sms/package.json services/sms/
 RUN bun install --frozen-lockfile
-RUN bun run --cwd apps/web build
+
+FROM oven/bun:1.1-slim AS builder
+WORKDIR /app
+COPY --from=deps /app/node_modules ./node_modules
+COPY . .
+ENV NODE_ENV=production
+RUN bun run --cwd packages/db generate
+RUN bun run --filter=web build
+
+FROM oven/bun:1.1-slim AS runner
+WORKDIR /app
+ENV NODE_ENV=production
+
+# Create a non-root user.
+RUN addgroup --system --gid 10001 nextjs \
+ && adduser --system --uid 10001 --gid 10001 nextjs
+
+# Copy only what's needed to run.
+COPY --from=builder --chown=nextjs:nextjs /app/apps/web/.next apps/web/.next
+COPY --from=builder --chown=nextjs:nextjs /app/apps/web/public apps/web/public
+COPY --from=builder --chown=nextjs:nextjs /app/apps/web/package.json apps/web/package.json
+COPY --from=builder --chown=nextjs:nextjs /app/node_modules node_modules
+COPY --from=builder --chown=nextjs:nextjs /app/package.json package.json
+COPY --from=builder --chown=nextjs:nextjs /app/packages packages
+COPY --from=builder --chown=nextjs:nextjs /app/services services
+COPY --from=builder --chown=nextjs:nextjs /app/tsconfig.base.json tsconfig.base.json
+
+USER nextjs
 EXPOSE 3000
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
+  CMD wget -q --spider http://localhost:3000/api/v1/health || exit 1
+
 CMD ["bun", "run", "--cwd", "apps/web", "start"]

@@ -1,8 +1,45 @@
 addisride.et {
-  reverse_proxy web:3000
+  encode gzip zstd
+
+  # Limit request body size — defends against DoS via huge uploads. The
+  # previous config had no limit (Caddy default is unlimited). 20MB
+  # accommodates contractor document uploads (10MB cap per file) with
+  # headroom.
+  request_body {
+    max_size 20MB
+  }
+
+  # Reasonable timeouts — a hung client shouldn't hold a connection forever.
+  timeouts {
+    read_body 30s
+    read_header 10s
+    write 60s
+    idle 120s
+  }
+
+  reverse_proxy web:3000 {
+    # Pass the real client IP to the app. Caddy appends to X-Forwarded-For
+    # (standard behavior); the app's rate-limit middleware now reads the
+    # RIGHTMOST entry (set by Caddy, our trusted proxy) rather than the
+    # leftmost (attacker-controlled).
+    header_up X-Real-IP {remote_host}
+    header_up X-Forwarded-For {remote_host}
+  }
+
   header {
-    Strict-Transport-Security "max-age=31536000; includeSubDomains"
+    Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
     X-Content-Type-Options "nosniff"
     X-Frame-Options "DENY"
+    Referrer-Policy "strict-origin-when-cross-origin"
+    Permissions-Policy "camera=(), microphone=(), geolocation=(self), payment=()"
   }
+
+  # www -> apex redirect
+  @www host www.addisride.et
+  redir @www https://addisride.et{uri} permanent
+}
+
+# Staging domain — same config, different cert (auto).
+staging.addisride.et {
+  import addisride.et
 }

@@ -83,6 +83,31 @@ export const documentService = {
       const [profile] = await tx.select().from(schema.contractorProfiles).where(eq(schema.contractorProfiles.id, contractorId));
       if (!profile) throw new NotFoundError('Contractor not found');
       if (profile.verificationStatus !== 'pending') throw new ConflictError('Only pending contractors can be verified');
+
+      // Safety checks the previous implementation skipped entirely:
+      //   1. All required document types must be present (registration,
+      //      insurance, inspection). A contractor with only one of the
+      //      three could be approved — driving without insurance.
+      //   2. No document may be pending a clamav scan. The scan is async
+      //      via outbox, so a freshly-uploaded doc could be approved
+      //      before the scan completed. The previous code allowed this,
+      //      letting an admin approve a contractor whose documents were
+      //      infected or unscanned.
+      const docs = await tx.select().from(schema.contractorDocuments)
+        .where(eq(schema.contractorDocuments.contractorId, contractorId));
+      const presentTypes = new Set(docs.map(d => d.type));
+      const missing = DOC_TYPES.filter(t => !presentTypes.has(t));
+      if (missing.length > 0) {
+        throw new ConflictError(`Cannot verify: missing document types: ${missing.join(', ')}`);
+      }
+      // scanStatus is the column tracking clamav result. Values are typically
+      // 'pending' | 'clean' | 'infected' | 'error'. Refuse if any doc is
+      // not explicitly 'clean'.
+      const uncleared = docs.filter(d => (d as any).scanStatus !== 'clean');
+      if (uncleared.length > 0) {
+        throw new ConflictError('Cannot verify: one or more documents are pending or failed malware scan');
+      }
+
       const t = contractorVerificationState.resolve('pending', 'admin.verify');
       await tx.update(schema.contractorProfiles).set({
         verificationStatus: t.to, verifiedById: adminId, verifiedAt: new Date(), updatedAt: new Date(),

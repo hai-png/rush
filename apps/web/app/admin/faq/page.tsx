@@ -46,7 +46,18 @@ export default function AdminFaqPage() {
         {(data ?? []).map((a: any) => (
           <Card key={a.id}><CardContent className="flex items-start justify-between">
             <div><p className="font-medium">{a.question}</p><p className="text-sm text-muted-foreground">{a.answer}</p></div>
-            <button onClick={() => remove.mutate(a.id)} aria-label="Delete"><Trash2 className="h-4 w-4 text-destructive" /></button>
+            <button
+              onClick={() => {
+                // Confirm before delete — the previous implementation
+                // deleted on a single click with no confirmation dialog.
+                if (window.confirm(`Delete FAQ article "${a.question}"?`)) {
+                  remove.mutate(a.id);
+                }
+              }}
+              aria-label="Delete"
+            >
+              <Trash2 className="h-4 w-4 text-destructive" />
+            </button>
           </CardContent></Card>
         ))}
       </div>

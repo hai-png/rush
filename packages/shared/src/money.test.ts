@@ -7,8 +7,12 @@ describe('Money', () => {
     expect(Money.fromDecimal(10.004).toString()).toBe('10.00');
   });
 
-  it('sub() never goes negative', () => {
-    const result = Money.fromDecimal(5).sub(Money.fromDecimal(10));
+  it('sub() throws on negative result (prevents silent over-refund)', () => {
+    expect(() => Money.fromDecimal(5).sub(Money.fromDecimal(10))).toThrow();
+  });
+
+  it('subOrZero() clamps to zero instead of throwing', () => {
+    const result = Money.fromDecimal(5).subOrZero(Money.fromDecimal(10));
     expect(result.toString()).toBe('0.00');
   });
 

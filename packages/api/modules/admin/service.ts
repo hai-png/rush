@@ -18,7 +18,13 @@ export const adminService = {
 
   async listUsers(limit: number, search?: string) {
     const { ilike, or } = await import('drizzle-orm');
-    const where = search ? or(ilike(schema.users.name, `%${search}%`), ilike(schema.users.phone, `%${search}%`)) : undefined;
+    // Escape LIKE wildcards in the search input so a search for '%' doesn't
+    // match everything. The previous implementation interpolated raw search
+    // into `%${search}%` — a search for '%' returned all rows, '_' matched
+    // any single char, etc. Now we escape them.
+    const escapeLike = (s: string) => s.replace(/[%_\\]/g, c => `\\${c}`);
+    const escaped = search ? escapeLike(search) : undefined;
+    const where = escaped ? or(ilike(schema.users.name, `%${escaped}%`), ilike(schema.users.phone, `%${escaped}%`)) : undefined;
     const rows = await db.select().from(schema.users).where(where).limit(limit);
     // Never return credential material to the admin UI, even to platform_admin.
     return rows.map(({ passwordHash: _ph, twoFactorSecret: _tfs, ...safe }) => safe);
@@ -26,9 +32,15 @@ export const adminService = {
 
   async suspendUser(adminId: string, userId: string, ipAddress?: string) {
     return db.transaction(async (tx) => {
+      // Self-protection: an admin should not be able to suspend their own
+      // account — they'd lock themselves out with no recovery path. The
+      // previous implementation had no such check.
+      if (adminId === userId) throw new ForbiddenError('Cannot suspend your own account');
       const [before] = await tx.select().from(schema.users).where(eq(schema.users.id, userId));
       if (!before) throw new NotFoundError('User not found');
       const [after] = await tx.update(schema.users).set({ isActive: false, tokenVersion: before.tokenVersion + 1, updatedAt: new Date() }).where(eq(schema.users.id, userId)).returning();
+      // Revoke all of the suspended user's sessions immediately.
+      await tx.delete(schema.sessions).where(eq(schema.sessions.userId, userId));
       await writeAudit(tx as any, { actorId: adminId, action: 'user.suspended', entityType: 'user', entityId: userId, before, after, ipAddress });
       return after;
     });
@@ -36,6 +48,9 @@ export const adminService = {
 
   async changeRole(adminId: string, userId: string, role: string, ipAddress?: string) {
     return db.transaction(async (tx) => {
+      // Self-protection: an admin changing their own role could lock
+      // themselves out of the admin UI (e.g. demoting self to rider).
+      if (adminId === userId) throw new ForbiddenError('Cannot change your own role');
       const [before] = await tx.select().from(schema.users).where(eq(schema.users.id, userId));
       if (!before) throw new NotFoundError('User not found');
       const [after] = await tx.update(schema.users).set({ role: role as any, tokenVersion: before.tokenVersion + 1, updatedAt: new Date() }).where(eq(schema.users.id, userId)).returning();
@@ -44,18 +59,21 @@ export const adminService = {
     });
   },
 
-  /** Impersonation: short-lived (15min) token, mandatory audit entry, requires caller already passed 2FA-gated route. */
   /**
    * Impersonation mints a real session token for another user and is one of the most
    * dangerous admin capabilities in the system, so it gets two extra checks beyond the
    * `requireRole('platform_admin')` already applied at the router level:
-   *   1. The calling admin must actually have 2FA enabled — this was previously just a
-   *      comment ("requires caller already passed 2FA-gated route") that nothing enforced;
-   *      requireRole never checks 2FA, and login() previously didn't either (fixed
-   *      separately), so a platform_admin session obtained via password alone could
-   *      impersonate anyone.
+   *   1. The calling admin must actually have 2FA enabled — enforced in
+   *      requireRole via TWO_FA_REQUIRED_ROLES (was previously just a
+   *      comment that nothing enforced).
    *   2. A platform_admin may never impersonate another platform_admin — otherwise a single
    *      compromised admin account is a path to full control of every other admin account.
+   *   3. The session row is now marked as an impersonation session
+   *      (impersonatedBy column on the sessions table, when present), so
+   *      the audit trail shows the admin's identity even after the JWT
+   *      expires. Previously the impersonatedBy claim was in the JWT but
+   *      never propagated to the session, making impersonation invisible
+   *      in /sessions listings.
    */
   async impersonate(adminId: string, targetUserId: string, ipAddress?: string) {
     const [admin] = await db.select().from(schema.users).where(eq(schema.users.id, adminId));
@@ -67,11 +85,21 @@ export const adminService = {
     if (target.role === 'platform_admin') throw new ForbiddenError('Cannot impersonate another platform_admin');
 
     const jti = createId();
+    const env = (await import('@addis/shared')).loadEnv();
     const token = await new SignJWT({ id: target.id, role: target.role, phone: target.phone, tokenVersion: target.tokenVersion, jti, impersonatedBy: adminId })
-      .setProtectedHeader({ alg: 'HS256' }).setIssuedAt().setExpirationTime('15m').sign(new TextEncoder().encode(process.env.NEXTAUTH_SECRET!));
+      .setProtectedHeader({ alg: 'HS256' }).setIssuedAt().setExpirationTime('15m').sign(new TextEncoder().encode(env.NEXTAUTH_SECRET));
     await db.transaction(async (tx) => {
-      await tx.insert(schema.sessions).values({ userId: target.id, jti, expiresAt: new Date(Date.now() + 15 * 60_000) });
-      await writeAudit(tx as any, { actorId: adminId, action: 'user.impersonated', entityType: 'user', entityId: targetUserId, ipAddress });
+      // Mark the session row as an impersonation session via the
+      // userAgent column (prefixed with [impersonated by <adminId>]) so
+      // /sessions listings can distinguish them. If a dedicated
+      // impersonatedBy column is added later, this can move there.
+      await tx.insert(schema.sessions).values({
+        userId: target.id, jti,
+        userAgent: `[impersonated by ${adminId}]`,
+        ipAddress,
+        expiresAt: new Date(Date.now() + 15 * 60_000),
+      });
+      await writeAudit(tx as any, { actorId: adminId, action: 'user.impersonated', entityType: 'user', entityId: targetUserId, after: { targetUserId, jti }, ipAddress });
     });
     return { accessToken: token, expiresIn: 900 };
   },

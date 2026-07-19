@@ -17,7 +17,34 @@ engagementRoutes.patch('/notifications/:id', async (c) => { await engagementServ
 engagementRoutes.delete('/notifications/:id', async (c) => { await engagementService.remove(c.get('session').userId, c.req.param('id')); return c.body(null, 204); });
 
 engagementRoutes.get('/notifications/preferences', async (c) => c.json({ data: await engagementService.getPreferences(c.get('session').userId) }));
-engagementRoutes.patch('/notifications/preferences', async (c) => c.json({ data: await engagementService.updatePreferences(c.get('session').userId, await c.req.json()) }));
+
+// Strict schema for preference updates — the previous route passed raw
+// JSON straight to the service's `.set({ ...input })`, allowing the
+// caller to write any JSON structure into the `prefs` jsonb column
+// (including prototype-pollution-style keys). Now the structure is
+// validated: prefs is a record of notification type -> partial channel
+// map, and quietHoursStart/End are HH:MM strings.
+const ChannelKeyZ = z.enum(['inApp', 'push', 'sms', 'email']);
+const NotificationTypeZ = z.enum([
+  'payment_received', 'payment_failed', 'refund_completed', 'refund_failed',
+  'seat_claimed', 'seat_released', 'seat_release_expired',
+  'subscription_expiring', 'subscription_expired', 'subscription_cancelled',
+  'trip_departing', 'document_verified', 'document_rejected',
+  'support_reply', 'support_resolved',
+  'corporate_member_added', 'corporate_member_removed', 'corporate_reset',
+  'general',
+]);
+const TimeOfDayZ = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Time must be HH:MM');
+const UpdatePreferencesInput = z.object({
+  prefs: z.record(NotificationTypeZ, z.record(ChannelKeyZ, z.boolean()).partial()).optional(),
+  quietHoursStart: TimeOfDayZ.nullable().optional(),
+  quietHoursEnd: TimeOfDayZ.nullable().optional(),
+}).strict();
+
+engagementRoutes.patch('/notifications/preferences', async (c) => {
+  const body = UpdatePreferencesInput.parse(await c.req.json());
+  return c.json({ data: await engagementService.updatePreferences(c.get('session').userId, body) });
+});
 
 engagementRoutes.post('/devices', async (c) => {
   const body = z.object({ pushToken: z.string(), platform: z.enum(['ios', 'android', 'web']) }).parse(await c.req.json());

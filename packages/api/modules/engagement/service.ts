@@ -25,23 +25,51 @@ export const engagementService = {
     return row;
   },
 
-  /** Fan out one notification envelope to enabled channels, respecting prefs + quiet hours. Always writes in-app row. */
+  /** Fan out one notification envelope to enabled channels, respecting prefs + quiet hours.
+   *  Writes in-app row only if the inApp preference is enabled (or the type is critical). */
   async dispatch(envelope: NotificationEnvelope) {
     const locale = envelope.locale ?? 'en';
-    const rendered = envelope.title && envelope.body ? { title: envelope.title, body: envelope.body } : renderTemplate(envelope.type, locale, envelope.data);
-
-    const [row] = await db.insert(schema.notifications).values({
-      userId: envelope.userId, type: envelope.type, title: rendered.title, body: rendered.body, link: envelope.link,
-    }).returning();
+    // Fix the rendered.title/body logic: the previous check
+    // `envelope.title && envelope.body` was wrong — an empty-string body
+    // falsy-coerced to "no body provided" and called renderTemplate,
+    // overwriting the explicitly-provided title. Now we check for nullish
+    // (not falsy), so empty strings are preserved.
+    const rendered = (envelope.title != null && envelope.body != null)
+      ? { title: envelope.title, body: envelope.body }
+      : renderTemplate(envelope.type, locale, envelope.data);
 
     const prefsRow = await engagementService.getPreferences(envelope.userId);
     const typePrefs = { ...DEFAULT_PREFS, ...(prefsRow.prefs as any)?.[envelope.type] };
     const critical = CRITICAL_TYPES.includes(envelope.type);
     const quiet = !critical && isQuietHours(prefsRow.quietHoursStart, prefsRow.quietHoursEnd);
 
-    if (typePrefs.push && !quiet) await db.insert(schema.outboxEvents).values({ channel: 'push', payload: { userId: envelope.userId, title: rendered.title, body: rendered.body, link: envelope.link } });
-    if (typePrefs.sms && (critical || !quiet)) await db.insert(schema.outboxEvents).values({ channel: 'sms', payload: { userId: envelope.userId, body: `${rendered.title}: ${rendered.body}` } });
-    if (typePrefs.email && (critical || !quiet)) await db.insert(schema.outboxEvents).values({ channel: 'email', payload: { userId: envelope.userId, subject: rendered.title, body: rendered.body } });
+    // Honor the inApp preference — the previous implementation always
+    // wrote the in-app row, ignoring the user's `inApp: false` setting.
+    // Critical notifications bypass the inApp preference (they're things
+    // the user must see, like payment failures).
+    let row = null;
+    if (critical || typePrefs.inApp) {
+      [row] = await db.insert(schema.notifications).values({
+        userId: envelope.userId, type: envelope.type, title: rendered.title, body: rendered.body, link: envelope.link,
+      }).returning();
+    }
+
+    // Insert all outbox events in a single multi-row insert — the previous
+    // implementation issued 1-3 separate inserts, partially dispatching if
+    // any failed mid-way.
+    const events: Array<{ channel: 'push' | 'sms' | 'email'; payload: any }> = [];
+    if (typePrefs.push && !quiet) {
+      events.push({ channel: 'push', payload: { userId: envelope.userId, title: rendered.title, body: rendered.body, link: envelope.link } });
+    }
+    if (typePrefs.sms && (critical || !quiet)) {
+      events.push({ channel: 'sms', payload: { userId: envelope.userId, body: `${rendered.title}: ${rendered.body}` } });
+    }
+    if (typePrefs.email && (critical || !quiet)) {
+      events.push({ channel: 'email', payload: { userId: envelope.userId, subject: rendered.title, body: rendered.body } });
+    }
+    if (events.length > 0) {
+      await db.insert(schema.outboxEvents).values(events as any);
+    }
 
     return row;
   },

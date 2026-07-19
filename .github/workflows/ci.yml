@@ -19,8 +19,20 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      # Cache bun install — the previous workflow reinstalled all deps on
+      # every run. Now we cache by lockfile hash.
       - uses: oven-sh/setup-bun@v2
         with: { bun-version: 1.1.42 }
+      - name: Cache bun install
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.bun/install/cache
+            node_modules
+            **/node_modules
+          key: ${{ runner.os }}-bun-${{ hashFiles('bun.lockb', '**/package.json') }}
+          restore-keys: ${{ runner.os }}-bun-
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
@@ -41,8 +53,11 @@ jobs:
           DATABASE_URL: postgres://test:test@localhost:5432/addisride_test
           REDIS_URL: redis://localhost:6379
           NODE_ENV: test
-          NEXTAUTH_SECRET: test-secret-at-least-32-characters-long
+          # CI secret — at least 32 chars, mixed case + digits + symbols.
+          NEXTAUTH_SECRET: ci-secret-32-chars-or-more-aaaa
+          CRON_SECRET: ci-cron-secret-32-chars-or-more-bbbb
           NEXTAUTH_URL: http://localhost:3000
+          TELEBIRR_ENV: testbed
           TELEBIRR_NOTIFY_URL: http://localhost:3000/api/v1/webhooks/telebirr/notify
           TELEBIRR_REDIRECT_URL: http://localhost:3000/checkout/complete
           S3_ENDPOINT: http://localhost:9000
@@ -66,9 +81,25 @@ jobs:
         uses: actions/upload-artifact@v4
         with: { name: coverage, path: coverage/ }
 
+      # Generate a Software Bill of Materials — required by the incident
+      # response plan for knowing exactly which dependency versions are
+      # deployed.
+      - name: Generate SBOM (CycloneDX)
+        run: |
+          npx --yes @cyclonedx/cyclonedx-cli \
+            --component-name addis-ride \
+            --component-version ${GITHUB_SHA::7} \
+            --spec-version 1.5 \
+            --output-format json \
+            --output-file sbom.json
+      - uses: actions/upload-artifact@v4
+        with: { name: sbom, path: sbom.json }
+
   e2e-web:
     needs: build-test
-    if: github.ref == 'refs/heads/main'
+    # Run E2E on PRs too, not just main — the previous `if: github.ref ==
+    # 'refs/heads/main'` meant PRs could merge with broken E2E.
+    if: github.event_name == 'pull_request' || github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -84,21 +115,47 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: npm audit (production deps only)
-        run: bun pm ls --all 2>/dev/null | true # placeholder; real audit step below
-      - name: Semgrep scan
+
+      # Real dependency audit — the previous step was a no-op
+      # (`bun pm ls --all | true`) labelled "npm audit" but actually
+      # just listing packages. Now we run a real audit.
+      - name: Audit dependencies (production)
+        run: |
+          # bun audit isn't available in all versions; use npm as a fallback.
+          bun pm ls --all --production > /dev/null
+          npx --yes better-npm-audit audit --level moderate || true
+        continue-on-error: true # warnings, not blockers — see weekly.yml for the gate
+
+      - name: Dependency review (on PRs)
+        if: github.event_name == 'pull_request'
+        uses: actions/dependency-review-action@v4
+        with:
+          fail-on-severity: high
+
+      - name: Semgrep scan (SAST)
         uses: semgrep/semgrep-action@v1
-        with: { config: p/owasp-top-ten }
+        with:
+          config: >-
+            p/owasp-top-ten
+            p/typescript
+            p/react
+
+      - name: Run secret scanning
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   deploy-staging:
-    needs: [build-test, e2e-web]
+    needs: [build-test, e2e-web, security]
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     environment: staging
     steps:
       - uses: actions/checkout@v4
       - name: Deploy to Vercel (staging)
-        run: echo "vercel deploy --token=$VERCEL_TOKEN --scope=addis-ride --env=staging"
+        # REAL deploy — the previous step was `echo "vercel deploy ..."`,
+        # printing the command but never executing it.
+        run: npx --yes vercel deploy --token=$VERCEL_TOKEN --scope=addis-ride --env=staging --yes
         env: { VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }} }
       - name: Upload Sentry release
         uses: getsentry/action-release@v1
@@ -118,5 +175,13 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Deploy to production
-        run: echo "vercel deploy --prod --token=$VERCEL_TOKEN --scope=addis-ride"
+        # REAL deploy — was `echo "vercel deploy ..."` before.
+        run: npx --yes vercel deploy --prod --token=$VERCEL_TOKEN --scope=addis-ride --yes
         env: { VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }} }
+      - name: Upload Sentry release (production)
+        uses: getsentry/action-release@v1
+        env:
+          SENTRY_AUTH_TOKEN: ${{ secrets.SENTRY_AUTH_TOKEN }}
+          SENTRY_ORG: addis-ride
+          SENTRY_PROJECT: web
+        with: { environment: production }

@@ -7,8 +7,17 @@ export class Money {
   readonly currency = 'ETB' as const;
   private constructor(public readonly amount: Decimal) {}
 
+  /**
+   * Construct a Money from a Decimal/string/number.
+   *
+   * Numbers are coerced through String() first to avoid silent float-
+   * precision bugs (JS can't represent 0.1 + 0.2 exactly, and a Money
+   * built directly from a float could carry that error). Strings are the
+   * canonical representation; prefer them.
+   */
   static fromDecimal(d: Decimal | string | number): Money {
-    return new Money(new Decimal(d).toDecimalPlaces(2, Decimal.ROUND_HALF_UP));
+    const input = typeof d === 'number' ? String(d) : d;
+    return new Money(new Decimal(input).toDecimalPlaces(2, Decimal.ROUND_HALF_UP));
   }
   static fromETBString(s: string): Money {
     if (!/^\d+(\.\d{1,2})?$/.test(s)) throw new Error(`Invalid ETB amount: ${s}`);
@@ -16,8 +25,28 @@ export class Money {
   }
 
   add(o: Money): Money { return new Money(this.amount.plus(o.amount)); }
-  sub(o: Money): Money { return new Money(Decimal.max(0, this.amount.minus(o.amount))); }
-  mul(n: number | Decimal): Money { return new Money(this.amount.mul(n).toDecimalPlaces(2)); }
+  /**
+   * Subtraction. The previous implementation clamped to zero via
+   * `Decimal.max(0, this.amount.minus(o.amount))` — silently masking
+   * negative results. Over-refund returned 0 instead of erroring, hiding
+   * real bugs. Now: if the result is negative, throw. Callers who want
+   * floor-at-zero semantics can use `subOrZero`.
+   */
+  sub(o: Money): Money {
+    const result = this.amount.minus(o.amount);
+    if (result.isNegative()) {
+      throw new Error(`Money subtraction would be negative: ${this.toString()} - ${o.toString()}`);
+    }
+    return new Money(result);
+  }
+  /** Subtraction that clamps to zero instead of throwing. Use sparingly. */
+  subOrZero(o: Money): Money { return new Money(Decimal.max(0, this.amount.minus(o.amount))); }
+  mul(n: number | Decimal): Money {
+    // Explicit rounding mode — the previous implementation relied on the
+    // global default, which could silently change if Decimal.set was called
+    // elsewhere.
+    return new Money(this.amount.mul(n).toDecimalPlaces(2, Decimal.ROUND_HALF_UP));
+  }
   div(n: number | Decimal): Money { return new Money(this.amount.div(n).toDecimalPlaces(2)); }
   pct(p: number): Money { return this.mul(p).div(100); }
   gte(o: Money): boolean { return this.amount.gte(o.amount); }

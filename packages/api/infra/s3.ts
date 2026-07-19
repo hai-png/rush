@@ -10,10 +10,25 @@ const client = new S3Client({
 
 export const s3 = {
   async putObject(key: string, body: Buffer, contentType: string) {
-    await client.send(new PutObjectCommand({ Bucket: env.S3_BUCKET, Key: key, Body: body, ContentType: contentType }));
+    // Server-side encryption: contractor documents (licenses, insurance,
+    // inspection certificates) are PII. Without SSE, a misconfigured bucket
+    // (or a snapshot leak) leaves them in plaintext at rest. AES256 is free
+    // on S3/MinIO and has zero performance impact.
+    await client.send(new PutObjectCommand({
+      Bucket: env.S3_BUCKET, Key: key, Body: body, ContentType: contentType,
+      ServerSideEncryption: 'AES256',
+    }));
   },
   async deleteObject(key: string) {
-    await client.send(new DeleteObjectCommand({ Bucket: env.S3_BUCKET, Key: key }));
+    try {
+      await client.send(new DeleteObjectCommand({ Bucket: env.S3_BUCKET, Key: key }));
+    } catch (err) {
+      // Don't swallow — log and rethrow so the caller can decide. The
+      // previous implementation silently ignored S3 delete failures,
+      // leaving orphaned objects in the bucket.
+      console.error('[s3] deleteObject failed', { key, err: (err as Error).message });
+      throw err;
+    }
   },
   async presignGet(key: string, expiresInSec: number) {
     return getSignedUrl(client, new GetObjectCommand({ Bucket: env.S3_BUCKET, Key: key }), { expiresIn: expiresInSec });

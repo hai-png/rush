@@ -29,10 +29,26 @@ export const subscriptionService = {
     let price = Money.fromDecimal(plan.priceETB);
     let corporateMemberId: string | null = null;
     if (input.corporateMemberId) {
+      // Corporate subsidy IDOR: the previous implementation accepted ANY
+      // corporateMemberId without verifying that the membership belongs to
+      // the requesting rider. A rider could pass a corporate admin's member
+      // ID and ride at that corporate's subsidy rate they're not entitled
+      // to. Now we look up the rider's profile by id (passed in
+      // input.riderId, which the route has already translated from
+      // session.userId) and verify the membership's userId matches.
       const [member] = await db.select().from(schema.corporateMembers).where(eq(schema.corporateMembers.id, input.corporateMemberId));
-      if (!member || member.approvalStatus !== 'approved' || !member.isActive) throw new BadRequestError('Corporate membership not approved');
+      if (!member || member.approvalStatus !== 'approved' || !member.isActive) {
+        throw new BadRequestError('Corporate membership not approved');
+      }
+      // Look up the rider profile to get the userId, then verify ownership.
+      const [riderProfile] = await db.select().from(schema.riderProfiles).where(eq(schema.riderProfiles.id, input.riderId));
+      if (!riderProfile || member.userId !== riderProfile.userId) {
+        throw new BadRequestError('Corporate membership does not belong to this rider');
+      }
       const [corp] = await db.select().from(schema.corporates).where(eq(schema.corporates.id, member.corporateId));
-      if (corp) price = price.sub(price.pct(corp.subsidyPercent)); // employee pays discounted share
+      if (corp && corp.isActive) {
+        price = price.sub(price.pct(corp.subsidyPercent)); // employee pays discounted share
+      }
       corporateMemberId = member.id;
     }
 

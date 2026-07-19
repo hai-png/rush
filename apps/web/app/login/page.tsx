@@ -23,6 +23,24 @@ export default function LoginPage() {
     setServerError(null);
     const res = await signIn('credentials', { ...data, redirect: false });
     if (res?.error) { setServerError('Invalid phone number or password'); return; }
+    // Redirect based on role — the previous implementation always sent
+    // every user to /dashboard/rider, so contractors and corporate_admins
+    // landed on the wrong dashboard. Now we read the role from the session
+    // via the next-auth/react useSession hook would require another round
+    // trip; instead we fetch /api/v1/auth/me which returns the role.
+    try {
+      const meRes = await fetch('/api/v1/auth/me', { credentials: 'include' });
+      if (meRes.ok) {
+        const me = (await meRes.json())?.data;
+        const role = me?.role ?? 'rider';
+        const dest = role === 'platform_admin' ? '/admin'
+          : role === 'corporate_admin' ? '/dashboard/corporate'
+          : role === 'contractor' ? '/dashboard/contractor'
+          : '/dashboard/rider';
+        router.push(dest);
+        return;
+      }
+    } catch { /* fall through to rider dashboard */ }
     router.push('/dashboard/rider');
   };
 

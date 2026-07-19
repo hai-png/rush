@@ -1,18 +1,46 @@
 'use client';
 import { useState } from 'react';
 import { AlertTriangle } from 'lucide-react';
-import { Button } from '@addis/ui';
+import { Button, Input, Label, FieldError, toast } from '@addis/ui';
 import { useApiClient } from '@/lib/sdk';
 import { ACCOUNT_DELETION_GRACE_DAYS } from '@addis/shared';
 
 export default function DeleteAccountPage() {
   const client = useApiClient();
   const [confirmed, setConfirmed] = useState(false);
+  const [password, setPassword] = useState('');
   const [requested, setRequested] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const submit = async () => {
-    await client.POST('/api/v1/account/delete', { body: {} });
-    setRequested(true);
+    // Require password re-authentication. The previous implementation
+    // triggered account deletion with a single click and no password
+    // confirmation — anyone with a stolen session cookie (XSS, session
+    // hijack, physical access to an unlocked device) could permanently
+    // delete the account.
+    if (!password) {
+      setError('Password is required to confirm deletion');
+      return;
+    }
+    setLoading(true);
+    setError(null);
+    try {
+      // The API route accepts a password field for re-authentication.
+      const { error: apiError } = await client.POST('/api/v1/account/delete', {
+        body: { password },
+      });
+      if (apiError) {
+        setError(apiError.message ?? 'Password incorrect');
+        toast({ title: 'Deletion failed', variant: 'destructive' });
+        return;
+      }
+      setRequested(true);
+    } catch (e) {
+      setError('Network error — please try again');
+    } finally {
+      setLoading(false);
+    }
   };
 
   if (requested) {
@@ -27,17 +55,38 @@ export default function DeleteAccountPage() {
   }
 
   return (
-    <div className="px-6 py-16 max-w-md mx-auto text-center">
+    <div className="px-6 py-16 max-w-md mx-auto">
       <AlertTriangle className="h-8 w-8 text-destructive mx-auto mb-3" />
-      <h1 className="font-semibold text-lg">Delete your account?</h1>
-      <p className="text-sm text-muted-foreground mt-2">
+      <h1 className="font-semibold text-lg text-center">Delete your account?</h1>
+      <p className="text-sm text-muted-foreground mt-2 text-center">
         This starts a {ACCOUNT_DELETION_GRACE_DAYS}-day grace period. Payment records are retained 7 years per Ethiopian tax law, anonymized.
       </p>
-      <label className="flex items-center gap-2 justify-center mt-4 text-sm">
-        <input type="checkbox" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} />
-        I understand this cannot be undone after the grace period.
-      </label>
-      <Button variant="destructive" className="mt-4" disabled={!confirmed} onClick={submit}>Request deletion</Button>
+      <div className="mt-6 space-y-3">
+        <div>
+          <Label htmlFor="password">Enter your password to confirm</Label>
+          <Input
+            id="password"
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            autoComplete="current-password"
+          />
+        </div>
+        <label className="flex items-center gap-2 text-sm">
+          <input type="checkbox" checked={confirmed} onChange={(e) => setConfirmed(e.target.checked)} />
+          I understand this cannot be undone after the grace period.
+        </label>
+        {error && <FieldError>{error}</FieldError>}
+        <Button
+          variant="destructive"
+          className="w-full"
+          disabled={!confirmed || !password || loading}
+          loading={loading}
+          onClick={submit}
+        >
+          Request deletion
+        </Button>
+      </div>
     </div>
   );
 }

@@ -15,10 +15,10 @@ export type RefundResult =
   | { status: 'processing'; retryAfterMs: number }
   | { status: 'failed'; error: string; permanent: boolean };
 export type WebhookEvent =
-  | { type: 'payment.settled'; merchOrderId: string; amount: Money; raw: unknown }
-  | { type: 'payment.failed'; merchOrderId: string; raw: unknown }
-  | { type: 'refund.succeeded'; refundRequestNo: string; raw: unknown }
-  | { type: 'refund.failed'; refundRequestNo: string; raw: unknown };
+  | { type: 'payment.settled'; merchOrderId: string; amount: Money; raw: unknown; signatureValid: boolean; timestampMs?: number }
+  | { type: 'payment.failed'; merchOrderId: string; raw: unknown; signatureValid: boolean; timestampMs?: number }
+  | { type: 'refund.succeeded'; refundRequestNo: string; raw: unknown; signatureValid: boolean; timestampMs?: number }
+  | { type: 'refund.failed'; refundRequestNo: string; raw: unknown; signatureValid: boolean; timestampMs?: number };
 
 export interface PaymentProvider {
   readonly name: PaymentMethod;

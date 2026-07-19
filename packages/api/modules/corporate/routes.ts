@@ -7,9 +7,14 @@ export const corporateRoutes = new Hono();
 
 corporateRoutes.post('/signup', async (c) => {
   const body = z.object({
-    corpName: z.string(), corpCode: z.string().min(2), contactEmail: z.string().email(), contactPhone: z.string(),
-    adminName: z.string(), adminPassword: z.string().min(10),
-    subsidyPercent: z.number().min(0).max(100).default(50), monthlySeatAllowance: z.number().int().positive().default(20),
+    corpName: z.string().min(2).max(200),
+    corpCode: z.string().min(2).max(50).regex(/^[A-Z0-9-]+$/, 'corpCode must be uppercase alphanumeric with dashes'),
+    contactEmail: z.string().email(),
+    contactPhone: z.string().regex(/^\+251[97]\d{8}$/, 'contactPhone must be an Ethiopian phone (+2519... or +2517...)'),
+    adminName: z.string().min(2).max(200),
+    adminPassword: z.string().min(10).max(1000),
+    subsidyPercent: z.number().min(0).max(100).default(50),
+    monthlySeatAllowance: z.number().int().positive().max(10000).default(20),
   }).parse(await c.req.json());
   return c.json({ data: await corporateService.signup(body) }, 201);
 });
@@ -30,7 +35,23 @@ corporateRoutes.get('/', requireRole('corporate_admin'), async (c) => c.json({ d
 corporateRoutes.patch('/', requireRole('corporate_admin'), async (c) => c.json({ data: await corporateService.updateOwn(c.get('session').userId, UpdateCorporateInput.parse(await c.req.json())) }));
 
 corporateRoutes.get('/members', requireRole('corporate_admin'), async (c) => c.json({ data: await corporateService.listMembers(c.get('session').userId) }));
-corporateRoutes.patch('/members/:id', requireRole('corporate_admin'), async (c) => c.json({ data: await corporateService.updateMember(c.get('session').userId, c.req.param('id'), await c.req.json()) }));
+
+// Strict schema for member updates — the previous route passed raw JSON
+// straight to the service's `.set({ ...input })`, a mass-assignment
+// vulnerability. A corporate admin could send
+// `{ corporateId: "other-corp", userId: "attacker-id", ridesUsedThisMonth: 0 }`
+// and the service would write all of it — moving a member to a different
+// corporate, changing the user pointer, or resetting ride counts. Now only
+// approvalStatus and isActive are accepted.
+const UpdateMemberInput = z.object({
+  approvalStatus: z.enum(['approved', 'rejected', 'pending']).optional(),
+  isActive: z.boolean().optional(),
+}).strict();
+
+corporateRoutes.patch('/members/:id', requireRole('corporate_admin'), async (c) => {
+  const body = UpdateMemberInput.parse(await c.req.json());
+  return c.json({ data: await corporateService.updateMember(c.get('session').userId, c.req.param('id'), body) });
+});
 corporateRoutes.delete('/members/:id', requireRole('corporate_admin'), async (c) => { await corporateService.removeMember(c.get('session').userId, c.req.param('id')); return c.body(null, 204); });
 
 corporateRoutes.post('/invites', requireRole('corporate_admin'), async (c) => c.json({ data: await corporateService.generateInvite(c.get('session').userId) }));

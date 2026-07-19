@@ -1,5 +1,7 @@
 import Link from 'next/link';
+import { redirect } from 'next/navigation';
 import { LayoutDashboard, Users, Route, Bus, ShieldCheck, CreditCard, Ticket, HelpCircle, FileClock } from 'lucide-react';
+import { auth } from '../../auth';
 
 const NAV = [
   { href: '/admin', label: 'Dashboard', icon: LayoutDashboard },
@@ -13,7 +15,22 @@ const NAV = [
   { href: '/admin/audit-logs', label: 'Audit log', icon: FileClock },
 ];
 
-export default function AdminLayout({ children }: { children: React.ReactNode }) {
+export default async function AdminLayout({ children }: { children: React.ReactNode }) {
+  // CRITICAL FIX: the previous layout rendered unconditionally — no auth
+  // check, no role check, no redirect. Any authenticated user could
+  // navigate to /admin and see the entire admin nav structure (and the
+  // page components would attempt API calls that 403'd, but the layout
+  // shell rendered regardless). Now we check the session and role here;
+  // non-admins are redirected to their own dashboard.
+  const session = await auth();
+  if (!session) {
+    redirect('/login?next=/admin');
+  }
+  const role = (session as any).role;
+  if (role !== 'platform_admin') {
+    redirect('/dashboard/' + (role ?? 'rider'));
+  }
+
   return (
     <div className="flex min-h-screen">
       <aside className="w-56 border-r border-border p-4 hidden md:block">

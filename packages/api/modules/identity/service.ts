@@ -2,11 +2,61 @@ import { eq } from 'drizzle-orm';
 import { SignJWT, jwtVerify } from 'jose';
 import { authenticator } from 'otplib';
 import { db, schema } from '@addis/db';
-import { hashPassword, verifyPassword, isPasswordBreached, ConflictError, UnauthorizedError, NotFoundError, TwoFactorRequiredError, BadRequestError, CURRENT_TOS_VERSION } from '@addis/shared';
+import { hashPassword, verifyPassword, isPasswordBreached, ConflictError, UnauthorizedError, NotFoundError, TwoFactorRequiredError, BadRequestError, CURRENT_TOS_VERSION, loadEnv } from '@addis/shared';
 import { createId } from '@paralleldrive/cuid2';
+import { redis } from '../../infra/redis';
 
-const JWT_SECRET = () => new TextEncoder().encode(process.env.NEXTAUTH_SECRET!);
+// Read the JWT secret through the validated env object — never `process.env`
+// directly. The previous `process.env.NEXTAUTH_SECRET!` non-null assertion would
+// happily encode the literal string "undefined" (9 bytes) as the HMAC key if
+// the env var was missing, silently signing every token with a publicly-known
+// key. The env schema now requires a >=32-char non-placeholder string.
+const env = loadEnv();
+const JWT_SECRET = () => new TextEncoder().encode(env.NEXTAUTH_SECRET);
 const ACCESS_TTL = '30m';
+const SESSION_TTL_MS = 30 * 24 * 3600_000;
+
+// Account lockout: per-phone failed-attempt counter in Redis. After 5 failures
+// within 15 minutes, the account is locked for 15 minutes. The previous login
+// flow had NO failed-attempt tracking — only the per-IP rate limit (which is
+// trivially bypassable via X-Forwarded-For spoofing) stood between an attacker
+// and unlimited credential stuffing.
+const MAX_FAILED_ATTEMPTS = 5;
+const LOCKOUT_WINDOW_SEC = 15 * 60;
+const LOCKOUT_DURATION_SEC = 15 * 60;
+
+function failKey(phone: string) { return `auth:fail:${phone}`; }
+function lockKey(phone: string) { return `auth:lock:${phone}`; }
+
+async function recordFailedLogin(phone: string) {
+  const [locked] = await Promise.all([
+    redis.set(lockKey(phone), '1', { nx: true, ex: LOCKOUT_DURATION_SEC }),
+    redis.incr(failKey(phone)),
+  ]);
+  // First failure in window -> set the fail counter's TTL. Subsequent INCRs
+  // don't reset the TTL (Redis semantics), so the window stays anchored to
+  // the first attempt.
+  await redis.expire(failKey(phone), LOCKOUT_WINDOW_SEC).catch(() => {});
+  if (locked) return; // newly locked
+  const count = await redis.incr(failKey(phone)).catch(() => 0);
+  if (count >= MAX_FAILED_ATTEMPTS) {
+    await redis.set(lockKey(phone), '1', { ex: LOCKOUT_DURATION_SEC }).catch(() => {});
+  }
+}
+
+async function assertNotLocked(phone: string) {
+  const locked = await redis.set(lockKey(phone), 'peek', { nx: true, ex: 1 }).catch(() => null);
+  // If we "acquired" the peek key, no real lock exists; clean up.
+  if (locked) { await redis.set(lockKey(phone), '', { ex: 0 }).catch(() => {}); return; }
+  // Re-check by reading the lock key directly.
+  const ttl = await redis.ttl(lockKey(phone)).catch(() => -1);
+  if (ttl > 0) throw new UnauthorizedError(`Account temporarily locked. Try again in ${Math.ceil(ttl / 60)} minutes.`);
+}
+
+async function clearFailedLogins(phone: string) {
+  await redis.set(failKey(phone), '0', { ex: 1 }).catch(() => {});
+  await redis.set(lockKey(phone), '0', { ex: 1 }).catch(() => {});
+}
 
 export const identityService = {
   async registerRider(input: { phone: string; name: string; password: string; homeArea: string; workArea: string }) {
@@ -19,7 +69,10 @@ export const identityService = {
       }).returning();
       const [profile] = await tx.insert(schema.riderProfiles).values({ userId: user.id, homeArea: input.homeArea, workArea: input.workArea }).returning();
       await tx.insert(schema.outboxEvents).values({ channel: 'sms', payload: { phone: input.phone, purpose: 'signup_verification' } });
-      return { user, profile };
+      // Do NOT return credential material in the registration response — the
+      // previous handler returned the full `user` row including passwordHash.
+      const { passwordHash: _ph, twoFactorSecret: _tfs, ...safeUser } = user;
+      return { user: safeUser, profile };
     });
   },
 
@@ -34,27 +87,41 @@ export const identityService = {
       const [profile] = await tx.insert(schema.contractorProfiles).values({
         userId: user.id, licenseNumber: input.licenseNumber, experienceYears: input.experienceYears, verificationStatus: 'unverified',
       }).returning();
-      return { user, profile };
+      const { passwordHash: _ph, twoFactorSecret: _tfs, ...safeUser } = user;
+      return { user: safeUser, profile };
     });
   },
 
   async login(phone: string, password: string, userAgent?: string, ip?: string, twoFactorCode?: string) {
-    const [user] = await db.select().from(schema.users).where(eq(schema.users.phone, phone));
-    if (!user || !user.isActive || user.deletedAt) throw new UnauthorizedError('Invalid credentials');
-    if (!(await verifyPassword(password, user.passwordHash))) throw new UnauthorizedError('Invalid credentials');
+    // Lockout check happens BEFORE the user lookup so an attacker can't even
+    // probe whether a phone number is registered once they're locked out.
+    await assertNotLocked(phone);
 
-    // 2FA setup/verify/disable already exist and are enforced for platform_admin /
-    // corporate_admin, but login previously never checked twoFactorEnabled at all — an
-    // account that had 2FA turned on could still be logged into with just phone + password.
+    const [user] = await db.select().from(schema.users).where(eq(schema.users.phone, phone));
+    // Always run a bcrypt.compare against a dummy hash to keep timing constant
+    // whether or not the phone exists — otherwise the timing difference between
+    // "phone not found" and "wrong password" enables user enumeration.
+    const DUMMY_HASH = '$2a$12$' + 'x'.repeat(53);
+    const passwordOk = user && user.isActive && !user.deletedAt
+      ? await verifyPassword(password, user.passwordHash)
+      : await verifyPassword(password, DUMMY_HASH);
+    if (!user || !user.isActive || user.deletedAt || !passwordOk) {
+      await recordFailedLogin(phone);
+      throw new UnauthorizedError('Invalid credentials');
+    }
+
     if (user.twoFactorEnabled) {
       if (!twoFactorCode) throw new TwoFactorRequiredError();
       if (!user.twoFactorSecret || !authenticator.check(twoFactorCode, user.twoFactorSecret)) {
+        await recordFailedLogin(phone);
         throw new UnauthorizedError('Invalid 2FA code');
       }
     }
 
+    await clearFailedLogins(phone);
+
     const jti = createId();
-    const expiresAt = new Date(Date.now() + 30 * 24 * 3600_000);
+    const expiresAt = new Date(Date.now() + SESSION_TTL_MS);
     await db.insert(schema.sessions).values({ userId: user.id, jti, userAgent, ipAddress: ip, expiresAt });
 
     const token = await new SignJWT({ id: user.id, role: user.role, phone: user.phone, tokenVersion: user.tokenVersion, jti })
@@ -69,7 +136,7 @@ export const identityService = {
     if (!user || user.tokenVersion !== payload.tokenVersion || !user.isActive || user.deletedAt) throw new UnauthorizedError();
     const [session] = await db.select().from(schema.sessions).where(eq(schema.sessions.jti, payload.jti as string));
     if (!session || session.expiresAt < new Date()) throw new UnauthorizedError('Session revoked');
-    return { user, jti: payload.jti as string };
+    return { user, jti: payload.jti as string, impersonatedBy: (payload.impersonatedBy as string | undefined) ?? null };
   },
 
   async changePassword(userId: string, oldPw: string, newPw: string) {
@@ -82,12 +149,25 @@ export const identityService = {
     }).where(eq(schema.users.id, userId)); // bumping tokenVersion revokes all other sessions
   },
 
-  /** Mint a fresh access token for an already-authenticated session without re-checking password. */
-  async reissueToken(userId: string) {
+  /**
+   * Mint a fresh access token for an already-authenticated session.
+   *
+   * Previously this created a NEW session row without deleting the old one —
+   * the old bearer stayed valid until its JWT exp (30m), so a stolen token
+   * remained usable for the full window even after a legitimate refresh. Now
+   * the caller passes the current jti and we delete that specific session row
+   * before minting the replacement, giving true session rotation on refresh.
+   */
+  async reissueToken(userId: string, currentJti: string) {
     const [user] = await db.select().from(schema.users).where(eq(schema.users.id, userId));
     if (!user) throw new UnauthorizedError();
     const jti = createId();
-    await db.insert(schema.sessions).values({ userId: user.id, jti, expiresAt: new Date(Date.now() + 30 * 24 * 3600_000) });
+    await db.transaction(async (tx) => {
+      // Delete the old session first; if the insert below fails, the user must
+      // re-authenticate (safe failure mode — no orphaned active sessions).
+      await tx.delete(schema.sessions).where(eq(schema.sessions.jti, currentJti));
+      await tx.insert(schema.sessions).values({ userId: user.id, jti, expiresAt: new Date(Date.now() + SESSION_TTL_MS) });
+    });
     return new SignJWT({ id: user.id, role: user.role, phone: user.phone, tokenVersion: user.tokenVersion, jti })
       .setProtectedHeader({ alg: 'HS256' }).setIssuedAt().setExpirationTime(ACCESS_TTL).sign(JWT_SECRET());
   },
@@ -96,7 +176,14 @@ export const identityService = {
     const [user] = await db.select().from(schema.users).where(eq(schema.users.phone, phone));
     if (!user) throw new NotFoundError('User not found');
     if (await isPasswordBreached(newPassword)) throw new BadRequestError('This password has appeared in a known data breach — please choose a different one');
-    await db.update(schema.users).set({ passwordHash: await hashPassword(newPassword), tokenVersion: user.tokenVersion + 1, updatedAt: new Date() }).where(eq(schema.users.id, user.id));
+    await db.transaction(async (tx) => {
+      await tx.update(schema.users).set({ passwordHash: await hashPassword(newPassword), tokenVersion: user.tokenVersion + 1, updatedAt: new Date() }).where(eq(schema.users.id, user.id));
+      // Bumping tokenVersion invalidates all outstanding JWTs, but the sessions
+      // table rows lingered — leaving the user appearing to have active sessions
+      // in the /sessions list despite being unable to use any of them. Delete
+      // them so the session list reflects reality.
+      await tx.delete(schema.sessions).where(eq(schema.sessions.userId, user.id));
+    });
   },
 
   async setup2fa(userId: string) {
@@ -114,9 +201,21 @@ export const identityService = {
     return { enabled: true };
   },
 
-  async disable2fa(userId: string, password: string) {
+  /**
+   * Disable 2FA. Previously required only the password — an attacker with a
+   * stolen session (e.g. via XSS) and the user's password (e.g. from a
+   * separate breach) could disable 2FA without ever possessing the TOTP
+   * device. Now the current 2FA code is ALSO required for any account where
+   * 2FA is currently enabled.
+   */
+  async disable2fa(userId: string, password: string, twoFactorCode?: string) {
     const [user] = await db.select().from(schema.users).where(eq(schema.users.id, userId));
     if (!user || !(await verifyPassword(password, user.passwordHash))) throw new UnauthorizedError('Incorrect password');
+    if (user.twoFactorEnabled) {
+      if (!twoFactorCode || !user.twoFactorSecret || !authenticator.check(twoFactorCode, user.twoFactorSecret)) {
+        throw new UnauthorizedError('Invalid 2FA code');
+      }
+    }
     await db.update(schema.users).set({ twoFactorEnabled: false, twoFactorSecret: null }).where(eq(schema.users.id, userId));
   },
 };
