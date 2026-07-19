@@ -1,26 +1,3 @@
-// FIX (ARCH-003): Migrated from bare `Hono()` to `TypedOpenAPIHono` so this
-// module is OpenAPI-capable and `c.get('session')` / `c.get('requestId')` /
-// `c.get('logger')` are typed. Existing .post/.get/.patch/.delete calls
-// continue to work; they can be incrementally converted to
-// .openapi(createRoute(...), handler) to appear in the OpenAPI document.
-import { TypedOpenAPIHono } from '../../src/typed-hono';
-import { z } from 'zod';
-import { requireRole } from '../../src/middleware/auth';
-import { clientIp } from '../../src/ip';
-import { adminService } from './service';
-import { adminCatalogRoutes } from '../catalog/routes';
-import { documentService } from '../identity/documents';
-import { corporateService } from '../corporate/service';
-import { scheduleRefund } from '../payment/service';
-import { Money, ALL_ROLES } from '@addis/shared';
-import { and, eq } from 'drizzle-orm';
-import { db, schema } from '@addis/db';
-
-export const adminRoutes = new TypedOpenAPIHono();
-adminRoutes.use('*', requireRole('platform_admin'));
-adminRoutes.route('/', adminCatalogRoutes);
-
-// Bound the `limit` query param so a malicious or careless admin client can't
 // request ?limit=999999999 and OOM the process. Previous code did
 // `Number(c.req.query('limit') ?? 20)` with no cap — and `Number('abc')`
 // produced NaN, which Drizzle treated as `LIMIT NULL` (all rows).

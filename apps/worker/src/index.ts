@@ -1,9 +1,10 @@
 import './instrumentation';
 import { loadEnv } from '@addis/shared';
 import { db, schema } from '@addis/db';
-import { eq, sql } from 'drizzle-orm';
+import { eq, sql, count } from 'drizzle-orm';
 import { withLock, CRON_JOBS } from '@addis/api/src/cron-jobs';
 import { logger } from '@addis/api/infra/logger';
+import { outboxDepthGauge } from '@addis/api/modules/health/metrics';
 
 loadEnv(); // validate env at startup
 
@@ -52,6 +53,15 @@ async function drainOutbox() {
   `);
 
   const rows = (claimed as any).rows ?? (claimed as any) ?? [];
+
+  // FIX (META-011): Update the outbox depth gauge so /metrics reports the
+  // current backlog. Query once per drain cycle.
+  try {
+    const [depth] = await db.select({ n: count() }).from(schema.outboxEvents)
+      .where(eq(schema.outboxEvents.status, 'pending'));
+    outboxDepthGauge.set(depth?.n ?? 0);
+  } catch { /* best-effort — don't block the drain loop */ }
+
   for (const evt of rows) {
     try {
       await HANDLERS[evt.channel](evt.payload);

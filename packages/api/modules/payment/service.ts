@@ -4,6 +4,7 @@ import { Money, BadRequestError, NotFoundError } from '@addis/shared';
 import { getPaymentProvider } from '@addis/payments';
 import { transitionSubscription } from '../subscription/state';
 import { createId } from '@paralleldrive/cuid2';
+import { paymentCounter, refundCounter } from '../health/metrics';
 
 /** Idempotent: returns false if the payment was already settled/failed (webhook replay safe).
  *  `reportedAmount`, when supplied by the caller, is the amount the payment provider's webhook
@@ -57,6 +58,8 @@ export async function settlePayment(reference: string, reportedAmount?: Money): 
       { channel: 'notification', payload: { type: 'payment_received', userId: p.riderId, amount: p.amount } },
       { channel: 'audit', payload: { action: 'payment.settled', entityId: p.id } },
     ]);
+    // FIX (META-011): Observe the payment counter so /metrics reports real data.
+    paymentCounter.labels('completed', p.method).inc();
     return true;
   });
 }
@@ -77,6 +80,7 @@ export async function failPayment(reference: string, reasonRaw: unknown): Promis
       if (claim) await tx.update(schema.seatReleases).set({ status: 'open', updatedAt: new Date() }).where(eq(schema.seatReleases.id, claim.seatReleaseId));
     }
     await tx.insert(schema.outboxEvents).values({ channel: 'notification', payload: { type: 'payment_failed', userId: p.riderId, raw: reasonRaw } });
+    paymentCounter.labels('failed', p.method).inc();
     return true;
   });
 }
@@ -200,14 +204,17 @@ export async function processRefundRetries(limit = 50) {
           await subscriptionRepo.decrementRidesUsed(tx, payment.subscriptionId);
         }
         await tx.insert(schema.outboxEvents).values({ channel: 'notification', payload: { type: 'refund_completed', userId: payment.riderId } });
+        refundCounter.labels('succeeded').inc();
       } else {
         const attempts = retry.attempts + 1;
         if (result.status === 'failed' && result.permanent) {
           await tx.update(schema.refundRetries).set({ status: 'permanent_failure', attempts, lastError: result.error, updatedAt: new Date() }).where(eq(schema.refundRetries.id, retry.id));
           await tx.insert(schema.outboxEvents).values({ channel: 'notification', payload: { type: 'refund_failed', userId: payment.riderId } });
+          refundCounter.labels('permanent_failure').inc();
         } else if (attempts >= retry.maxAttempts) {
           await tx.update(schema.refundRetries).set({ status: 'permanent_failure', attempts, updatedAt: new Date() }).where(eq(schema.refundRetries.id, retry.id));
           await tx.insert(schema.outboxEvents).values({ channel: 'notification', payload: { type: 'refund_failed', userId: payment.riderId } });
+          refundCounter.labels('permanent_failure').inc();
         } else {
           const backoffMin = BACKOFF_MIN[Math.min(attempts - 1, BACKOFF_MIN.length - 1)];
           await tx.update(schema.refundRetries).set({

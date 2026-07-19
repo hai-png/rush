@@ -1,10 +1,11 @@
 import { addHours } from 'date-fns';
 import { and, eq, gt, desc, lte } from 'drizzle-orm';
 import { db, schema } from '@addis/db';
-import { Money, ConflictError, BadRequestError, NotFoundError, proratedRideValue, PAYMENT_RETENTION_YEARS } from '@addis/shared';
+import { Money, ConflictError, BadRequestError, NotFoundError, proratedRideValue, PAYMENT_RETENTION_YEARS, loadEnv } from '@addis/shared';
 import { getPaymentProvider } from '@addis/payments';
 import { scheduleRefund } from '../payment/service';
 
+const env = loadEnv();
 const SEAT_RELEASE_TTL_HOURS = Number(process.env.SEAT_RELEASE_TTL_HOURS ?? 4);
 function addYears(d: Date, years: number) { const c = new Date(d); c.setFullYear(c.getFullYear() + years); return c; }
 function generateMerchOrderId() { return `CLM${Date.now()}${Math.random().toString(36).slice(2, 8)}`; }
@@ -89,7 +90,7 @@ export const marketplaceService = {
     try {
       const checkout = await provider.createCheckout({
         merchOrderId: result.payment.reference, amount: Money.fromDecimal(result.payment.amount),
-        description: 'Addis Ride — claim released seat', notifyUrl: process.env.TELEBIRR_NOTIFY_URL!, redirectUrl: process.env.TELEBIRR_REDIRECT_URL!,
+        description: 'Addis Ride — claim released seat', notifyUrl: env.TELEBIRR_NOTIFY_URL, redirectUrl: env.TELEBIRR_REDIRECT_URL,
       });
       return { ...result, checkout };
     } catch (err) {

@@ -9,19 +9,6 @@ import { clientIp } from '../../src/ip';
 import { db, schema } from '@addis/db';
 import { eq, and } from 'drizzle-orm';
 
-// FIX (ARCH-003): Migrated from bare `Hono()` to `TypedOpenAPIHono` so routes
-// appear in the generated OpenAPI document (and therefore in the SDK types).
-// The most security-critical routes (token, register, 2fa/*) get full
-// createRoute() definitions with request/response schemas; the rest use
-// the .openapi() method with inline route specs.
-export const identityRoutes = new TypedOpenAPIHono();
-
-const RegisterInput = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('rider'), name: z.string().min(2), phone: EthiopianPhone, password: z.string().min(10), homeArea: z.string(), workArea: z.string() }),
-  z.object({ kind: z.literal('contractor'), name: z.string().min(2), phone: EthiopianPhone, password: z.string().min(10), licenseNumber: z.string(), experienceYears: z.number().int().min(0) }),
-]);
-
-// FIX (ARCH-003): Full OpenAPI route definitions for the most security-critical
 // auth endpoints. These now appear in the generated OpenAPI document with
 // request/response schemas, so the SDK types them end-to-end.
 const RegisterResponseSchema = z.object({

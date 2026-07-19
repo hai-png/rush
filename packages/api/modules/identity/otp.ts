@@ -3,6 +3,7 @@ import { and, eq, gt, sql } from 'drizzle-orm';
 import { db, schema } from '@addis/db';
 import { BadRequestError, RateLimitError } from '@addis/shared';
 import { redis } from '../../infra/redis';
+import { otpCounter } from '../health/metrics';
 
 const OTP_TTL_MIN = 5;
 const MAX_ATTEMPTS = 5;
@@ -59,6 +60,7 @@ export const otpService = {
       || process.env.ALLOW_DEV_OTP === '1'
       || process.env.ALLOW_DEV_OTP === 'true';
     const devCode = allowDev ? code : undefined;
+    otpCounter.labels('sent').inc();
     return { sent, devCode };
   },
 
@@ -97,6 +99,7 @@ export const otpService = {
       .where(and(eq(schema.otpCodes.id, row.id), eq(schema.otpCodes.verified, false)))
       .returning({ id: schema.otpCodes.id });
     if (updated.length === 0) throw new BadRequestError('Code already used or invalidated');
+    otpCounter.labels('verified').inc();
     return true;
   },
 };

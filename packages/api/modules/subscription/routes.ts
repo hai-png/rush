@@ -1,4 +1,5 @@
-import { createRoute, OpenAPIHono, z } from '@hono/zod-openapi';
+import { createRoute, z } from '@hono/zod-openapi';
+import { TypedOpenAPIHono } from '../../src/typed-hono';
 import { ErrorSchema, envelope } from '@addis/shared';
 import { requireRole } from '../../src/middleware/auth';
 import { CreateSubscriptionInput } from './types';
@@ -7,7 +8,9 @@ import { db, schema } from '@addis/db';
 import { eq } from 'drizzle-orm';
 import { NotFoundError } from '@addis/shared';
 
-export const subscriptionRoutes = new OpenAPIHono();
+// FIX (META-020): Migrated from bare OpenAPIHono to TypedOpenAPIHono so
+// c.get('session') is typed consistently with the rest of the codebase.
+export const subscriptionRoutes = new TypedOpenAPIHono();
 
 const SubscriptionSchema = z.object({
   id: z.string(), riderId: z.string(), planId: z.string(), routeId: z.string().nullable(),

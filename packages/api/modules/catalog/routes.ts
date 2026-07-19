@@ -1,16 +1,3 @@
-// FIX (ARCH-003): Migrated from bare `Hono()` to `TypedOpenAPIHono` so this
-// module is OpenAPI-capable and `c.get('session')` / `c.get('requestId')` /
-// `c.get('logger')` are typed. Existing .post/.get/.patch/.delete calls
-// continue to work; they can be incrementally converted to
-// .openapi(createRoute(...), handler) to appear in the OpenAPI document.
-import { TypedOpenAPIHono } from '../../src/typed-hono';
-import { requireRole } from '../../src/middleware/auth';
-import { catalogService } from './service';
-import { CreateRouteInput, UpdateRouteInput, CreateShuttleInput, UpdateShuttleInput } from './types';
-
-export const catalogRoutes = new TypedOpenAPIHono();
-
-// Public
 catalogRoutes.get('/routes', async (c) => {
   // FIX (API-003): Use the shared parseLimit() helper (1..100 clamp) instead
   // of raw `Number(c.req.query('limit') ?? 20)`, which accepted ?limit=99999999

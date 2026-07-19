@@ -138,6 +138,9 @@ export const corporateMembers = pgTable('corporate_members', {
   corpUserActiveUniq: uniqueIndex('corp_member_user_active_uniq').on(t.userId).where(sql`${t.deletedAt} is null`),
   corpEmpActiveUniq: uniqueIndex('corp_member_corp_emp_active_uniq').on(t.corporateId, t.employeeId).where(sql`${t.deletedAt} is null`),
   corpIdx: index().on(t.corporateId),
+  // FIX (DATA-002): full (non-partial) index on userId for queries that
+  // don't filter deletedAt (e.g. admin lists, retention-cleanup).
+  userIdIdx: index().on(t.userId),
 }));
 
 export const routes = pgTable('routes', {
@@ -314,7 +317,11 @@ export const seatClaims = pgTable('seat_claims', {
   status: seatClaimStatus('status').notNull().default('confirmed'),
   createdAt: ts('created_at').notNull().defaultNow(),
   updatedAt: ts('updated_at').notNull().defaultNow(),
-}, (t) => ({ riderIdx: index().on(t.riderId) }));
+}, (t) => ({
+  riderIdx: index().on(t.riderId),
+  // FIX (DATA-002): index on paymentId for the webhook refund-lookup path
+  paymentIdx: index().on(t.paymentId),
+}));
 
 export const rides = pgTable('rides', {
   id: text('id').primaryKey().$defaultFn(createId),
@@ -329,6 +336,9 @@ export const rides = pgTable('rides', {
 }, (t) => ({
   tripRiderUniq: uniqueIndex().on(t.tripId, t.riderId),
   riderIdx: index().on(t.riderId),
+  // FIX (DATA-002): indexes for FK columns used in hot paths
+  subscriptionIdx: index().on(t.subscriptionId),
+  seatClaimIdx: index().on(t.seatClaimId),
 }));
 
 export const refundRetries = pgTable('refund_retries', {
@@ -367,6 +377,9 @@ export const supportTickets = pgTable('support_tickets', {
 }, (t) => ({
   userStatusIdx: index().on(t.userId, t.status),
   statusCreatedIdx: index().on(t.status, t.createdAt),
+  // FIX (DATA-002): indexes for FK columns used in ticket-lookup paths
+  subscriptionIdx: index().on(t.subscriptionId),
+  paymentIdx: index().on(t.paymentId),
 }));
 
 export const ticketMessages = pgTable('ticket_messages', {

@@ -1,8 +1,3 @@
-// FIX (ARCH-003): Migrated from bare `Hono()` to `TypedOpenAPIHono` so this
-// module is OpenAPI-capable and `c.get('session')` / `c.get('requestId')` /
-// `c.get('logger')` are typed. Existing .post/.get/.patch/.delete calls
-// continue to work; they can be incrementally converted to
-// .openapi(createRoute(...), handler) to appear in the OpenAPI document.
 import { TypedOpenAPIHono } from '../../src/typed-hono';
 import { eq, and, inArray } from 'drizzle-orm';
 import { db, schema } from '@addis/db';

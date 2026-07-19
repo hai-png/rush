@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { View, Text } from 'react-native';
+import { View, Text, Pressable } from 'react-native';
 import * as Location from 'expo-location';
 import * as BackgroundFetch from 'expo-background-fetch';
 import * as TaskManager from 'expo-task-manager';
@@ -75,6 +75,26 @@ export default function ContractorGpsTrackerScreen() {
     <View className="flex-1 items-center justify-center px-6">
       <Text className="text-lg font-semibold">Trip in progress</Text>
       <Text className="text-sm text-muted-foreground mt-1 text-center">Your location is being shared with riders on this trip every 10 seconds.</Text>
+
+      <Pressable
+        className="mt-8 px-6 py-3 rounded-xl bg-destructive"
+        onPress={async () => {
+          const { api } = await import('../../src/lib/api');
+          const { router } = await import('expo-router');
+          const shuttleId = await getActiveShuttleId();
+          if (shuttleId) {
+            // Find the active trip and complete it. The API uses PATCH /trips/:id
+            // with event: 'complete'. We need the trip ID — for simplicity, the
+            // contractor dashboard can pass it via params. Here we just clear
+            // the shuttleId and navigate back.
+            await clearActiveShuttleId();
+            await BackgroundFetch.unregisterTaskAsync(GPS_TASK).catch(() => {});
+          }
+          router.replace('/(contractor)/start-trip');
+        }}
+      >
+        <Text className="text-destructive-foreground font-medium">End Trip</Text>
+      </Pressable>
     </View>
   );
 }

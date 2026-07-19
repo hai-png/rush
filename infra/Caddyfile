@@ -45,10 +45,8 @@ addisride.et {
   import common
 
   reverse_proxy web:3000 {
-    # Pass the real client IP to the app. Caddy appends to X-Forwarded-For
-    # (standard behavior); the app's rate-limit middleware now reads the
-    # RIGHTMOST entry (set by Caddy, our trusted proxy) rather than the
-    # leftmost (attacker-controlled).
+    # Caddy replaces X-Forwarded-For with {remote_host}. The app's clientIp()
+    # reads the rightmost entry — correct for single-hop and multi-hop alike.
     header_up X-Real-IP {remote_host}
     header_up X-Forwarded-For {remote_host}
   }

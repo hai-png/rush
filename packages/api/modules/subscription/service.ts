@@ -1,13 +1,14 @@
 import { addDays } from 'date-fns';
 import { and, desc, eq } from 'drizzle-orm';
 import { db, schema } from '@addis/db';
-import { Money, ConflictError, BadRequestError, NotFoundError, PAYMENT_RETENTION_YEARS } from '@addis/shared';
+import { Money, ConflictError, BadRequestError, NotFoundError, PAYMENT_RETENTION_YEARS, loadEnv } from '@addis/shared';
 import { getPaymentProvider } from '@addis/payments';
 import type { CreateSubscriptionInput } from './types';
 import { subscriptionRepo } from './repository';
 import { transitionSubscription } from './state';
 import { scheduleRefund } from '../payment/service';
 
+const env = loadEnv();
 function addYears(d: Date, years: number) { const c = new Date(d); c.setFullYear(c.getFullYear() + years); return c; }
 function generateMerchOrderId() { return `SUB${Date.now()}${Math.random().toString(36).slice(2, 8)}`; }
 
@@ -78,7 +79,7 @@ export const subscriptionService = {
     const provider = getPaymentProvider(input.paymentMethod);
     const checkout = await provider.createCheckout({
       merchOrderId, amount: price, description: `Addis Ride — ${plan.name}`,
-      notifyUrl: process.env.TELEBIRR_NOTIFY_URL!, redirectUrl: process.env.TELEBIRR_REDIRECT_URL!,
+      notifyUrl: env.TELEBIRR_NOTIFY_URL, redirectUrl: env.TELEBIRR_REDIRECT_URL,
     });
 
     // Second transaction: update prepayId if the provider returned one.

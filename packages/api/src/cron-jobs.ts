@@ -479,6 +479,36 @@ export const CRON_JOBS: ReadonlyArray<{
         console.error('[archive-old-records] payments failed:', (err as Error).message);
       }
 
+      // 6. FIX (META-010): Anonymize subscriptions, seat_releases, seat_claims,
+      //    rides — scrub PII fields (morningSlot, eveningSlot, pickupStop) while
+      //    keeping the rows for reporting. riderId stays valid (FK to anonymized
+      //    rider profile).
+      try {
+        const oldSubs = await db.update(schema.subscriptions)
+          .set({ morningSlot: null, eveningSlot: null, updatedAt: new Date() })
+          .where(and(
+            lt(schema.subscriptions.endDate, SEVEN_YEARS_AGO),
+            sql`${schema.subscriptions.morningSlot} IS NOT NULL OR ${schema.subscriptions.eveningSlot} IS NOT NULL`,
+          ))
+          .returning({ id: schema.subscriptions.id });
+        result.subscriptionsAnonymized = oldSubs.length;
+      } catch (err) {
+        console.error('[archive-old-records] subscriptions failed:', (err as Error).message);
+      }
+
+      try {
+        const oldRides = await db.update(schema.rides)
+          .set({ pickupStop: null, updatedAt: new Date() })
+          .where(and(
+            lt(schema.rides.createdAt, SEVEN_YEARS_AGO),
+            sql`${schema.rides.pickupStop} IS NOT NULL`,
+          ))
+          .returning({ id: schema.rides.id });
+        result.ridesAnonymized = oldRides.length;
+      } catch (err) {
+        console.error('[archive-old-records] rides failed:', (err as Error).message);
+      }
+
       return result;
     },
   },
