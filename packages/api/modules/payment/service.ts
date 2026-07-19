@@ -82,7 +82,7 @@ export async function failPayment(reference: string, reasonRaw: unknown): Promis
  *   3. The cumulative refunded amount (existing refundAmount + new amount)
  *      does not exceed the original payment amount.
  */
-export async function scheduleRefund(paymentId: string, amount: Money, reason: string, tx = db) {
+export async function scheduleRefund(paymentId: string, amount: Money, reason: string, tx: import('@addis/db').DbOrTx = db) {
   const [payment] = await tx.select().from(schema.payments).where(eq(schema.payments.id, paymentId));
   if (!payment) throw new NotFoundError(`Payment ${paymentId} not found`);
   if (payment.status !== 'completed') throw new BadRequestError('Only completed payments can be refunded');

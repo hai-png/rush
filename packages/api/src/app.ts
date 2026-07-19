@@ -21,6 +21,7 @@ import { healthRoutes } from '../modules/health/routes';
 import { metricsRoutes } from '../modules/health/metrics';
 import { accountRoutes } from '../modules/account/routes';
 import { dashboardRoutes } from '../modules/dashboard/routes';
+import { tosRoutes } from '../modules/tos/routes';
 
 export const app = new OpenAPIHono();
 
@@ -45,6 +46,7 @@ app.route('/api/v1', healthRoutes);       // /api/v1/health
 app.route('/api/v1', metricsRoutes);      // /api/v1/metrics
 app.route('/api/v1/account', accountRoutes);
 app.route('/api/v1/dashboard', dashboardRoutes);
+app.route('/api/v1/tos', tosRoutes);
 
 app.onError(errorHandler);
 

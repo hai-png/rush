@@ -6,9 +6,7 @@ export * from './primitives/skeleton';
 export * from './primitives/toast';
 export * from './components/route-card';
 export * from './components/subscription-card';
-// Removed: export * from './components/shuttle-eta-card';
-// The file didn't exist — importing @addis/ui crashed the entire web app
-// build with a module-not-found error. Re-add when the component is created.
+export * from './components/shuttle-eta-card';
 export * from './components/empty-state';
 export * from './components/data-table';
 export * from './components/stepper';

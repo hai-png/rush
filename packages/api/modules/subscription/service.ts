@@ -1,11 +1,12 @@
 import { addDays } from 'date-fns';
+import { and, desc, eq } from 'drizzle-orm';
 import { db, schema } from '@addis/db';
 import { Money, ConflictError, BadRequestError, NotFoundError, PAYMENT_RETENTION_YEARS } from '@addis/shared';
 import { getPaymentProvider } from '@addis/payments';
 import type { CreateSubscriptionInput } from './types';
 import { subscriptionRepo } from './repository';
 import { transitionSubscription } from './state';
-import { eq } from 'drizzle-orm';
+import { scheduleRefund } from '../payment/service';
 
 function addYears(d: Date, years: number) { const c = new Date(d); c.setFullYear(c.getFullYear() + years); return c; }
 function generateMerchOrderId() { return `SUB${Date.now()}${Math.random().toString(36).slice(2, 8)}`; }
@@ -84,8 +85,13 @@ export const subscriptionService = {
     const sub = await subscriptionRepo.findById(subscriptionId);
     if (!sub || sub.riderId !== riderId) throw new NotFoundError('Subscription not found');
     if (sub.status !== 'expired' && sub.status !== 'cancelled') throw new ConflictError('Only expired/cancelled subscriptions can be renewed');
+    // routeId is nullable on subscriptions (ON DELETE SET NULL from routes), but
+    // create() requires it. A subscription without a route cannot be renewed —
+    // the route was likely deleted. Surface a clear error instead of crashing
+    // on the `!` non-null assertion. (H48 fix.)
+    if (!sub.routeId) throw new BadRequestError('Cannot renew a subscription whose route has been deleted');
     return subscriptionService.create({
-      riderId, planId: sub.planId, routeId: sub.routeId!,
+      riderId, planId: sub.planId, routeId: sub.routeId,
       morningSlot: sub.morningSlot ?? undefined, eveningSlot: sub.eveningSlot ?? undefined,
       paymentMethod, corporateMemberId: sub.corporateMemberId ?? undefined,
     });
@@ -97,6 +103,37 @@ export const subscriptionService = {
     return db.transaction(async (tx) => {
       const result = await transitionSubscription(tx, subscriptionId, 'subscription.cancelled');
       await tx.update(schema.subscriptions).set({ cancelledAt: new Date() }).where(eq(schema.subscriptions.id, subscriptionId));
+
+      // If the subscription is active and has a completed payment, queue a
+      // prorated refund for the unused rides. The state machine's sideEffects
+      // list includes 'refund.if_eligible' — we implement that check here
+      // rather than in the state machine itself (which stays pure).
+      //
+      // We call scheduleRefund (which validates: payment completed, amount
+      // positive, cumulative ≤ original) rather than inserting into
+      // refundRetries directly. This ensures the cancel-path refund goes
+      // through the same validation as admin-initiated refunds. (H49 fix.)
+      if (sub.status === 'active') {
+        const [plan] = await tx.select().from(schema.subscriptionPlans).where(eq(schema.subscriptionPlans.id, sub.planId));
+        const [payment] = await tx.select().from(schema.payments)
+          .where(and(eq(schema.payments.subscriptionId, subscriptionId), eq(schema.payments.status, 'completed')))
+          .orderBy(desc(schema.payments.createdAt)).limit(1);
+        // plan.ridesIncluded === -1 means unlimited — no per-ride refund due.
+        if (plan && payment && plan.ridesIncluded > 0) {
+          const unusedRides = Math.max(0, plan.ridesIncluded - sub.ridesUsed);
+          if (unusedRides > 0) {
+            const perRide = Money.fromDecimal(plan.priceETB).div(plan.ridesIncluded);
+            const refundAmount = perRide.mul(unusedRides);
+            // Only schedule if the refund amount is positive and doesn't exceed
+            // the payment amount (scheduleRefund enforces both, but we skip
+            // the call entirely for zero amounts to avoid a no-op audit row).
+            if (refundAmount.isPositive() && refundAmount.lte(Money.fromDecimal(payment.amount))) {
+              await scheduleRefund(payment.id, refundAmount, 'subscription_cancelled', tx);
+            }
+          }
+        }
+      }
+
       await tx.insert(schema.outboxEvents).values([
         { channel: 'notification', payload: { type: 'subscription_cancelled', userId: riderId } },
         { channel: 'audit', payload: { action: 'subscription.cancelled', entityId: subscriptionId } },

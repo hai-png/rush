@@ -51,6 +51,8 @@ export class Money {
   pct(p: number): Money { return this.mul(p).div(100); }
   gte(o: Money): boolean { return this.amount.gte(o.amount); }
   gt(o: Money): boolean { return this.amount.gt(o.amount); }
+  lte(o: Money): boolean { return this.amount.lte(o.amount); }
+  lt(o: Money): boolean { return this.amount.lt(o.amount); }
   eq(o: Money): boolean { return this.amount.eq(o.amount); }
   isPositive(): boolean { return this.amount.gt(0); }
   isZero(): boolean { return this.amount.eq(0); }

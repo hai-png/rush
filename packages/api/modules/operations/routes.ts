@@ -79,17 +79,50 @@ operationsRoutes.post('/shuttle-positions', requireRole('contractor'), async (c)
 
 operationsRoutes.get('/shuttle-positions/stream', requireRole('rider'), async (c) => {
   const ids = (c.req.query('shuttleIds') ?? '').split(',').filter(Boolean);
+  /**
+   * Server-Sent Events stream of live shuttle positions.
+   *
+   * The previous implementation called `redis.duplicate()` and `sub.subscribe()` —
+   * ioredis-style APIs that do not exist on @upstash/redis (which is HTTP-based, not
+   * connection-based). The code would have thrown at runtime the first time a rider
+   * opened the live-trip screen.
+   *
+   * We now poll the cached positions from Redis every 5s and push them as SSE events.
+   * This is less efficient than true pub/sub (5s of latency vs. instant) but works
+   * with the existing @upstash/redis client. A future optimisation is to switch to
+   * a Redis client that supports pub/sub (e.g. ioredis or node-redis) for this
+   * endpoint only, keeping @upstash/redis for the rate-limit/OTP counters.
+   */
   return new Response(new ReadableStream({
     async start(controller) {
       const encoder = new TextEncoder();
-      const heartbeat = setInterval(() => controller.enqueue(encoder.encode(':heartbeat\n\n')), 15000);
-      const sub = redis.duplicate();
-      for (const id of ids) {
-        await sub.subscribe(`shuttle:updates:${id}`, (message) => {
-          controller.enqueue(encoder.encode(`data: ${message}\n\n`));
-        });
-      }
-      c.req.raw.signal.addEventListener('abort', () => { clearInterval(heartbeat); sub.disconnect(); controller.close(); });
+      const closed = { value: false };
+
+      const pushPositions = async () => {
+        if (closed.value) return;
+        try {
+          const positions = await Promise.all(ids.map((id) => redis.hgetall(`shuttle:pos:${id}`)));
+          const valid = positions.filter(Boolean);
+          if (valid.length) {
+            controller.enqueue(encoder.encode(`data: ${JSON.stringify(valid)}\n\n`));
+          } else {
+            controller.enqueue(encoder.encode(':heartbeat\n\n'));
+          }
+        } catch {
+          // Redis hiccup — don't kill the stream; next tick will retry.
+          controller.enqueue(encoder.encode(':heartbeat\n\n'));
+        }
+      };
+
+      // Initial push, then poll every 5s.
+      await pushPositions();
+      const interval = setInterval(pushPositions, 5000);
+
+      c.req.raw.signal.addEventListener('abort', () => {
+        closed.value = true;
+        clearInterval(interval);
+        try { controller.close(); } catch { /* already closed */ }
+      });
     },
   }), { headers: { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' } });
 });
