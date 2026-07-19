@@ -42,6 +42,25 @@ app.use('*', rateLimitMiddleware);  // must run after authMiddleware — several
 app.use('*', tosGateMiddleware);    // 409 if authenticated + stale ToS
 app.use('/api/v1/*', idempotencyMiddleware); // POST only, internally
 
+// FIX (META-005): Timing middleware MUST be registered BEFORE app.route()
+// calls. In Hono v4, middleware registered after a matched route does not
+// execute — the route handler returns a Response without calling next(),
+// stopping the chain. The previous placement (after routes) meant the
+// histogram was never observed for any matched route.
+app.use('*', async (c, next) => {
+  const start = Date.now();
+  await next();
+  const durationSec = (Date.now() - start) / 1000;
+  const route = c.req.path
+    .replace(/\/[a-z0-9]{24}/g, '/:id')
+    .replace(/\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '/:id');
+  try {
+    httpRequestDuration.labels(c.req.method, route, String(c.res.status)).observe(durationSec);
+  } catch {
+    // Don't let metrics observation break the response.
+  }
+});
+
 app.route('/api/v1', catalogRoutes);
 app.route('/api/v1/auth', identityRoutes);
 app.route('/api/v1/subscriptions', subscriptionRoutes);
@@ -58,29 +77,6 @@ app.route('/api/v1', metricsRoutes);      // /api/v1/metrics
 app.route('/api/v1/account', accountRoutes);
 app.route('/api/v1/dashboard', dashboardRoutes);
 app.route('/api/v1/tos', tosRoutes);
-
-// FIX (OPS-006): Timing middleware. Runs AFTER all routes are mounted so
-// c.req.routePaths is populated. We observe the request duration with
-// normalized route labels (replace cuid2/uuid path segments with :id) so
-// the cardinality of the `route` label stays bounded.
-app.use('*', async (c, next) => {
-  const start = Date.now();
-  await next();
-  const durationSec = (Date.now() - start) / 1000;
-  // Normalize the path: replace cuid2 (24-char lowercase alnum) and uuid
-  // path segments with :id so /api/v1/tickets/abc123 becomes
-  // /api/v1/tickets/:id. Without this, every distinct ticket id would
-  // create a new label series — unbounded cardinality would OOM the
-  // metrics registry over time.
-  const route = c.req.path
-    .replace(/\/[a-z0-9]{24}/g, '/:id')      // cuid2
-    .replace(/\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '/:id');  // uuid
-  try {
-    httpRequestDuration.labels(c.req.method, route, String(c.res.status)).observe(durationSec);
-  } catch {
-    // Don't let metrics observation break the response — log and continue.
-  }
-});
 
 app.onError(errorHandler);
 

@@ -35,28 +35,28 @@ export default function RootLayout() {
     return unsubscribe;
   }, []);
 
-  // FIX (MOB-005): Biometric gate bypass via deep links and notifications.
-  // The previous implementation set `initialRouteName="(auth)/biometric-gate"`
-  // which is only a HINT for the initial stack screen — it does NOT prevent
-  // deep links (from push notifications, URL schemes) from routing directly
-  // to /(rider)/dashboard or /(contractor)/gps-tracker, bypassing the
-  // biometric gate entirely. A user who backgrounded the app with
-  // biometricUnlock enabled could tap a notification and land in the rider
-  // dashboard without authenticating.
-  //
-  // This AppState listener re-triggers the gate whenever the app returns to
-  // the foreground ('active') AND the user has biometricUnlock enabled.
-  // The gate itself (in (auth)/biometric-gate.tsx) handles the actual
-  // LocalAuthentication.authenticateAsync() call; we just route there.
+  // FIX (MOB-005 / UX-003): Biometric gate on app foreground. Deep links and
+  // notifications can bypass `initialRouteName`. This listener re-triggers
+  // the gate when the app returns to the foreground AND the user has
+  // biometricUnlock enabled. UX-003 fix: only re-trigger if the app was
+  // backgrounded for >30 seconds — avoids forcing biometric auth every time
+  // the user briefly switches to SMS to copy an OTP.
   const router = useRouter();
   useEffect(() => {
+    let lastBackgroundedAt: number | null = null;
     const sub = AppState.addEventListener('change', (state) => {
+      if (state === 'background') {
+        lastBackgroundedAt = Date.now();
+        return;
+      }
       if (state !== 'active') return;
+      if (lastBackgroundedAt === null) return; // first foreground (app launch) — gate handles it
+      const backgroundDuration = Date.now() - lastBackgroundedAt;
+      lastBackgroundedAt = null;
+      if (backgroundDuration < 30_000) return; // <30s background — don't re-prompt
       const { accessToken } = useAuthStore.getState();
       const { biometricUnlock } = useSettingsStore.getState();
       if (accessToken && biometricUnlock) {
-        // Replace (not push) so the back button doesn't return to the
-        // pre-gate screen.
         router.replace('/(auth)/biometric-gate');
       }
     });

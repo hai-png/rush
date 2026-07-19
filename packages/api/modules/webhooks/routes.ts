@@ -4,7 +4,7 @@
 // continue to work; they can be incrementally converted to
 // .openapi(createRoute(...), handler) to appear in the OpenAPI document.
 import { TypedOpenAPIHono } from '../../src/typed-hono';
-import { eq } from 'drizzle-orm';
+import { eq, and, inArray } from 'drizzle-orm';
 import { db, schema } from '@addis/db';
 import { getPaymentProvider } from '@addis/payments';
 import { settlePayment, failPayment } from '../payment/service';
@@ -95,9 +95,17 @@ webhookRoutes.post('/telebirr/notify', async (c) => {
   if (event.type === 'refund.succeeded' || event.type === 'refund.failed') {
     if (!event.refundRequestNo) return c.text('SUCCESS');
     const newStatus = event.type === 'refund.succeeded' ? 'succeeded' : 'permanent_failure';
+    // FIX (META-004): Only update if the row is still in a pre-terminal state
+    // ('pending' or 'processing'). Without this guard, a duplicate webhook
+    // (or a webhook arriving after the process-refund-retries cron already
+    // marked the row 'succeeded') would match the UPDATE, return the row,
+    // and accumulate refundAmount on the payment AGAIN — double-crediting.
     const updated = await db.update(schema.refundRetries)
       .set({ status: newStatus as any, updatedAt: new Date() })
-      .where(eq(schema.refundRetries.refundRequestNo, event.refundRequestNo))
+      .where(and(
+        eq(schema.refundRetries.refundRequestNo, event.refundRequestNo),
+        inArray(schema.refundRetries.status, ['pending', 'processing'] as any),
+      ))
       .returning();
     if (updated.length === 0) {
       // Unknown refund — could be a webhook for a refund initiated elsewhere.

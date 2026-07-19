@@ -33,15 +33,12 @@ function PlansClient() {
   const [plans, setPlans] = useState<any[] | null>(null);
   const [routes, setRoutes] = useState<any[] | null>(null);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
 
-  // FIX (WEB-002): The previous implementation used `useState(() => {...})`
-  // (the lazy-initializer form) to fire the async fetch. useState's
-  // initializer runs DURING render and is for computing the initial state
-  // value — not for side effects. In React Strict Mode (dev) the
-  // initializer is called twice, causing double API calls. There's also no
-  // cleanup, no error handling, and no cancellation if the component
-  // unmounts mid-fetch (setPlans/setRoutes would warn about a state
-  // update on an unmounted component). useEffect is the correct hook.
+  // FIX (WEB-002 / UX-005): useEffect with cleanup + error state. The
+  // previous useState-initializer pattern fired twice in Strict Mode and
+  // had no error handling. Now: on fetch failure, set `error=true` so the
+  // render shows a retry button instead of an empty grid.
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -55,7 +52,7 @@ function PlansClient() {
         setRoutes(routeData ?? []);
         setLoading(false);
       } catch {
-        if (!cancelled) setLoading(false);
+        if (!cancelled) { setError(true); setLoading(false); }
       }
     })();
     return () => { cancelled = true; };
@@ -70,6 +67,18 @@ function PlansClient() {
             <Card key={i}><CardContent className="h-48 animate-pulse bg-secondary/50" /></Card>
           ))}
         </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="px-5 py-10 max-w-3xl mx-auto text-center">
+        <h1 className="text-xl font-semibold mb-4">Couldn&apos;t load plans</h1>
+        <p className="text-muted-foreground mb-6">Something went wrong. Please try again.</p>
+        <Button onClick={() => { setError(false); setLoading(true); setPlans(null); setRoutes(null); }}>
+          Retry
+        </Button>
       </div>
     );
   }

@@ -64,13 +64,11 @@ export default function AdminUsersPage() {
               Suspend
             </Button>
           ) : (
-            // FIX (WEB-003): The previous implementation sent `action: 'suspend'`
-            // for the Reactivate button too — the same payload as Suspend. The
-            // server would either re-suspend (no-op) or treat it as a toggle,
-            // neither of which matched the button label. Now sends `reactivate`.
+            // FIX (WEB-003 / UX-007): Reactivate now sends 'reactivate' action.
+            // Server support added in admin/routes.ts + admin/service.ts.
             <Button size="sm"
               loading={updateUser.isPending && updateUser.variables?.id === u.id}
-              onClick={() => updateUser.mutate({ id: u.id, action: 'reactivate' as any })}>
+              onClick={() => updateUser.mutate({ id: u.id, action: 'reactivate' })}>
               Reactivate
             </Button>
           )}

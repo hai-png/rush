@@ -32,16 +32,32 @@ export const adminService = {
 
   async suspendUser(adminId: string, userId: string, ipAddress?: string) {
     return db.transaction(async (tx) => {
-      // Self-protection: an admin should not be able to suspend their own
-      // account — they'd lock themselves out with no recovery path. The
-      // previous implementation had no such check.
       if (adminId === userId) throw new ForbiddenError('Cannot suspend your own account');
       const [before] = await tx.select().from(schema.users).where(eq(schema.users.id, userId));
       if (!before) throw new NotFoundError('User not found');
       const [after] = await tx.update(schema.users).set({ isActive: false, tokenVersion: before.tokenVersion + 1, updatedAt: new Date() }).where(eq(schema.users.id, userId)).returning();
-      // Revoke all of the suspended user's sessions immediately.
       await tx.delete(schema.sessions).where(eq(schema.sessions.userId, userId));
       await writeAudit(tx as any, { actorId: adminId, action: 'user.suspended', entityType: 'user', entityId: userId, before, after, ipAddress });
+      return after;
+    });
+  },
+
+  /**
+   * Reactivate a previously-suspended user. FIX (UX-007): The admin UI had a
+   * Reactivate button that sent `action: 'reactivate'`, but the server didn't
+   * support it — the Zod enum only allowed 'suspend' and 'change_role'. This
+   * method sets isActive=true. We do NOT bump tokenVersion (the user's
+   * existing sessions are still invalid — they must log in fresh). We do NOT
+   * restore deleted sessions (that would be a security hole — the sessions
+   * were deleted on suspension for a reason).
+   */
+  async reactivateUser(adminId: string, userId: string, ipAddress?: string) {
+    return db.transaction(async (tx) => {
+      const [before] = await tx.select().from(schema.users).where(eq(schema.users.id, userId));
+      if (!before) throw new NotFoundError('User not found');
+      if (before.isActive) return before; // already active — idempotent no-op
+      const [after] = await tx.update(schema.users).set({ isActive: true, updatedAt: new Date() }).where(eq(schema.users.id, userId)).returning();
+      await writeAudit(tx as any, { actorId: adminId, action: 'user.reactivated', entityType: 'user', entityId: userId, before, after, ipAddress });
       return after;
     });
   },

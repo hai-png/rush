@@ -1,19 +1,22 @@
-import './instrumentation'; // must run first: calls Sentry.init(); this file previously existed but was never imported anywhere, so worker crash reporting was silently a no-op
+import './instrumentation';
 import { loadEnv } from '@addis/shared';
 import { db, schema } from '@addis/db';
-import { and, eq, lte, inArray, sql } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { withLock, CRON_JOBS } from '@addis/api/src/cron-jobs';
 import { logger } from '@addis/api/infra/logger';
 
-const env = loadEnv();
-const workerLogger = logger.child({ component: 'worker', workerId: `worker-${process.pid}-${Date.now()}` });
+loadEnv(); // validate env at startup
+
+// FIX (META-016): Single WORKER_ID for both logger and DB — consistent
+// log-to-DB correlation.
+const WORKER_ID = `worker-${process.pid}-${Date.now()}`;
+const workerLogger = logger.child({ component: 'worker', workerId: WORKER_ID });
 
 const HANDLERS: Record<string, (payload: any) => Promise<void>> = {
   notification: async (p) => (await import('./handlers/notification')).handle(p),
   sms: async (p) => (await import('./handlers/sms')).handle(p),
   push: async (p) => (await import('./handlers/push')).handle(p),
   email: async (p) => (await import('./handlers/email')).handle(p),
-  refund: async () => { /* refunds drained separately via process-refund-retries cron */ },
   audit: async (p) => (await import('./handlers/audit')).handle(p),
   webhook: async (p) => (await import('./handlers/webhook')).handle(p),
 };
@@ -36,7 +39,7 @@ async function drainOutbox() {
   // transient connection blips. Now: errors propagate — the next setInterval
   // tick retries. Fail loud, never silently degrade to an unsafe path.
   const claimed = await db.execute(sql`
-    UPDATE outbox_events SET status = 'processing', locked_at = now(), locked_by = ${`worker-${process.pid}-${Date.now()}`}, visibility_after = now() + interval '${sql.raw(String(LOCK_TTL_MS / 1000))} seconds'
+    UPDATE outbox_events SET status = 'processing', locked_at = now(), locked_by = ${WORKER_ID}, visibility_after = now() + interval '${sql.raw(String(LOCK_TTL_MS / 1000))} seconds'
     WHERE id IN (
       SELECT id FROM outbox_events
       WHERE status = 'pending'

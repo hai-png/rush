@@ -33,9 +33,14 @@ function boundedLimit(raw: string | undefined, def: number, max = 200): number {
 adminRoutes.get('/dashboard', async (c) => c.json({ data: await adminService.dashboard() }));
 adminRoutes.get('/users', async (c) => c.json({ data: await adminService.listUsers(boundedLimit(c.req.query('limit'), 20, 200), c.req.query('q')) }));
 adminRoutes.patch('/users/:id', async (c) => {
-  const body = z.object({ action: z.enum(['suspend', 'change_role']), role: z.enum(ALL_ROLES as [string, ...string[]]).optional() }).parse(await c.req.json());
+  // FIX (UX-007): Added 'reactivate' to the action enum so the admin UI's
+  // Reactivate button works. The previous enum only had 'suspend' and
+  // 'change_role' — the Reactivate button sent 'reactivate' which the
+  // server rejected with 400 Zod validation error every time.
+  const body = z.object({ action: z.enum(['suspend', 'change_role', 'reactivate']), role: z.enum(ALL_ROLES as [string, ...string[]]).optional() }).parse(await c.req.json());
   const ip = clientIp(c);
   if (body.action === 'suspend') return c.json({ data: await adminService.suspendUser(c.get('session').userId, c.req.param('id'), ip) });
+  if (body.action === 'reactivate') return c.json({ data: await adminService.reactivateUser(c.get('session').userId, c.req.param('id'), ip) });
   if (!body.role) return c.json({ error: { code: 'BAD_REQUEST', message: 'role is required for change_role', requestId: c.get('requestId') } }, 400);
   return c.json({ data: await adminService.changeRole(c.get('session').userId, c.req.param('id'), body.role, ip) });
 });

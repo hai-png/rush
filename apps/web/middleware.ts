@@ -1,6 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server';
 
 export function middleware(req: NextRequest) {
+  // FIX (UX-002): 404 the /telebirr-stub route in production. The previous
+  // fix rendered a "not available" message but the route was still reachable
+  // and the JS bundle (including the unsigned-POST fetch logic) was still
+  // shipped. Now: return a 404 response in production so the route doesn't
+  // exist at all.
+  if (req.nextUrl.pathname === '/telebirr-stub' &&
+      (process.env.NODE_ENV === 'production' || process.env.NEXT_PUBLIC_TELEBIRR_ENV === 'production')) {
+    return new NextResponse(null, { status: 404 });
+  }
+
   const nonce = Buffer.from(crypto.randomUUID()).toString('base64');
   // Strengthened CSP:
   //   - Removed 'unsafe-inline' from style-src (was neutralizing CSP).

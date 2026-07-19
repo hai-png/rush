@@ -24,7 +24,16 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     Credentials({
       credentials: { phone: {}, password: {}, code: {} },
       async authorize(creds, req) {
-        const ip = req.headers.get('x-forwarded-for') ?? undefined;
+        // FIX (META-013): Use the rightmost X-Forwarded-For entry (set by
+        // our trusted proxy) instead of the raw header (which is the whole
+        // comma-separated list, or the leftmost attacker-controlled entry).
+        // Mirrors the logic in packages/api/src/ip.ts clientIp().
+        const xff = req.headers.get('x-forwarded-for');
+        let ip: string | undefined;
+        if (xff) {
+          const parts = xff.split(',').map(s => s.trim()).filter(Boolean);
+          if (parts.length > 0) ip = parts[parts.length - 1] ?? undefined;
+        }
         const ua = req.headers.get('user-agent') ?? undefined;
         try {
           const code = (creds.code as string | undefined)?.trim() || undefined;

@@ -86,8 +86,15 @@ async function assertNotLocked(phone: string) {
 }
 
 async function clearFailedLogins(phone: string) {
-  await redis.set(failKey(phone), '0', { ex: 1 }).catch(() => {});
-  await redis.set(lockKey(phone), '0', { ex: 1 }).catch(() => {});
+  // FIX (META-006): Only delete the fail counter — do NOT touch the lock key.
+  // The previous implementation set lockKey to '0' with ex:1, which had two
+  // bugs: (1) for 1 second after a successful login, assertNotLocked read
+  // ttl=1 and threw a false "locked" error; (2) if a concurrent
+  // recordFailedLogin set the real lock (ex:900) between assertNotLocked and
+  // clearFailedLogins, the set('0', {ex:1}) overwrote the real lock — after
+  // 1 second the lock was gone, defeating the lockout. The failKey reset is
+  // sufficient to restart the counter on successful login.
+  await redis.del(failKey(phone)).catch(() => {});
 }
 
 export const identityService = {
@@ -215,15 +222,21 @@ export const identityService = {
     if (!user) throw new UnauthorizedError();
     // FIX (SEC-004): Refresh must NOT extend an impersonation session beyond
     // its original 15-minute lifetime. The impersonate() flow issues a 15-min
-    // JWT and a 15-min session row, intending a hard cap on how long an admin
-    // can act as another user. But the previous reissueToken replaced the
-    // session row with a NEW 30-day session (SESSION_TTL_MS) — so an admin
-    // (or anyone who later obtained the impersonation token) could refresh
-    // to extend the session from 15 minutes to 30 days, defeating the time
-    // limit. Now: if the current session row is marked as impersonated, we
-    // refuse refresh — the admin must re-impersonate (which requires 2FA).
+    // JWT and a 15-min session row. The previous reissueToken replaced the
+    // session row with a NEW 30-day session — so an admin (or anyone who
+    // obtained the impersonation token) could refresh to extend from 15 min
+    // to 30 days, defeating the time limit. Now: if the current session row
+    // is marked as impersonated, we refuse refresh.
+    // FIX (META-007): If currentSession is null (jti not found — already
+    // deleted by password reset, admin revocation, or logout-all), throw
+    // UnauthorizedError. The previous code's `currentSession?.impersonatedBy`
+    // was undefined for null, so the impersonation check passed and a NEW
+    // 30-day session was created — defeating session revocation.
     const [currentSession] = await db.select().from(schema.sessions).where(eq(schema.sessions.jti, currentJti));
-    if (currentSession?.impersonatedBy) {
+    if (!currentSession) {
+      throw new UnauthorizedError('Session not found — please log in again');
+    }
+    if (currentSession.impersonatedBy) {
       throw new ForbiddenError('Impersonation sessions cannot be refreshed — re-impersonate to continue');
     }
     const jti = createId();

@@ -80,17 +80,15 @@ export const CRON_JOBS: ReadonlyArray<{
         );
       }
 
-      // FIX (SEC-007): The previous implementation only expired `status='open'`
-      // releases. A `status='claimed'` release whose checkout URL expired
-      // (Telebirr's `timeout_express: '120m'`) was never returned to the open
-      // pool — the seat was permanently locked out of the marketplace. An
-      // attacker could claim every open seat with abandoned checkouts to DoS
-      // the marketplace. Now: a release that has been 'claimed' for more than
-      // 30 minutes (well beyond Telebirr's 120m checkout expiry; we use 30m
-      // here as a tight bound for abandoned-claim recovery) is reverted to
-      // 'open' if its associated payment is still 'pending'. The associated
-      // seat_claim is marked 'refunded' (cancelled) and the payment is
-      // marked 'failed' — matching the rollback path in marketplaceService.claim.
+      // FIX (SEC-007 / META-001): A 'claimed' release whose checkout URL
+      // expired (Telebirr's timeout_express: '120m') was never returned to
+      // the open pool. Now: a release claimed for >30m with a still-pending
+      // payment is reverted to 'open'. META-001 fix: the previous code
+      // looked up payments by `payments.seatClaimId = release.id`, but
+      // release.id is seatReleases.id and payments.seatClaimId is a FK to
+      // seatClaims.id — different ID spaces, so the query never matched.
+      // The correct join is: seatClaims.seatReleaseId = release.id →
+      // payments.seatClaimId = seatClaims.id.
       const staleClaims = await db.select().from(schema.seatReleases)
         .where(and(
           eq(schema.seatReleases.status, 'claimed'),
@@ -99,13 +97,17 @@ export const CRON_JOBS: ReadonlyArray<{
         .limit(50);
       for (const release of staleClaims) {
         await db.transaction(async (tx) => {
-          // Re-open the release only if its associated payment is still pending.
+          // Find the seatClaim for this release, then the payment for that claim.
+          const [claim] = await tx.select().from(schema.seatClaims)
+            .where(eq(schema.seatClaims.seatReleaseId, release.id))
+            .limit(1);
+          if (!claim) return;
           const [payment] = await tx.select().from(schema.payments)
-            .where(eq(schema.payments.seatClaimId, release.id))
+            .where(eq(schema.payments.seatClaimId, claim.id))
             .limit(1);
           if (!payment || payment.status !== 'pending') return;
           await tx.update(schema.seatReleases).set({ status: 'open', updatedAt: new Date() }).where(eq(schema.seatReleases.id, release.id));
-          await tx.update(schema.seatClaims).set({ status: 'refunded', updatedAt: new Date() }).where(eq(schema.seatClaims.seatReleaseId, release.id));
+          await tx.update(schema.seatClaims).set({ status: 'refunded', updatedAt: new Date() }).where(eq(schema.seatClaims.id, claim.id));
           await tx.update(schema.payments).set({ status: 'failed', updatedAt: new Date() }).where(eq(schema.payments.id, payment.id));
         });
       }
@@ -369,9 +371,8 @@ export const CRON_JOBS: ReadonlyArray<{
     route: 'archive-old-records',
     intervalMs: 24 * 3600_000, // 1 day
     run: async () => {
-      const { and, lt, sql, eq } = await import('drizzle-orm');
+      const { and, lt, sql, eq, inArray } = await import('drizzle-orm');
       const { s3 } = await import('../infra/s3');
-      const { writeAudit } = await import('../modules/admin/audit');
       const SEVEN_YEARS_AGO = sql`now() - interval '7 years'`;
       const result: Record<string, number> = {};
 
@@ -392,7 +393,7 @@ export const CRON_JOBS: ReadonlyArray<{
           // retention job's actions must be traceable).
           await db.transaction(async (tx) => {
             await tx.delete(schema.auditLogs).where(
-              sql`${schema.auditLogs.id} IN (${oldAudit.map(r => `'${r.id}'`).join(',')})`
+              inArray(schema.auditLogs.id, oldAudit.map(r => r.id))
             );
             // Note: we can't use writeAudit for this because writeAudit inserts
             // into audit_logs, which would be self-referential. Log to the
@@ -419,7 +420,7 @@ export const CRON_JOBS: ReadonlyArray<{
           const archiveKey = `archive/telebirr_notify/${new Date().toISOString().slice(0, 10)}-${Date.now()}.jsonl`;
           await s3.putObject(archiveKey, Buffer.from(jsonl, 'utf-8'), 'application/x-jsonlines');
           await db.delete(schema.telebirrNotifyEvents).where(
-            sql`${schema.telebirrNotifyEvents.merchOrderId} IN (${oldNotify.map(r => `'${r.merchOrderId}'`).join(',')})`
+            inArray(schema.telebirrNotifyEvents.merchOrderId, oldNotify.map(r => r.merchOrderId))
           );
           result.telebirrNotifyArchived = oldNotify.length;
         }
@@ -447,7 +448,7 @@ export const CRON_JOBS: ReadonlyArray<{
         }
         if (oldDocs.length > 0) {
           await db.delete(schema.contractorDocuments).where(
-            sql`${schema.contractorDocuments.id} IN (${oldDocs.map(d => `'${d.id}'`).join(',')})`
+            inArray(schema.contractorDocuments.id, oldDocs.map(d => d.id))
           );
         }
         result.contractorDocsDeleted = oldDocs.length;
@@ -455,17 +456,23 @@ export const CRON_JOBS: ReadonlyArray<{
         console.error('[archive-old-records] contractor_documents failed:', (err as Error).message);
       }
 
-      // 5. payments / subscriptions / seat_releases / seat_claims / rides:
-      //    ANONYMIZE in place (keep the rows for financial reporting, scrub PII).
-      //    riderId stays valid (FK to anonymized rider profile), but amounts and
-      //    timestamps are preserved (needed for revenue reporting). The PII
-      //    that's scrubbed: reference (Telebirr merchOrderId — a replay primitive),
-      //    prepayId, refundRequestNo. These are already stripped from admin CSV
-      //    exports (SEC-006); after 7 years we scrub them from the live row too.
+      // 5. payments: ANONYMIZE in place (keep rows for financial reporting,
+      //    scrub PII). reference (Telebirr merchOrderId — a replay primitive)
+      //    and prepayId are scrubbed after 7 years.
+      //    FIX (META-008): The previous code used a JS template literal with
+      //    sql.raw() inside it, which coerced the SQL object to "[object Object]".
+      //    Now use a Drizzle sql tagged template for the whole value.
       try {
         const oldPayments = await db.update(schema.payments)
-          .set({ reference: `[archived-${sql.raw("EXTRACT(YEAR FROM created_at)::text")}]`, prepayId: null, updatedAt: new Date() })
-          .where(and(lt(schema.payments.retentionExpiresAt, sql`now()`), sql`reference NOT LIKE '[archived-%'`))
+          .set({
+            reference: sql`concat('[archived-', EXTRACT(YEAR FROM ${schema.payments.createdAt})::text, ']')`,
+            prepayId: null,
+            updatedAt: new Date(),
+          })
+          .where(and(
+            lt(schema.payments.retentionExpiresAt, sql`now()`),
+            sql`reference NOT LIKE '[archived-%'`,
+          ))
           .returning({ id: schema.payments.id });
         result.paymentsAnonymized = oldPayments.length;
       } catch (err) {

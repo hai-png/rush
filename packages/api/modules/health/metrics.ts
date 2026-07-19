@@ -2,14 +2,9 @@ import { Hono } from 'hono';
 import { Registry, Counter, Histogram, Gauge, collectDefaultMetrics } from 'prom-client';
 import { timingSafeEqual } from 'node:crypto';
 
-// FIX (test compatibility): the previous `const env = loadEnv()` ran at
-// module-load time, which meant any test that imported metrics.ts had to
-// satisfy the full env schema (including METRICS_PASSWORD ≥ 16 chars in
-// production). Tests that wanted to exercise the "METRICS_PASSWORD too
-// short" path couldn't — loadEnv threw before the test could assert
-// anything. We now read process.env directly in the handler so tests can
-// mutate METRICS_PASSWORD freely. The loadEnv() call is deferred to the
-// first request (and only used as a fallback for the password).
+// FIX (COMPLEX-002): Read METRICS_PASSWORD from process.env directly (not
+// loadEnv) so tests can mutate it between requests without module reset.
+// The previous comment referenced a loadEnv() fallback that doesn't exist.
 
 export const registry = new Registry();
 collectDefaultMetrics({ register: registry });

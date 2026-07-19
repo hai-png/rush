@@ -120,10 +120,11 @@ export const marketplaceService = {
     if (!claim) return;
     const [release] = await db.select().from(schema.seatReleases).where(eq(schema.seatReleases.id, claim.seatReleaseId));
     if (!release) return;
-    // The correct refund target is the most recent *completed* payment for this
-    // subscription AS OF the release's creation. A renewal made after the release
-    // must NOT be picked — that renewal funded a different (future) period and
-    // refunding it would be money laundering (rider effectively gets a free renewal).
+    // FIX (META-003): Idempotency check. This method is called from both the
+    // webhook handler (webhooks/routes.ts) and the reconcile-claims cron. If
+    // both fire (or the cron runs twice), we must not schedule duplicate
+    // refunds. Check for an existing refund_retry with reason='seat_claimed'
+    // for the original payment before proceeding.
     const [originalPayment] = await db.select().from(schema.payments)
       .where(and(
         eq(schema.payments.subscriptionId, release.subscriptionId),
@@ -133,6 +134,14 @@ export const marketplaceService = {
       .orderBy(desc(schema.payments.createdAt))
       .limit(1);
     if (!originalPayment) return;
+    // Check if a refund was already scheduled for this payment + reason.
+    const [existingRefund] = await db.select().from(schema.refundRetries)
+      .where(and(
+        eq(schema.refundRetries.paymentId, originalPayment.id),
+        eq(schema.refundRetries.reason, 'seat_claimed'),
+      ))
+      .limit(1);
+    if (existingRefund) return; // already scheduled — idempotent no-op
     await scheduleRefund(originalPayment.id, Money.fromDecimal(release.refundAmount), 'seat_claimed');
     await db.insert(schema.outboxEvents).values({ channel: 'notification', payload: { type: 'seat_claimed', userId: release.riderId } });
   },
