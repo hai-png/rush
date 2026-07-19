@@ -7,10 +7,23 @@ import { db, schema } from '@addis/db';
 const AUDIT_CHAIN_LOCK_KEY = 'addis_ride_audit_chain';
 
 /** The single writer for audit rows. Enforces hash-chaining so tampering is detectable. */
-export async function writeAudit(tx: typeof db, entry: {
-  actorId: string | null; action: string; entityType: string; entityId?: string | null;
-  before?: unknown; after?: unknown; ipAddress?: string | null; userAgent?: string | null;
-}) {
+/**
+ * Audit entry. Fields with `| undefined` are explicitly optional under
+ * exactOptionalPropertyTypes — callers routinely pass `ipAddress: undefined` from
+ * `c.req.header('x-forwarded-for') ?? undefined`, which the bare `?` form rejects.
+ */
+export interface AuditEntry {
+  actorId: string | null;
+  action: string;
+  entityType: string;
+  entityId?: string | null | undefined;
+  before?: unknown;
+  after?: unknown;
+  ipAddress?: string | null | undefined;
+  userAgent?: string | null | undefined;
+}
+
+export async function writeAudit(tx: typeof db, entry: AuditEntry) {
   // Without this lock, two concurrent writeAudit calls in separate transactions can both read
   // the same "last" row before either commits, both compute a hash chained off the same
   // prevHash, and both insert — forking the tamper-evident chain (or making verifyAuditChain's

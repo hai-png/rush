@@ -1,9 +1,12 @@
 import type { MiddlewareHandler } from 'hono';
 import { childLogger } from '../../infra/logger';
+import type { Variables } from '../context';
+
+type Env = { Variables: Variables };
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-export const requestContext: MiddlewareHandler = async (c, next) => {
+export const requestContext: MiddlewareHandler<Env> = async (c, next) => {
   // A client-supplied x-request-id is convenient for correlating client-side and
   // server-side logs, but it must not be trusted verbatim: an arbitrary string is a log/header
   // injection surface (newlines, control characters, unbounded length) once echoed back into

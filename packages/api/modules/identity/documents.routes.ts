@@ -1,4 +1,4 @@
-import { Hono } from 'hono';
+import { TypedHono } from '../../src/typed-hono';
 import { z } from 'zod';
 import { requireRole } from '../../src/middleware/auth';
 import { documentService } from './documents';
@@ -6,7 +6,7 @@ import { BadRequestError, NotFoundError } from '@addis/shared';
 import { db, schema } from '@addis/db';
 import { eq } from 'drizzle-orm';
 
-export const documentRoutes = new Hono();
+export const documentRoutes = new TypedHono();
 
 const DocType = z.enum(['registration', 'insurance', 'inspection']);
 

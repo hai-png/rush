@@ -5,6 +5,7 @@ import { authMiddleware } from './middleware/auth';
 import { idempotencyMiddleware } from './middleware/idempotency';
 import { rateLimitMiddleware } from './middleware/rate-limit';
 import { tosGateMiddleware } from './middleware/tos-gate';
+import type { Variables } from './context';
 
 import { catalogRoutes } from '../modules/catalog/routes';
 import { identityRoutes } from '../modules/identity/routes';
@@ -23,7 +24,12 @@ import { metricsRoutes } from '../modules/health/metrics';
 import { accountRoutes } from '../modules/account/routes';
 import { dashboardRoutes } from '../modules/dashboard/routes';
 
-export const app = new OpenAPIHono();
+/**
+ * Typed Hono app. Binding `Variables` here means every `c.get('session')` across the
+ * codebase resolves to `Session | undefined` instead of `unknown` — eliminates ~150
+ * TS2571 errors at once. All route modules use the same `HonoApp` type exported below.
+ */
+export const app = new OpenAPIHono<{ Variables: Variables }>();
 
 app.use('*', requestContext);
 app.use('*', authMiddleware);       // populates c.get('session') if present; does not 401 by default

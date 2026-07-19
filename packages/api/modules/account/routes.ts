@@ -1,9 +1,9 @@
-import { Hono } from 'hono';
+import { TypedHono } from '../../src/typed-hono';
 import { z } from 'zod';
 import { requireAuth } from '../../src/middleware/auth';
 import { accountService } from './service';
 
-export const accountRoutes = new Hono();
+export const accountRoutes = new TypedHono();
 accountRoutes.use('*', requireAuth);
 
 const UpdateAccountInput = z.object({

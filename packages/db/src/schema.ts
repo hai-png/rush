@@ -33,7 +33,20 @@ export const otpPurpose = pgEnum('otp_purpose', ['signup_verification', 'passwor
 export const vehicleType = pgEnum('vehicle_type', ['coaster', 'minibus', 'van', 'sedan']);
 export const outboxChannel = pgEnum('outbox_channel', ['notification', 'sms', 'push', 'email', 'refund', 'audit', 'webhook']);
 
-const ts = () => timestamp({ withTimezone: true });
+/**
+ * Timestamp column helper. Was `() => timestamp({ withTimezone: true })` returning a
+ * builder instance, but every call site did `ts()('column_name')` — calling the
+ * builder as a function, which throws "ts() is not a function". Two valid fixes:
+ *   (a) make ts a function taking the column name: `const ts = (name: string) => timestamp(name, { withTimezone: true })`
+ *   (b) leave ts() returning a builder and change call sites to `ts()('column_name')` → `ts('column_name')` doesn't work either.
+ * Going with (a) — the call sites already pass the column name as the second `()`,
+ * so we just unwrap: `ts()('deleted_at')` becomes `ts('deleted_at')` which calls
+ * `timestamp('deleted_at', { withTimezone: true })`.
+ *
+ * Migrating all call sites would touch ~60 lines; instead we keep the call-site
+ * shape `ts()('name')` and make `ts` return a function that takes the name.
+ */
+const ts = () => (name: string) => timestamp(name, { withTimezone: true });
 const money = (name: string) => decimal(name, { precision: 12, scale: 2 });
 
 // ---------- tables ----------

@@ -14,7 +14,7 @@ export const accountService = {
     return { ...safeUser, profile };
   },
 
-  async update(userId: string, input: { name?: string; homeArea?: string; workArea?: string }) {
+  async update(userId: string, input: { name?: string | undefined; homeArea?: string | undefined; workArea?: string | undefined }) {
     if (input.name) await db.update(schema.users).set({ name: input.name, updatedAt: new Date() }).where(eq(schema.users.id, userId));
     if (input.homeArea || input.workArea) {
       await db.update(schema.riderProfiles).set({

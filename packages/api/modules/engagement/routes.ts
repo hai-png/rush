@@ -1,11 +1,11 @@
-import { Hono } from 'hono';
+import { TypedHono } from '../../src/typed-hono';
 import { z } from 'zod';
 import { requireAuth } from '../../src/middleware/auth';
 import { engagementService } from './service';
 import { db, schema } from '@addis/db';
 import { eq, and } from 'drizzle-orm';
 
-export const engagementRoutes = new Hono();
+export const engagementRoutes = new TypedHono();
 engagementRoutes.use('*', requireAuth);
 
 engagementRoutes.get('/notifications', async (c) => {

@@ -4,7 +4,7 @@ import { NotFoundError, ForbiddenError } from '@addis/shared';
 import { ticketState } from './state';
 
 export const supportService = {
-  async createTicket(userId: string, input: { subject: string; body: string; category: string; subscriptionId?: string; paymentId?: string }) {
+  async createTicket(userId: string, input: { subject: string; body: string; category: string; subscriptionId?: string | undefined; paymentId?: string | undefined }) {
     const [ticket] = await db.insert(schema.supportTickets).values({ userId, ...input } as any).returning();
     await db.insert(schema.outboxEvents).values({ channel: 'audit', payload: { action: 'ticket.created', entityId: ticket.id } });
     return ticket;

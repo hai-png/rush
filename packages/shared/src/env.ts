@@ -39,6 +39,23 @@ const envSchema = z.object({
   SENTRY_DSN: z.string().url().optional(),
   LOG_LEVEL: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
 
+  /**
+   * Opt-in flag for returning the OTP code in the /auth/otp/send response body.
+   * Defaults to false — even in development — so a developer running the stack
+   * locally with a tunneled port does not accidentally expose OTP codes to the
+   * internet. Set ALLOW_DEV_OTP=1 to get the code in the response during local
+   * development without a real SMS provider configured.
+   */
+  ALLOW_DEV_OTP: z.string().optional(),
+
+  /**
+   * Password for the /api/v1/metrics endpoint (Basic auth, username 'metrics').
+   * Required in production — the metrics handler fails closed (503) if unset
+   * or shorter than 16 chars. Not in the env schema's required list because
+   * dev/test runs don't need it.
+   */
+  METRICS_PASSWORD: z.string().min(16).optional(),
+
   NEXT_PUBLIC_TILE_SERVER_URL: z.string().url().optional(),
   NEXT_PUBLIC_CARTO_API_KEY: z.string().optional(),
   NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN: z.string().optional(),

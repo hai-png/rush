@@ -1,4 +1,4 @@
-import { Hono } from 'hono';
+import { TypedHono } from '../../src/typed-hono';
 import { Registry, Counter, Histogram, Gauge, collectDefaultMetrics } from 'prom-client';
 import { timingSafeEqual } from 'node:crypto';
 
@@ -12,7 +12,7 @@ export const otpCounter = new Counter({ name: 'otp_total', help: 'OTP sent/verif
 export const outboxDepthGauge = new Gauge({ name: 'outbox_depth', help: 'Pending outbox events', registers: [registry] });
 export const activeSubscriptionsGauge = new Gauge({ name: 'active_subscriptions', help: 'Active subscriptions count', registers: [registry] });
 
-export const metricsRoutes = new Hono();
+export const metricsRoutes = new TypedHono();
 metricsRoutes.get('/metrics', async (c) => {
   // Fail closed if METRICS_PASSWORD is unset: previously, `expected` would then become
   // `Basic bWV0cmljczp` (base64 of "metrics:"), which is publicly computable — any unauthenticated

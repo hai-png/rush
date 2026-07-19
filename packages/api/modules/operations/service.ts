@@ -45,7 +45,7 @@ export const operationsService = {
     });
   },
 
-  async bookRide(riderId: string, input: { tripId: string; subscriptionId?: string; seatClaimId?: string; pickupStop?: string }) {
+  async bookRide(riderId: string, input: { tripId: string; subscriptionId?: string | undefined; seatClaimId?: string | undefined; pickupStop?: string | undefined }) {
     const [trip] = await db.select().from(schema.trips).where(eq(schema.trips.id, input.tripId));
     if (!trip || trip.status !== 'scheduled') throw new BadRequestError('Trip not open for booking');
     try {
@@ -68,7 +68,7 @@ export const operationsService = {
   },
 
   /** Atomic GPS upsert w/ dedup + min-distance guard. Redis cache managed by caller. */
-  async reportPosition(shuttleId: string, pos: { lat: number; lng: number; heading?: number; speed?: number }) {
+  async reportPosition(shuttleId: string, pos: { lat: number; lng: number; heading?: number | undefined; speed?: number | undefined }) {
     const [existing] = await db.select().from(schema.shuttlePositions).where(eq(schema.shuttlePositions.shuttleId, shuttleId));
     if (existing && haversineMeters([existing.lat, existing.lng], [pos.lat, pos.lng]) < MIN_GPS_MOVE_METERS) {
       return existing; // dedup: no meaningful movement

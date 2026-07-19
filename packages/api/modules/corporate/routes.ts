@@ -1,9 +1,9 @@
-import { Hono } from 'hono';
+import { TypedHono } from '../../src/typed-hono';
 import { z } from 'zod';
 import { requireRole } from '../../src/middleware/auth';
 import { corporateService } from './service';
 
-export const corporateRoutes = new Hono();
+export const corporateRoutes = new TypedHono();
 
 corporateRoutes.post('/signup', async (c) => {
   const body = z.object({

@@ -1,4 +1,4 @@
-import { Hono } from 'hono';
+import { TypedHono } from '../../src/typed-hono';
 import { z } from 'zod';
 import { requireRole } from '../../src/middleware/auth';
 import { adminService } from './service';
@@ -12,7 +12,7 @@ import { Money, ALL_ROLES } from '@addis/shared';
 import { and, eq } from 'drizzle-orm';
 import { db, schema } from '@addis/db';
 
-export const adminRoutes = new Hono();
+export const adminRoutes = new TypedHono();
 adminRoutes.use('*', requireRole('platform_admin'));
 adminRoutes.route('/', adminCatalogRoutes);
 

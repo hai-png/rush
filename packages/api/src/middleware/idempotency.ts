@@ -3,12 +3,15 @@ import { createHash } from 'node:crypto';
 import { eq } from 'drizzle-orm';
 import { db, schema } from '@addis/db';
 import { ConflictError } from '@addis/shared';
+import type { Variables } from '../context';
+
+type Env = { Variables: Variables };
 
 // No real HTTP response ever has status 0 — used as a sentinel to mark a claimed-but-not-yet-
 // completed idempotency record while the handler is still running.
 const PROCESSING_STATUS = 0;
 
-export const idempotencyMiddleware: MiddlewareHandler = async (c, next) => {
+export const idempotencyMiddleware: MiddlewareHandler<Env> = async (c, next) => {
   if (c.req.method !== 'POST') return next();
   const key = c.req.header('Idempotency-Key');
   if (!key) return next();

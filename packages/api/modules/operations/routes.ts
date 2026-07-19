@@ -1,4 +1,4 @@
-import { Hono } from 'hono';
+import { TypedHono } from '../../src/typed-hono';
 import { z } from 'zod';
 import { requireRole } from '../../src/middleware/auth';
 import { operationsService } from './service';
@@ -6,7 +6,7 @@ import { db, schema } from '@addis/db';
 import { eq, and } from 'drizzle-orm';
 import { redis } from '../../infra/redis';
 
-export const operationsRoutes = new Hono();
+export const operationsRoutes = new TypedHono();
 
 operationsRoutes.get('/trips', requireRole('contractor'), async (c) => {
   const [profile] = await db.select().from(schema.contractorProfiles).where(eq(schema.contractorProfiles.userId, c.get('session').userId));

@@ -1,11 +1,11 @@
-import { Hono } from 'hono';
+import { TypedHono } from '../../src/typed-hono';
 import { z } from 'zod';
 import { eq } from 'drizzle-orm';
 import { db, schema } from '@addis/db';
 import { requireAuth } from '../../src/middleware/auth';
 import { CURRENT_TOS_VERSION } from '@addis/shared';
 
-export const tosRoutes = new Hono();
+export const tosRoutes = new TypedHono();
 
 /**
  * Accepts the current (or, defensively, any version the server knows about) Terms of Service.

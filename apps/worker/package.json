@@ -16,7 +16,8 @@
     "@addis/sms": "workspace:*",
     "@addis/shared": "workspace:*",
     "@sentry/node": "^8.47.0",
-    "drizzle-orm": "^0.36.4"
+    "drizzle-orm": "^0.36.4",
+    "resend": "^4.0.1"
   },
   "devDependencies": {
     "tsx": "^4.19.2",

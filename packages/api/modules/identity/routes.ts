@@ -1,4 +1,4 @@
-import { Hono } from 'hono';
+import { TypedHono } from '../../src/typed-hono';
 import { z } from 'zod';
 import { EthiopianPhone } from '@addis/shared';
 import { identityService } from './service';
@@ -7,7 +7,7 @@ import { requireRole, requireAuth } from '../../src/middleware/auth';
 import { db, schema } from '@addis/db';
 import { eq, and } from 'drizzle-orm';
 
-export const identityRoutes = new Hono();
+export const identityRoutes = new TypedHono();
 
 const RegisterInput = z.discriminatedUnion('kind', [
   z.object({

@@ -1,11 +1,11 @@
-import { Hono } from 'hono';
+import { TypedHono } from '../../src/typed-hono';
 import { requireRole } from '../../src/middleware/auth';
 import { CreateSeatReleaseInput, ClaimSeatInput } from './types';
 import { marketplaceService } from './service';
 import { db, schema } from '@addis/db';
 import { eq, and, gt } from 'drizzle-orm';
 
-export const marketplaceRoutes = new Hono();
+export const marketplaceRoutes = new TypedHono();
 
 marketplaceRoutes.get('/seat-releases', requireRole('rider'), async (c) => {
   const rows = await db.select().from(schema.seatReleases)

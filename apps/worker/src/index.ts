@@ -1,9 +1,8 @@
 import './instrumentation'; // must run first: calls Sentry.init(); this file previously existed but was never imported anywhere, so worker crash reporting was silently a no-op
 import { loadEnv } from '@addis/shared';
 import { db, schema } from '@addis/db';
-import { and, eq, lte, sql } from 'drizzle-orm';
-import { processRefundRetries } from '@addis/api/modules/payment/service';
-import { writeAudit } from '@addis/api/modules/admin/audit';
+import { and, eq, lte } from 'drizzle-orm';
+import { withLock, CRON_JOBS } from '@addis/api/src/cron-jobs';
 
 const env = loadEnv();
 
@@ -12,7 +11,7 @@ const HANDLERS: Record<string, (payload: any) => Promise<void>> = {
   sms: async (p) => (await import('./handlers/sms')).handle(p),
   push: async (p) => (await import('./handlers/push')).handle(p),
   email: async (p) => (await import('./handlers/email')).handle(p),
-  refund: async () => { /* refunds drained separately via processRefundRetries */ },
+  refund: async () => { /* refunds drained separately via process-refund-retries cron */ },
   audit: async (p) => (await import('./handlers/audit')).handle(p),
   webhook: async (p) => (await import('./handlers/webhook')).handle(p),
 };
@@ -45,61 +44,33 @@ async function drainOutbox() {
   }
 }
 
-/** Cron jobs use pg_advisory_xact_lock so only one worker instance runs each job at a time.
- *  Mirrors packages/api/modules/cron/routes.ts's withLock — the two are duplicated because
- *  this process runs the same jobs on a setInterval loop for the self-hosted/docker-compose
- *  deployment, while the HTTP cron routes serve an external-scheduler (e.g. Vercel Cron)
- *  deployment. Both use the same advisory-lock names, so running both against the same
- *  database is safe (whichever gets there first wins the lock), but they are two independent
- *  copies of this logic that can drift — worth consolidating into a shared helper. */
-async function withLock(name: string, fn: () => Promise<unknown>) {
-  return db.transaction(async (tx) => {
-    const { rows } = await tx.execute(sql`select pg_try_advisory_xact_lock(hashtext(${name})) as locked`);
-    if (!(rows as any)[0]?.locked) return { skipped: true, reason: 'lock-held' };
-    const result = await fn();
-    // Previously inserted a raw row with hash: 'n/a' — see the same fix in cron/routes.ts.
-    await writeAudit(tx as any, { actorId: null, action: `cron.${name}`, entityType: 'cron', after: result as any });
-    return { ok: true, result };
-  });
-}
-
+/**
+ * Worker entrypoint. Two responsibilities:
+ *
+ *   1. Drain the outbox every 5s — fan out notification/sms/push/email/audit/webhook
+ *      events to their handlers with exponential backoff.
+ *
+ *   2. Run every cron job on a setInterval loop. The job definitions and the
+ *      `withLock` helper are imported from `@addis/api/src/cron-jobs` — the same
+ *      registry the HTTP cron routes use. This eliminates the previous duplication
+ *      (the worker had its own copy of withLock and of every job's body, which
+ *      had already drifted: the corporate-reset job used `setDate(1)` here while
+ *      the cron route used `date_trunc('month', now())`).
+ *
+ * Running both the worker AND the HTTP cron routes against the same database is
+ * safe — both take a Postgres advisory lock keyed on the job name, so whichever
+ * arrives first wins; the loser's `withLock` returns `{ skipped: true }` and the
+ * job is a no-op for that invocation.
+ */
 async function main() {
   setInterval(() => drainOutbox().catch(console.error), 5000);
 
-  setInterval(() => withLock('expire-subscriptions', async () => {
-    const { subscriptionRepo } = await import('@addis/api/modules/subscription/repository');
-    return subscriptionRepo.expireDue();
-  }).catch(console.error), 3600_000);
+  for (const job of CRON_JOBS) {
+    setInterval(() => {
+      withLock(job.name, () => job.run()).catch(console.error);
+    }, job.intervalMs);
+  }
 
-  setInterval(() => withLock('expire-seat-releases', async () => {
-    const { lt, eq: eq2 } = await import('drizzle-orm');
-    return db.update(schema.seatReleases).set({ status: 'expired', updatedAt: new Date() })
-      .where(and(eq2(schema.seatReleases.status, 'open'), lt(schema.seatReleases.expiresAt, new Date())))
-      .returning({ id: schema.seatReleases.id });
-  }).catch(console.error), 15 * 60_000);
-
-  setInterval(() => withLock('cleanup-pending-subscriptions', async () => {
-    const { subscriptionRepo } = await import('@addis/api/modules/subscription/repository');
-    return subscriptionRepo.cancelStalePending();
-  }).catch(console.error), 30 * 60_000);
-
-  setInterval(() => withLock('process-refund-retries', () => processRefundRetries()).catch(console.error), 15 * 60_000);
-
-  setInterval(() => withLock('corporate-reset-monthly', async () => {
-    // Reset every member whose lastResetAt is before the start of the CURRENT month.
-    //
-    // Previously this used `new Date(new Date().setDate(1))` which keeps the current
-    // time-of-day (e.g. 14:30 on the 1st). That drifts from the cron route's
-    // `date_trunc('month', now())` (which is midnight on the 1st) and means members
-    // whose lastResetAt falls between midnight and 14:30 on the 1st would NOT be
-    // reset by the worker, even though they were due. Using SQL date_trunc keeps
-    // both paths byte-for-byte identical.
-    const { lt, sql } = await import('drizzle-orm');
-    return db.update(schema.corporateMembers).set({ ridesUsedThisMonth: 0, lastResetAt: new Date() })
-      .where(lt(schema.corporateMembers.lastResetAt, sql`date_trunc('month', now())`))
-      .returning({ id: schema.corporateMembers.id });
-  }).catch(console.error), 24 * 3600_000);
-
-  console.log('Addis Ride worker started.');
+  console.log(`Addis Ride worker started. ${CRON_JOBS.length} cron jobs registered.`);
 }
 main();

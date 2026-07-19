@@ -1,11 +1,11 @@
-import { Hono } from 'hono';
+import { TypedHono } from '../../src/typed-hono';
 import { eq } from 'drizzle-orm';
 import { db, schema } from '@addis/db';
 import { getPaymentProvider } from '@addis/payments';
 import { settlePayment, failPayment } from '../payment/service';
 import { marketplaceService } from '../marketplace/service';
 
-export const webhookRoutes = new Hono();
+export const webhookRoutes = new TypedHono();
 
 webhookRoutes.post('/telebirr/notify', async (c) => {
   const provider = getPaymentProvider('telebirr');

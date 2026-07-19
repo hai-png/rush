@@ -1,10 +1,10 @@
-import { Hono } from 'hono';
+import { TypedHono } from '../../src/typed-hono';
 import { sql } from 'drizzle-orm';
 import { db } from '@addis/db';
 import { redis } from '../../infra/redis';
 import { statfs } from 'node:fs/promises';
 
-export const healthRoutes = new Hono();
+export const healthRoutes = new TypedHono();
 
 healthRoutes.get('/health', async (c) => {
   const checks: Record<string, any> = {};

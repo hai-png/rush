@@ -39,7 +39,7 @@ export const corporateService = {
     return corp;
   },
 
-  async updateOwn(adminUserId: string, input: Partial<{ name: string; contactEmail: string; contactPhone: string; subsidyPercent: number; monthlySeatAllowance: number }>) {
+  async updateOwn(adminUserId: string, input: Partial<{ name: string; contactEmail: string; contactPhone: string; subsidyPercent: number; monthlySeatAllowance: number }> & Record<string, unknown>) {
     const corp = await corporateService.getOwn(adminUserId);
     const [row] = await db.update(schema.corporates).set({ ...input, updatedAt: new Date() }).where(eq(schema.corporates.id, corp.id)).returning();
     return row;
@@ -50,7 +50,7 @@ export const corporateService = {
     return db.select().from(schema.corporateMembers).where(eq(schema.corporateMembers.corporateId, corp.id));
   },
 
-  async updateMember(adminUserId: string, memberId: string, input: { approvalStatus?: 'approved' | 'rejected'; isActive?: boolean }) {
+  async updateMember(adminUserId: string, memberId: string, input: { approvalStatus?: 'approved' | 'rejected' | 'pending' | undefined; isActive?: boolean | undefined }) {
     const corp = await corporateService.getOwn(adminUserId);
     const [member] = await db.select().from(schema.corporateMembers).where(eq(schema.corporateMembers.id, memberId));
     if (!member || member.corporateId !== corp.id) throw new NotFoundError('Member not found');

@@ -1,10 +1,11 @@
-import { createRoute, OpenAPIHono, z } from '@hono/zod-openapi';
+import { createRoute, z } from '@hono/zod-openapi';
+import { TypedOpenAPIHono } from '../../src/typed-hono';
 import { ErrorSchema, envelope } from '@addis/shared';
 import { requireRole } from '../../src/middleware/auth';
 import { CreateSubscriptionInput } from './types';
 import { subscriptionService } from './service';
 
-export const subscriptionRoutes = new OpenAPIHono();
+export const subscriptionRoutes = new TypedOpenAPIHono();
 
 const SubscriptionSchema = z.object({
   id: z.string(), riderId: z.string(), planId: z.string(), routeId: z.string().nullable(),

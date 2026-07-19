@@ -76,7 +76,7 @@ export const adminService = {
     return { accessToken: token, expiresIn: 900 };
   },
 
-  async searchAuditLogs(filters: { entityType?: string; actorId?: string; action?: string }, limit: number) {
+  async searchAuditLogs(filters: { entityType?: string | undefined; actorId?: string | undefined; action?: string | undefined }, limit: number) {
     const conditions = [] as any[];
     if (filters.entityType) conditions.push(eq(schema.auditLogs.entityType, filters.entityType));
     if (filters.actorId) conditions.push(eq(schema.auditLogs.actorId, filters.actorId));
