@@ -3,8 +3,10 @@ import { loadEnv } from '@addis/shared';
 import { db, schema } from '@addis/db';
 import { and, eq, lte, inArray, sql } from 'drizzle-orm';
 import { withLock, CRON_JOBS } from '@addis/api/src/cron-jobs';
+import { logger } from '@addis/api/infra/logger';
 
 const env = loadEnv();
+const workerLogger = logger.child({ component: 'worker', workerId: `worker-${process.pid}-${Date.now()}` });
 
 const HANDLERS: Record<string, (payload: any) => Promise<void>> = {
   notification: async (p) => (await import('./handlers/notification')).handle(p),
@@ -17,7 +19,6 @@ const HANDLERS: Record<string, (payload: any) => Promise<void>> = {
 };
 
 const BACKOFF_SEC = [30, 60, 300, 900, 3600];
-const WORKER_ID = `worker-${process.pid}-${Date.now()}`;
 const LOCK_TTL_MS = 5 * 60_000; // 5 min — if the worker crashes, another can pick up after this
 
 async function drainOutbox() {
@@ -27,10 +28,15 @@ async function drainOutbox() {
   // two concurrent workers from both picking up the same event and
   // double-firing notifications/SMS/etc.
   //
-  // The previous implementation did a plain SELECT with no locking — under
-  // multiple worker replicas, the same event could be delivered twice.
+  // FIX (OPS-001 / SEC-005): The previous implementation had a `.catch()`
+  // fallback that did a plain SELECT + UPDATE with NO locking — a TOCTOU
+  // race where two workers could both select the same 50 rows, both mark
+  // them 'processing', and both fire the side effect (double SMS, double
+  // refund, double webhook). The fallback fired on ANY SQL error, including
+  // transient connection blips. Now: errors propagate — the next setInterval
+  // tick retries. Fail loud, never silently degrade to an unsafe path.
   const claimed = await db.execute(sql`
-    UPDATE outbox_events SET status = 'processing', locked_at = now(), locked_by = ${WORKER_ID}, visibility_after = now() + interval '${sql.raw(String(LOCK_TTL_MS / 1000))} seconds'
+    UPDATE outbox_events SET status = 'processing', locked_at = now(), locked_by = ${`worker-${process.pid}-${Date.now()}`}, visibility_after = now() + interval '${sql.raw(String(LOCK_TTL_MS / 1000))} seconds'
     WHERE id IN (
       SELECT id FROM outbox_events
       WHERE status = 'pending'
@@ -40,25 +46,7 @@ async function drainOutbox() {
       FOR UPDATE SKIP LOCKED
     )
     RETURNING *
-  `).catch(async () => {
-    // Fallback for environments where the raw SQL above doesn't work (e.g.
-    // the table name is camelCase or the SQL syntax is incompatible).
-    // Use a simpler claim: just mark as processing with lockedBy.
-    const { and, eq, lte, or, isNull, lt, sql } = await import('drizzle-orm');
-    const due = await db.select().from(schema.outboxEvents)
-      .where(and(
-        eq(schema.outboxEvents.status, 'pending'),
-        lte(schema.outboxEvents.nextAttemptAt, new Date()),
-        or(isNull(schema.outboxEvents.lockedAt), lt(schema.outboxEvents.visibilityAfter, new Date())),
-      ))
-      .limit(50);
-    if (due.length === 0) return { rows: [] };
-    // Mark as processing
-    await db.update(schema.outboxEvents)
-      .set({ status: 'processing' as any, lockedAt: new Date(), lockedBy: WORKER_ID, visibilityAfter: new Date(Date.now() + LOCK_TTL_MS) })
-      .where(inArray(schema.outboxEvents.id, due.map(e => e.id)));
-    return { rows: due };
-  });
+  `);
 
   const rows = (claimed as any).rows ?? (claimed as any) ?? [];
   for (const evt of rows) {
@@ -70,7 +58,13 @@ async function drainOutbox() {
       if (attempts >= evt.maxAttempts) {
         await db.update(schema.outboxEvents).set({ status: 'dead' as any, attempts, lastError: String(err), updatedAt: new Date() }).where(eq(schema.outboxEvents.id, evt.id));
         const Sentry = await import('@sentry/node');
+        // FIX (OPS-004): dedicated dead-letter alert, not just the underlying error.
+        Sentry.captureMessage('outbox event dead-lettered', {
+          level: 'error',
+          extra: { outboxEventId: evt.id, channel: evt.channel, attempts, lastError: String(err) },
+        });
         Sentry.captureException(err, { extra: { outboxEventId: evt.id } });
+        workerLogger.error({ outboxEventId: evt.id, channel: evt.channel, attempts, err }, 'outbox event dead-lettered');
       } else {
         const backoff = BACKOFF_SEC[Math.min(attempts - 1, BACKOFF_SEC.length - 1)];
         await db.update(schema.outboxEvents).set({
@@ -100,16 +94,63 @@ async function drainOutbox() {
  * safe — both take a Postgres advisory lock keyed on the job name, so whichever
  * arrives first wins; the loser's `withLock` returns `{ skipped: true }` and the
  * job is a no-op for that invocation.
+ *
+ * FIXES (OPS-002, OPS-003):
+ *   - SIGTERM/SIGINT handlers now stop the timers and let in-flight work finish
+ *     (up to 30s) before exiting. Previously, a rolling deploy killed the process
+ *     immediately, leaving 'processing' outbox rows stuck until visibility_after
+ *     expired (5 min) — and any handler mid-SMS-send would either send a duplicate
+ *     on the next run or skip a notification entirely.
+ *   - The drain loop is guarded by a `draining` flag so a slow drain (e.g.
+ *     Telebirr webhook takes 8s) doesn't overlap with the next setInterval tick.
+ *     Previously, N overlapping drains could claim N×50 rows and exhaust the
+ *     DB pool / blow through provider rate limits.
  */
+let draining = false;
+let shuttingDown = false;
+let drainTimer: NodeJS.Timeout | null = null;
+const cronTimers: NodeJS.Timeout[] = [];
+
 async function main() {
-  setInterval(() => drainOutbox().catch(console.error), 5000);
+  drainTimer = setInterval(async () => {
+    if (shuttingDown || draining) return;
+    draining = true;
+    try {
+      await drainOutbox();
+    } catch (err) {
+      workerLogger.error({ err }, 'drainOutbox failed');
+    } finally {
+      draining = false;
+    }
+  }, 5000);
 
   for (const job of CRON_JOBS) {
-    setInterval(() => {
-      withLock(job.name, () => job.run()).catch(console.error);
+    const t = setInterval(() => {
+      if (shuttingDown) return;
+      withLock(job.name, () => job.run()).catch(err => {
+        workerLogger.error({ err, job: job.name }, 'cron job failed');
+      });
     }, job.intervalMs);
+    cronTimers.push(t);
   }
 
-  console.log(`Addis Ride worker started. ${CRON_JOBS.length} cron jobs registered.`);
+  workerLogger.info({ cronJobs: CRON_JOBS.length }, 'Addis Ride worker started');
+
+  // Graceful shutdown. On SIGTERM/SIGINT, stop scheduling new work and let
+  // the current drainOutbox iteration finish (up to 30s) before exiting.
+  const shutdown = async (signal: string) => {
+    workerLogger.info({ signal }, 'shutting down worker');
+    shuttingDown = true;
+    if (drainTimer) clearInterval(drainTimer);
+    for (const t of cronTimers) clearInterval(t);
+    // Wait up to 30s for the in-flight drain to finish.
+    const deadline = Date.now() + 30_000;
+    while (draining && Date.now() < deadline) {
+      await new Promise(r => setTimeout(r, 200));
+    }
+    process.exit(0);
+  };
+  process.on('SIGTERM', () => void shutdown('SIGTERM'));
+  process.on('SIGINT', () => void shutdown('SIGINT'));
 }
 main();

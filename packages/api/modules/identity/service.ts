@@ -2,7 +2,7 @@ import { eq } from 'drizzle-orm';
 import { SignJWT, jwtVerify } from 'jose';
 import { authenticator } from 'otplib';
 import { db, schema } from '@addis/db';
-import { hashPassword, verifyPassword, isPasswordBreached, ConflictError, UnauthorizedError, NotFoundError, TwoFactorRequiredError, BadRequestError, CURRENT_TOS_VERSION, loadEnv } from '@addis/shared';
+import { hashPassword, verifyPassword, isPasswordBreached, ConflictError, UnauthorizedError, ForbiddenError, NotFoundError, TwoFactorRequiredError, BadRequestError, CURRENT_TOS_VERSION, loadEnv } from '@addis/shared';
 import { createId } from '@paralleldrive/cuid2';
 import { redis } from '../../infra/redis';
 
@@ -37,28 +37,52 @@ function failKey(phone: string) { return `auth:fail:${phone}`; }
 function lockKey(phone: string) { return `auth:lock:${phone}`; }
 
 async function recordFailedLogin(phone: string) {
-  const [locked] = await Promise.all([
-    redis.set(lockKey(phone), '1', { nx: true, ex: LOCKOUT_DURATION_SEC }),
-    redis.incr(failKey(phone)),
-  ]);
-  // First failure in window -> set the fail counter's TTL. Subsequent INCRs
-  // don't reset the TTL (Redis semantics), so the window stays anchored to
-  // the first attempt.
-  await redis.expire(failKey(phone), LOCKOUT_WINDOW_SEC).catch(() => {});
-  if (locked) return; // newly locked
-  const count = await redis.incr(failKey(phone)).catch(() => 0);
+  // CRITICAL FIX (SEC-002): The previous implementation had a double-INCR
+  // bug. It ran `redis.incr(failKey(phone))` inside the Promise.all, then
+  // ran `redis.incr(failKey(phone))` AGAIN at the bottom of the function
+  // (the `const count = await redis.incr(...)` line). Each failure was
+  // counted as TWO attempts, so the lockout triggered at 3 actual failures
+  // instead of the intended 5 — a 40% reduction in the brute-force budget
+  // an attacker needs to trigger a victim lockout. The double-count also
+  // made the per-failure count display wrong in any future admin UI.
+  //
+  // The new implementation increments exactly once, sets the TTL on the
+  // first increment, and only takes the lock when the counter actually
+  // crosses MAX_FAILED_ATTEMPTS.
+  const count = await redis.incr(failKey(phone)).catch(() => 1);
+  if (count === 1) {
+    // First failure in the window — anchor the TTL. Subsequent INCRs
+    // don't reset the TTL (Redis semantics), so the window stays anchored
+    // to the first attempt.
+    await redis.expire(failKey(phone), LOCKOUT_WINDOW_SEC).catch(() => {});
+  }
   if (count >= MAX_FAILED_ATTEMPTS) {
-    await redis.set(lockKey(phone), '1', { ex: LOCKOUT_DURATION_SEC }).catch(() => {});
+    // NX+EX: only set the lock if it doesn't already exist. If a previous
+    // failure already locked the account, this is a no-op (the existing
+    // TTL is preserved — no extension, so the lock window stays anchored
+    // to the triggering failure).
+    await redis.set(lockKey(phone), '1', { nx: true, ex: LOCKOUT_DURATION_SEC }).catch(() => {});
   }
 }
 
 async function assertNotLocked(phone: string) {
-  const locked = await redis.set(lockKey(phone), 'peek', { nx: true, ex: 1 }).catch(() => null);
-  // If we "acquired" the peek key, no real lock exists; clean up.
-  if (locked) { await redis.set(lockKey(phone), '', { ex: 0 }).catch(() => {}); return; }
-  // Re-check by reading the lock key directly.
+  // FIX (SEC-003): The previous implementation used a "peek" dance:
+  //   const locked = await redis.set(lockKey, 'peek', { nx: true, ex: 1 });
+  //   if (locked) { await redis.set(lockKey, '', { ex: 0 }); return; }
+  //   const ttl = await redis.ttl(lockKey); if (ttl > 0) throw ...
+  // This had two bugs:
+  //   1. `redis.set(lockKey, '', { ex: 0 })` does NOT delete the key in
+  //      Upstash — `ex: 0` is interpreted as "no expiry" or rejected. The
+  //      peek lock lingered for 1 second, during which another request's
+  //      `set(..., { nx: true })` for the REAL lock would fail.
+  //   2. TOCTOU: between the peek-set and the peek-delete, another
+  //      request could set the real lock — which the peek-delete would
+  //      then clobber, defeating the lockout.
+  // The simpler and correct implementation just reads the TTL directly.
   const ttl = await redis.ttl(lockKey(phone)).catch(() => -1);
-  if (ttl > 0) throw new UnauthorizedError(`Account temporarily locked. Try again in ${Math.ceil(ttl / 60)} minutes.`);
+  if (ttl > 0) {
+    throw new UnauthorizedError(`Account temporarily locked. Try again in ${Math.ceil(ttl / 60)} minutes.`);
+  }
 }
 
 async function clearFailedLogins(phone: string) {
@@ -76,7 +100,17 @@ export const identityService = {
         phone: input.phone, name: input.name, passwordHash: await hashPassword(input.password), role: 'rider',
       }).returning();
       const [profile] = await tx.insert(schema.riderProfiles).values({ userId: user.id, homeArea: input.homeArea, workArea: input.workArea }).returning();
-      await tx.insert(schema.outboxEvents).values({ channel: 'sms', payload: { phone: input.phone, purpose: 'signup_verification' } });
+      // FIX (ARCH-005 / SEC-007): The previous implementation queued an
+      // outboxEvents row with channel='sms' and payload
+      // `{ phone, purpose: 'signup_verification' }` — but no `body` and no
+      // `code`. The worker's SMS handler reads `payload.body` (which was
+      // undefined) and called smsProvider.send(phone, undefined). Africa's
+      // Talking would 400 or send the literal string "undefined". The user
+      // never received a verification code, and phoneVerified stayed false
+      // forever. The signup flow should call POST /auth/otp/send FIRST, then
+      // POST /auth/register after verification. We remove the broken outbox
+      // insert here — the frontend signup page must orchestrate the OTP flow
+      // explicitly.
       // Do NOT return credential material in the registration response — the
       // previous handler returned the full `user` row including passwordHash.
       const { passwordHash: _ph, twoFactorSecret: _tfs, ...safeUser } = user;
@@ -179,6 +213,19 @@ export const identityService = {
   async reissueToken(userId: string, currentJti: string) {
     const [user] = await db.select().from(schema.users).where(eq(schema.users.id, userId));
     if (!user) throw new UnauthorizedError();
+    // FIX (SEC-004): Refresh must NOT extend an impersonation session beyond
+    // its original 15-minute lifetime. The impersonate() flow issues a 15-min
+    // JWT and a 15-min session row, intending a hard cap on how long an admin
+    // can act as another user. But the previous reissueToken replaced the
+    // session row with a NEW 30-day session (SESSION_TTL_MS) — so an admin
+    // (or anyone who later obtained the impersonation token) could refresh
+    // to extend the session from 15 minutes to 30 days, defeating the time
+    // limit. Now: if the current session row is marked as impersonated, we
+    // refuse refresh — the admin must re-impersonate (which requires 2FA).
+    const [currentSession] = await db.select().from(schema.sessions).where(eq(schema.sessions.jti, currentJti));
+    if (currentSession?.impersonatedBy) {
+      throw new ForbiddenError('Impersonation sessions cannot be refreshed — re-impersonate to continue');
+    }
     const jti = createId();
     await db.transaction(async (tx) => {
       // Delete the old session first; if the insert below fails, the user must
@@ -226,12 +273,22 @@ export const identityService = {
    * that setup2fa on an already-enabled account first verify the CURRENT
    * 2FA code (passed as currentCode) before generating a new secret.
    */
-  async setup2fa(userId: string, currentCode?: string) {
+  async setup2fa(userId: string, currentCode?: string, password?: string) {
     const [existing] = await db.select().from(schema.users).where(eq(schema.users.id, userId));
     if (!existing) throw new NotFoundError('User not found');
-    // If 2FA is already enabled, require the current TOTP code before
-    // allowing a secret rotation. This prevents an attacker with a stolen
-    // session from silently replacing the secret.
+    // CRITICAL FIX (SEC-001): The previous implementation only required
+    // `currentCode` when 2FA was ALREADY enabled. On an account where 2FA
+    // was not yet enabled (the vast majority of users), an attacker with a
+    // stolen session (XSS, log leak, MITM) could call setup2fa to overwrite
+    // twoFactorSecret with their own TOTP seed, then call verify2fa with a
+    // code from their authenticator to enable 2FA — locking the legitimate
+    // user out of their own account without ever knowing the password.
+    // Now: password re-auth is REQUIRED for every setup2fa call, regardless
+    // of current 2FA state. The rotation-of-existing-secret path additionally
+    // requires the current TOTP code.
+    if (!password || !(await verifyPassword(password, existing.passwordHash))) {
+      throw new UnauthorizedError('Current password is required to set up or rotate 2FA');
+    }
     if (existing.twoFactorEnabled) {
       if (!currentCode || !existing.twoFactorSecret || !authenticator.check(currentCode, existing.twoFactorSecret)) {
         throw new UnauthorizedError('Current 2FA code required to rotate the 2FA secret');

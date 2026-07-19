@@ -1,8 +1,21 @@
-addisride.et {
+# FIX (INFRA-005): The previous Caddyfile used `import addisride.et` inside
+# the staging site block. Caddy's `import` directive imports a FILE or a
+# named snippet `(name) { ... }` — NOT a site-address label. With the old
+# config, Caddy looked for a file named `addisride.et` in the Caddyfile's
+# directory, failed to find it, and errored at startup (or silently skipped
+# the staging site). Staging was unreachable. The fix defines the shared
+# config as a named snippet and imports it from both site blocks.
+#
+# FIX (INFRA-006): Added a baseline Content-Security-Policy at the proxy
+# layer as defense in depth. The app sets a tighter per-route CSP via
+# Next.js middleware, but if middleware is ever bypassed (static assets,
+# direct API JSON, a future non-Next route), the proxy-layer CSP still
+# applies.
+
+(common) {
   encode gzip zstd
 
-  # Limit request body size — defends against DoS via huge uploads. The
-  # previous config had no limit (Caddy default is unlimited). 20MB
+  # Limit request body size — defends against DoS via huge uploads. 20MB
   # accommodates contractor document uploads (10MB cap per file) with
   # headroom.
   request_body {
@@ -17,6 +30,20 @@ addisride.et {
     idle 120s
   }
 
+  header {
+    Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
+    X-Content-Type-Options "nosniff"
+    X-Frame-Options "DENY"
+    Referrer-Policy "strict-origin-when-cross-origin"
+    Permissions-Policy "camera=(), microphone=(), geolocation=(self), payment=()"
+    # Baseline CSP — the app layer tightens this per-route via Next.js middleware.
+    Content-Security-Policy "default-src 'self'; frame-ancestors 'none'; base-uri 'self'; object-src 'none'; form-action 'self'"
+  }
+}
+
+addisride.et {
+  import common
+
   reverse_proxy web:3000 {
     # Pass the real client IP to the app. Caddy appends to X-Forwarded-For
     # (standard behavior); the app's rate-limit middleware now reads the
@@ -26,14 +53,6 @@ addisride.et {
     header_up X-Forwarded-For {remote_host}
   }
 
-  header {
-    Strict-Transport-Security "max-age=63072000; includeSubDomains; preload"
-    X-Content-Type-Options "nosniff"
-    X-Frame-Options "DENY"
-    Referrer-Policy "strict-origin-when-cross-origin"
-    Permissions-Policy "camera=(), microphone=(), geolocation=(self), payment=()"
-  }
-
   # www -> apex redirect
   @www host www.addisride.et
   redir @www https://addisride.et{uri} permanent
@@ -41,5 +60,10 @@ addisride.et {
 
 # Staging domain — same config, different cert (auto).
 staging.addisride.et {
-  import addisride.et
+  import common
+
+  reverse_proxy web:3000 {
+    header_up X-Real-IP {remote_host}
+    header_up X-Forwarded-For {remote_host}
+  }
 }

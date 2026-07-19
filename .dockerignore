@@ -1,0 +1,53 @@
+# FIX (INFRA-001): No .dockerignore existed — `COPY . .` in the Dockerfile
+# shipped the entire repo into the builder stage, including .git/, host
+# node_modules/, coverage/, playwright reports, and any local .env file a
+# developer may have created despite .gitignore. Build context ballooned
+# to GBs, layer cache invalidated on every unrelated file change, and a
+# stray .env landed in the builder-stage layer cache (which may be pushed
+# to a registry).
+
+# VCS
+.git
+.github
+.gitignore
+
+# Dependencies (host — image rebuilds its own)
+**/node_modules
+**/.bun
+
+# Build artifacts
+**/.next
+**/.turbo
+**/dist
+**/build
+**/.expo
+**/coverage
+
+# Test artifacts
+**/playwright-report
+**/test-results
+**/playwright/.cache
+
+# Local env files (defense in depth — .gitignore already excludes these,
+# but a stray .env.local would still land in the build context without this)
+**/.env
+**/.env.*
+!**/.env.example
+
+# Logs
+**/*.log
+**/npm-debug.log*
+**/yarn-debug.log*
+**/yarn-error.log*
+
+# Editor / OS
+.vscode
+.idea
+.DS_Store
+Thumbs.db
+
+# Docs and scripts not needed at runtime
+docs
+scripts
+e2e
+repomix-output.xml

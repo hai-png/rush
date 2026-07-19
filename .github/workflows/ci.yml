@@ -116,15 +116,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Real dependency audit — the previous step was a no-op
-      # (`bun pm ls --all | true`) labelled "npm audit" but actually
-      # just listing packages. Now we run a real audit.
-      - name: Audit dependencies (production)
+      # FIX (OPS-012): The previous "audit" step had three compounding bugs:
+      #   1. `bun pm ls --all --production > /dev/null` lists packages and
+      #      discards the output — it does NO audit.
+      #   2. `better-npm-audit` reads package-lock.json (npm's lockfile),
+      #      but this repo uses bun.lockb — the tool finds nothing to audit.
+      #   3. `|| true` and `continue-on-error: true` double-ensured the
+      #      step always succeeded. The CI badge was green even if every
+      #      dependency had a critical CVE.
+      # We now use `osv-scanner` which reads bun.lockb directly and
+      # reports known vulnerabilities from the OSV database. The step
+      # FAILS on HIGH or CRITICAL severity (no more `|| true`).
+      - name: Audit dependencies (production) — fail on HIGH/CRITICAL CVEs
         run: |
-          # bun audit isn't available in all versions; use npm as a fallback.
-          bun pm ls --all --production > /dev/null
-          npx --yes better-npm-audit audit --level moderate || true
-        continue-on-error: true # warnings, not blockers — see weekly.yml for the gate
+          npx --yes @google/osv-scanner --lockfile=bun.lockb --severity=HIGH
+      - name: Audit dependencies (all) — warn on MEDIUM
+        run: |
+          npx --yes @google/osv-scanner --lockfile=bun.lockb --severity=MODERATE
+        continue-on-error: true  # medium/low are warnings, not blockers
 
       - name: Dependency review (on PRs)
         if: github.event_name == 'pull_request'

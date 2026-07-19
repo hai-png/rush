@@ -11,7 +11,16 @@ export function middleware(req: NextRequest) {
   const csp = [
     `default-src 'self'`,
     `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`,
-    `style-src 'self' 'nonce-${nonce}'`,
+    // FIX (WEB-009): Re-added 'unsafe-inline' to style-src. The previous
+    // removal broke Tailwind v4, Framer Motion, react-leaflet, and other
+    // libraries that inject <style> tags at runtime without nonces. The
+    // breakage was silent in dev (CSP not enforced) and only manifested in
+    // production — broken layouts, missing animations, blank map tiles.
+    // 'unsafe-inline' for style-src is much safer than for script-src
+    // (style injection can't execute arbitrary JS in modern browsers).
+    // A future hardening pass can use 'unsafe-hashes' with specific style
+    // hashes for stricter control.
+    `style-src 'self' 'unsafe-inline'`,
     `img-src 'self' data: https:`,
     `font-src 'self' data:`,
     `connect-src 'self' https://superapp.ethiomobilemoney.et https://sentry.io ${process.env.NEXT_PUBLIC_TILE_SERVER_URL ?? ''}`,

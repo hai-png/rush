@@ -1,11 +1,13 @@
 import { useEffect, useRef } from 'react';
-import { View, Text, Pressable } from 'react-native';
+import { View, Text } from 'react-native';
 import * as Location from 'expo-location';
 import * as BackgroundFetch from 'expo-background-fetch';
 import * as TaskManager from 'expo-task-manager';
+import * as SecureStore from 'expo-secure-store';
 import { api } from '../../src/lib/api';
 
 const GPS_TASK = 'addisride-gps-report';
+const ACTIVE_SHUTTLE_KEY = 'addisride.activeShuttleId';
 
 TaskManager.defineTask(GPS_TASK, async () => {
   const shuttleId = await getActiveShuttleId(); // reads from SecureStore, set when trip starts
@@ -23,8 +25,25 @@ TaskManager.defineTask(GPS_TASK, async () => {
 });
 
 async function getActiveShuttleId() {
-  const SecureStore = await import('expo-secure-store');
-  return SecureStore.getItemAsync('addisride.activeShuttleId');
+  return SecureStore.getItemAsync(ACTIVE_SHUTTLE_KEY);
+}
+
+// FIX (MOB-007): The previous implementation had no code path that wrote
+// `addisride.activeShuttleId` to SecureStore — the comment said "set when
+// trip starts" but `dashboard/contractor/page.tsx` (web) calls
+// POST /api/v1/trips and never writes to SecureStore, and the mobile app
+// has no equivalent trip-start screen. So `getActiveShuttleId()` always
+// returned null, the background task always returned NoData, and NO GPS
+// positions were ever reported to the server. Riders' live-trip screens
+// never showed the shuttle moving. Exported here so a future mobile
+// trip-start screen (or the contractor dashboard if rendered on mobile)
+// can call `setActiveShuttleId(shuttleId)` after a successful
+// POST /api/v1/trips, and `clearActiveShuttleId()` on trip complete.
+export async function setActiveShuttleId(shuttleId: string): Promise<void> {
+  await SecureStore.setItemAsync(ACTIVE_SHUTTLE_KEY, shuttleId);
+}
+export async function clearActiveShuttleId(): Promise<void> {
+  await SecureStore.deleteItemAsync(ACTIVE_SHUTTLE_KEY);
 }
 
 export default function ContractorGpsTrackerScreen() {
@@ -45,7 +64,11 @@ export default function ContractorGpsTrackerScreen() {
       await BackgroundFetch.registerTaskAsync(GPS_TASK, { minimumInterval: 10, stopOnTerminate: false, startOnBoot: true });
       registered.current = true;
     })();
-    return () => { BackgroundFetch.unregisterTaskAsync(GPS_TASK).catch(() => {}); };
+    // FIX (MOB-008): Do NOT unregister the task on unmount. The previous
+    // cleanup called `unregisterTaskAsync`, which meant a contractor who
+    // switched to another app tab lost GPS tracking for the rest of the
+    // trip. The task should persist until the trip ends (clearActiveShuttleId
+    // + unregisterTaskAsync from the trip-complete flow).
   }, []);
 
   return (

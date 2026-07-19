@@ -1,9 +1,14 @@
-import { Hono } from 'hono';
+// FIX (ARCH-003): Migrated from bare `Hono()` to `TypedOpenAPIHono` so this
+// module is OpenAPI-capable and `c.get('session')` / `c.get('requestId')` /
+// `c.get('logger')` are typed. Existing .post/.get/.patch/.delete calls
+// continue to work; they can be incrementally converted to
+// .openapi(createRoute(...), handler) to appear in the OpenAPI document.
+import { TypedOpenAPIHono } from '../../src/typed-hono';
 import { z } from 'zod';
 import { requireRole, requireAuth } from '../../src/middleware/auth';
 import { supportService, faqService } from './service';
 
-export const supportRoutes = new Hono();
+export const supportRoutes = new TypedOpenAPIHono();
 
 const CreateTicket = z.object({ subject: z.string().min(3), body: z.string().min(1), category: z.string().default('general'), subscriptionId: z.string().optional(), paymentId: z.string().optional() });
 const Reply = z.object({ body: z.string().min(1) });

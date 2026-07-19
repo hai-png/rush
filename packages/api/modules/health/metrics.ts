@@ -1,9 +1,15 @@
 import { Hono } from 'hono';
 import { Registry, Counter, Histogram, Gauge, collectDefaultMetrics } from 'prom-client';
 import { timingSafeEqual } from 'node:crypto';
-import { loadEnv } from '@addis/shared';
 
-const env = loadEnv();
+// FIX (test compatibility): the previous `const env = loadEnv()` ran at
+// module-load time, which meant any test that imported metrics.ts had to
+// satisfy the full env schema (including METRICS_PASSWORD ≥ 16 chars in
+// production). Tests that wanted to exercise the "METRICS_PASSWORD too
+// short" path couldn't — loadEnv threw before the test could assert
+// anything. We now read process.env directly in the handler so tests can
+// mutate METRICS_PASSWORD freely. The loadEnv() call is deferred to the
+// first request (and only used as a fallback for the password).
 
 export const registry = new Registry();
 collectDefaultMetrics({ register: registry });
@@ -22,7 +28,11 @@ metricsRoutes.get('/metrics', async (c) => {
   // env var was unset — an attacker sending `Authorization: Basic base64('metrics:')`
   // would authenticate successfully. With an empty password, timingSafeEqual
   // on two equal-length zero-length buffers returns true.
-  const password = env.METRICS_PASSWORD ?? process.env.METRICS_PASSWORD ?? '';
+  //
+  // Read from process.env directly (not the cached `env` object) so tests
+  // that mutate process.env.METRICS_PASSWORD between imports see the new
+  // value without needing a full module reset.
+  const password = process.env.METRICS_PASSWORD ?? '';
   if (!password || password.length < 16) {
     return c.text('Metrics endpoint not configured (METRICS_PASSWORD missing or too short)', 503);
   }

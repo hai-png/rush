@@ -1,16 +1,33 @@
-import { Hono } from 'hono';
+// FIX (ARCH-003): Migrated from bare `Hono()` to `TypedOpenAPIHono` so this
+// module is OpenAPI-capable and `c.get('session')` / `c.get('requestId')` /
+// `c.get('logger')` are typed. Existing .post/.get/.patch/.delete calls
+// continue to work; they can be incrementally converted to
+// .openapi(createRoute(...), handler) to appear in the OpenAPI document.
+import { TypedOpenAPIHono } from '../../src/typed-hono';
 import { z } from 'zod';
 import { requireAuth } from '../../src/middleware/auth';
 import { engagementService } from './service';
 import { db, schema } from '@addis/db';
 import { eq, and } from 'drizzle-orm';
 
-export const engagementRoutes = new Hono();
+export const engagementRoutes = new TypedOpenAPIHono();
 engagementRoutes.use('*', requireAuth);
 
 engagementRoutes.get('/notifications', async (c) => {
-  const { rows, cursor } = await engagementService.listForUser(c.get('session').userId, Number(c.req.query('limit') ?? 20), c.req.query('cursor'));
-  return c.json({ data: rows, meta: { cursor, limit: 20 } });
+  // FIX (API-004 + API-003): The previous implementation:
+  //   1. Used `Number(c.req.query('limit') ?? 20)` with no clamp — a client
+  //      could request ?limit=99999999 and force a huge table scan.
+  //   2. Returned `meta.limit: 20` hardcoded — the response envelope lied
+  //      about the actual page size that was applied. A client requesting
+  //      ?limit=50 received 50 rows but the envelope reported limit=20,
+  //      breaking pagination UIs that read meta.limit to decide whether to
+  //      fetch more.
+  // Now: use the shared parseLimit() helper (1..100 clamp) and report the
+  // actual limit applied.
+  const { parseLimit } = await import('../../src/limit');
+  const limit = parseLimit(c.req.query('limit'));
+  const { rows, cursor } = await engagementService.listForUser(c.get('session').userId, limit, c.req.query('cursor'));
+  return c.json({ data: rows, meta: { cursor, limit } });
 });
 engagementRoutes.get('/notifications/unread-count', async (c) => c.json({ data: { count: await engagementService.unreadCount(c.get('session').userId) } }));
 engagementRoutes.patch('/notifications/:id', async (c) => { await engagementService.markRead(c.get('session').userId, c.req.param('id')); return c.body(null, 204); });
@@ -36,7 +53,15 @@ const NotificationTypeZ = z.enum([
 ]);
 const TimeOfDayZ = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'Time must be HH:MM');
 const UpdatePreferencesInput = z.object({
-  prefs: z.record(NotificationTypeZ, z.record(ChannelKeyZ, z.boolean()).partial()).optional(),
+  // FIX (ARCH-002 follow-up): z.record(...).partial() is not a valid Zod
+  // method — .partial() is for object schemas, not records. The previous
+  // code threw "z.record(...).partial is not a function" at module load,
+  // which prevented the OpenAPI document from being generated (and would
+  // have crashed the API at startup if the engagement routes were ever
+  // loaded in a fresh process). The equivalent for "record with optional
+  // values" is z.record(keySchema, valueSchema) — the values are already
+  // optional in the sense that any key may be absent from the record.
+  prefs: z.record(NotificationTypeZ, z.record(ChannelKeyZ, z.boolean())).optional(),
   quietHoursStart: TimeOfDayZ.nullable().optional(),
   quietHoursEnd: TimeOfDayZ.nullable().optional(),
 }).strict();

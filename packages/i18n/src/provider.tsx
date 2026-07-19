@@ -19,8 +19,20 @@ export function I18nProvider({ children, initialLocale = 'en' }: { children: Rea
   const [locale, setLocaleState] = useState<Locale>(initialLocale);
   const setLocale = useCallback((l: Locale) => {
     setLocaleState(l);
-    document.cookie = `addis-ride-locale=${l}; path=/; max-age=31536000`;
-    document.documentElement.lang = l;
+    // FIX (I18N-001): The previous implementation unconditionally accessed
+    // `document.cookie` and `document.documentElement.lang`. This provider is
+    // imported by BOTH web (apps/web) and mobile (apps/mobile). On React
+    // Native, `document` is undefined, so the language switcher in the mobile
+    // settings screen threw `ReferenceError: document is not defined` and
+    // crashed the app. Guard for platform — mobile persistence is handled by
+    // the settings-store (AsyncStorage), so we only need to set the cookie
+    // and lang attribute on web.
+    if (typeof document !== 'undefined') {
+      document.cookie = `addis-ride-locale=${l}; Path=/; Max-Age=31536000; SameSite=Lax; Secure`;
+      if (typeof document.documentElement !== 'undefined') {
+        document.documentElement.lang = l;
+      }
+    }
   }, []);
   return (
     <LocaleContext.Provider value={{ locale, setLocale }}>

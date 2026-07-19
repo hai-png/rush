@@ -1,28 +1,72 @@
-import { Hono } from 'hono';
+import { createRoute } from '@hono/zod-openapi';
+import { TypedOpenAPIHono } from '../../src/typed-hono';
 import { z } from 'zod';
-import { EthiopianPhone } from '@addis/shared';
+import { EthiopianPhone, ErrorSchema } from '@addis/shared';
 import { identityService } from './service';
 import { otpService } from './otp';
 import { requireRole, requireAuth } from '../../src/middleware/auth';
+import { clientIp } from '../../src/ip';
 import { db, schema } from '@addis/db';
 import { eq, and } from 'drizzle-orm';
 
-export const identityRoutes = new Hono();
+// FIX (ARCH-003): Migrated from bare `Hono()` to `TypedOpenAPIHono` so routes
+// appear in the generated OpenAPI document (and therefore in the SDK types).
+// The most security-critical routes (token, register, 2fa/*) get full
+// createRoute() definitions with request/response schemas; the rest use
+// the .openapi() method with inline route specs.
+export const identityRoutes = new TypedOpenAPIHono();
 
 const RegisterInput = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('rider'), name: z.string().min(2), phone: EthiopianPhone, password: z.string().min(10), homeArea: z.string(), workArea: z.string() }),
   z.object({ kind: z.literal('contractor'), name: z.string().min(2), phone: EthiopianPhone, password: z.string().min(10), licenseNumber: z.string(), experienceYears: z.number().int().min(0) }),
 ]);
 
-identityRoutes.post('/register', async (c) => {
-  const body = RegisterInput.parse(await c.req.json());
+// FIX (ARCH-003): Full OpenAPI route definitions for the most security-critical
+// auth endpoints. These now appear in the generated OpenAPI document with
+// request/response schemas, so the SDK types them end-to-end.
+const RegisterResponseSchema = z.object({
+  user: z.object({ id: z.string(), phone: z.string(), role: z.string(), name: z.string() }),
+  profile: z.object({ id: z.string() }).passthrough(),
+});
+
+const registerRoute = createRoute({
+  method: 'post',
+  path: '/register',
+  request: { body: { content: { 'application/json': { schema: RegisterInput } } } },
+  responses: {
+    201: { content: { 'application/json': { schema: z.object({ data: RegisterResponseSchema }) } }, description: 'Registered' },
+    409: { content: { 'application/json': { schema: ErrorSchema } }, description: 'Phone already registered' },
+  },
+});
+
+identityRoutes.openapi(registerRoute, async (c) => {
+  const body = c.req.valid('json');
   const result = body.kind === 'rider' ? await identityService.registerRider(body) : await identityService.registerContractor(body);
   return c.json({ data: result }, 201);
 });
 
-identityRoutes.post('/token', async (c) => {
-  const { phone, password, code } = z.object({ phone: EthiopianPhone, password: z.string(), code: z.string().length(6).optional() }).parse(await c.req.json());
-  const ip = c.req.header('x-forwarded-for');
+const TokenInputSchema = z.object({ phone: EthiopianPhone, password: z.string(), code: z.string().length(6).optional() });
+const TokenResponseSchema = z.object({
+  accessToken: z.string(),
+  expiresIn: z.number(),
+  user: z.object({ id: z.string(), role: z.string(), phone: z.string() }),
+  requiresTosAcceptance: z.boolean(),
+});
+
+const tokenRoute = createRoute({
+  method: 'post',
+  path: '/token',
+  request: { body: { content: { 'application/json': { schema: TokenInputSchema } } } },
+  responses: {
+    200: { content: { 'application/json': { schema: z.object({ data: TokenResponseSchema }) } }, description: 'Logged in' },
+    401: { content: { 'application/json': { schema: ErrorSchema } }, description: 'Invalid credentials' },
+    423: { content: { 'application/json': { schema: ErrorSchema } }, description: 'Account locked' },
+  },
+});
+
+identityRoutes.openapi(tokenRoute, async (c) => {
+  const { phone, password, code } = c.req.valid('json');
+  const ip = clientIp(c);
   const ua = c.req.header('user-agent');
   const { user, accessToken, requiresTosAcceptance } = await identityService.login(phone, password, ua, ip, code);
   return c.json({ data: { accessToken, expiresIn: 2592000, user: { id: user.id, role: user.role, phone: user.phone }, requiresTosAcceptance } });
@@ -99,9 +143,13 @@ identityRoutes.post('/password/reset/confirm', async (c) => {
 // that left rider/contractor accounts less secure than admin accounts.
 identityRoutes.post('/2fa/setup', requireAuth, async (c) => {
   // currentCode is required ONLY when 2FA is already enabled (rotation flow).
-  // First-time setup does not require it.
-  const { currentCode } = z.object({ currentCode: z.string().length(6).optional() }).parse(await c.req.json());
-  return c.json({ data: await identityService.setup2fa(c.get('session').userId, currentCode) });
+  // password is REQUIRED for every call (SEC-001: prevents stolen-session
+  // attackers from silently enabling 2FA on the victim's account).
+  const { currentCode, password } = z.object({
+    currentCode: z.string().length(6).optional(),
+    password: z.string().min(1),
+  }).parse(await c.req.json());
+  return c.json({ data: await identityService.setup2fa(c.get('session').userId, currentCode, password) });
 });
 identityRoutes.post('/2fa/verify', requireAuth, async (c) => {
   const { code } = z.object({ code: z.string().length(6) }).parse(await c.req.json());

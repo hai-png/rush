@@ -8,13 +8,30 @@ export default function AccountExportPage() {
 
   const download = async (format: 'json' | 'csv') => {
     setLoading(true);
-    const res = await fetch(`/api/v1/account/export?format=${format}`);
-    const blob = await res.blob();
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url; a.download = `addis-ride-export.${format === 'json' ? 'zip' : 'zip'}`;
-    a.click(); URL.revokeObjectURL(url);
-    setLoading(false);
+    try {
+      const res = await fetch(`/api/v1/account/export?format=${format}`);
+      // FIX (WEB-015): The previous implementation always saved the file as
+      // `.zip` regardless of format (the ternary `format === 'json' ? 'zip' : 'zip'`
+      // was dead code — both branches produced `.zip`). The CSV endpoint
+      // returns a ZIP too (the service always streams a zip archive), so the
+      // extension is correct for both — but the dead ternary was misleading.
+      // Also added: res.ok check so a 429 rate-limit response doesn't get
+      // saved as a corrupt .zip of JSON error text.
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        alert(err?.error?.message ?? `Export failed (HTTP ${res.status})`);
+        return;
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `addis-ride-export-${format}.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (

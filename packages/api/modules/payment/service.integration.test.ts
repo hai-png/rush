@@ -44,7 +44,37 @@ beforeAll(async () => {
   // Mock @addis/db so all service imports use the testcontainer db.
   vi.doMock('@addis/db', () => ({ db, schema, Db: undefined as any, DbOrTx: undefined as any }));
 
-  // Now import the services — they'll get the mocked @addis/db.
+  // FIX (TEST-006): Mock @addis/payments so processRefundRetries doesn't hit
+  // the real Telebirr sandbox endpoint. The previous implementation left
+  // @addis/payments unmocked, so the "refund succeeded" assertion only
+  // passed on developer machines with real TELEBIRR_FABRIC_APP_ID credentials
+  // set. In CI (no Telebirr creds), provider.refund() threw a network error,
+  // the service caught it and scheduled a retry, and the refund_retries row
+  // stayed 'processing' — the assertion `expect(retry.status).toBe('succeeded')`
+  // failed.
+  //
+  // The mock returns a successful refund for any input, so the test
+  // exercises the full DB state machine (claim rows → 'succeeded',
+  // payment.refundAmount accumulated, notification queued) without depending
+  // on an external service.
+  vi.doMock('@addis/payments', () => ({
+    getPaymentProvider: () => ({
+      refund: vi.fn().mockResolvedValue({ status: 'succeeded' as const }),
+      verifyPayment: vi.fn().mockResolvedValue({
+        status: 'completed' as const,
+        amount: Money.fromDecimal('500.00'),
+      }),
+      createCheckout: vi.fn().mockResolvedValue({
+        status: 'checkout' as const,
+        checkoutUrl: 'https://stub.example/checkout',
+        prepayId: 'stub-prepay-id',
+      }),
+      parseWebhook: vi.fn(),
+      name: 'telebirr' as const,
+    }),
+  }));
+
+  // Now import the services — they'll get the mocked @addis/db and @addis/payments.
   const serviceMod = await import('./service');
   settlePayment = serviceMod.settlePayment;
   failPayment = serviceMod.failPayment;
@@ -56,7 +86,11 @@ beforeAll(async () => {
   transitionSubscription = stateMod.transitionSubscription;
 }, 60_000);
 
-afterAll(async () => { vi.doUnmock('@addis/db'); await container.stop(); });
+afterAll(async () => {
+  vi.doUnmock('@addis/db');
+  vi.doUnmock('@addis/payments');
+  await container.stop();
+});
 
 function addDays(d: Date, n: number) { const c = new Date(d); c.setDate(c.getDate() + n); return c; }
 

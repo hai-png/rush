@@ -138,6 +138,13 @@ const BACKOFF_MIN = [15, 30, 60, 120, 240];
 export async function processRefundRetries(limit = 50) {
   // Claim rows with SELECT FOR UPDATE SKIP LOCKED so concurrent workers
   // don't double-process the same refund.
+  //
+  // FIX (OPS-001 / SEC-005): The previous implementation had a `.catch()`
+  // fallback that did a plain SELECT with NO locking — a TOCTOU race where
+  // two workers could both select the same rows, both call provider.refund(),
+  // and DOUBLE-REFUND the customer. The fallback fired on ANY SQL error,
+  // including transient connection blips. Now: errors propagate. Fail loud
+  // rather than silently degrade to an unsafe path that defrauds the platform.
   const claimed = await db.execute(sql`
     UPDATE refund_retries SET status = 'processing', updated_at = now()
     WHERE id IN (
@@ -148,15 +155,7 @@ export async function processRefundRetries(limit = 50) {
       FOR UPDATE SKIP LOCKED
     )
     RETURNING *
-  `).catch(async () => {
-    // Fallback for environments where the SQL above doesn't work (e.g. the
-    // table name is camelCase due to Drizzle's naming). Use the Drizzle API
-    // with a less-strict lock.
-    const due = await db.select().from(schema.refundRetries)
-      .where(and(eq(schema.refundRetries.status, 'pending'), lte(schema.refundRetries.nextAttemptAt, new Date())))
-      .limit(limit);
-    return { rows: due };
-  });
+  `);
 
   const rows = (claimed as any).rows ?? (claimed as any);
   let processed = 0;

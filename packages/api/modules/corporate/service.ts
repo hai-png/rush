@@ -116,10 +116,16 @@ export const corporateService = {
     const expiresAt = Date.now() + 24 * 3600_000; // 24h
     const payload = JSON.stringify({ code: corp.code, expiresAt });
     const { createHmac } = await import('node:crypto');
-    const sig = createHmac('sha256', process.env.NEXTAUTH_SECRET!).update(payload).digest('hex');
+    // FIX (SEC-008 / ARCH-015): Use the validated env object instead of
+    // `process.env.NEXTAUTH_SECRET!` directly. The previous non-null assertion
+    // bypassed loadEnv()'s strength check; if the env var was unset, the HMAC
+    // was signed with the literal string "undefined" — every invite token was
+    // forgeable.
+    const env = (await import('@addis/shared')).loadEnv();
+    const sig = createHmac('sha256', env.NEXTAUTH_SECRET).update(payload).digest('hex');
     const token = Buffer.from(`${payload}.${sig}`).toString('base64url');
     return {
-      inviteUrl: `${process.env.NEXTAUTH_URL}/signup/rider?invite=${token}`,
+      inviteUrl: `${env.NEXTAUTH_URL}/signup/rider?invite=${token}`,
       code: corp.code, // still returned for the admin's reference
       token,
       expiresAt: new Date(expiresAt).toISOString(),

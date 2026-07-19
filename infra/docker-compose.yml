@@ -1,9 +1,30 @@
 # docker-compose for local dev / staging.
+#
+# FIX (INFRA-003): The previous file exposed Postgres, Redis, and MinIO to
+# the host by default — anyone running `docker compose up` on a staging host
+# (or a developer on a coffee-shop Wi-Fi) exposed unencrypted services to
+# the network. Redis had no password until recently; the weak default
+# `addisride_dev_only_change_me` is still the fallback if REDIS_PASSWORD is
+# unset.
+#
+# FIX (INFRA-004): No network isolation — all services shared the default
+# Compose network, so the `web` container (Internet-facing via Caddy) could
+# reach `postgres`, `redis`, and `minio` directly. If `web` was compromised
+# (RCE via a dependency), the attacker had line-of-sight to all datastores.
+#
+# The new config:
+#   - Uses `profiles: ["dev"]` on host-exposed ports so `docker compose up`
+#     (no profile) starts services WITHOUT exposing datastores to the host.
+#     `docker compose --profile dev up` exposes them for local development.
+#   - Splits services across two networks: `frontend` (Caddy only) and
+#     `backend` (web, worker, datastores). Caddy can reach `web`; `web` and
+#     `worker` can reach the datastores; the datastores cannot be reached
+#     from `frontend` at all.
+#   - Binds exposed ports to 127.0.0.1 instead of 0.0.0.0 so even with the
+#     dev profile, the ports are reachable only from localhost.
+#
 # Production deployments should NOT use these credentials — override via
-# .env or a secrets manager. The previous file committed hardcoded weak
-# passwords ('addisride', 'addisride123') and Redis had no password at
-# all — any container on the network could read/write sessions, rate-limit
-# counters, and OTP locks.
+# .env or a secrets manager.
 
 services:
   postgres:
@@ -11,10 +32,12 @@ services:
     environment:
       POSTGRES_DB: addisride
       POSTGRES_USER: addisride
-      # Read from env so production can override without editing this file.
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-addisride_dev_only_change_me}
-    # Don't expose DB to host in production — comment out or remove ports.
-    ports: ["5432:5432"]
+    # FIX (INFRA-003): bind to 127.0.0.1 so the port is reachable only from
+    # localhost, not from the network. Use `profiles: ["dev"]` so the port
+    # isn't exposed at all in production-mode `docker compose up`.
+    profiles: ["dev"]
+    ports: ["127.0.0.1:5432:5432"]
     volumes: ["pgdata:/var/lib/postgresql/data"]
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U addisride"]
@@ -22,20 +45,20 @@ services:
       timeout: 5s
       retries: 10
     restart: unless-stopped
+    networks: [backend]
 
   redis:
     image: redis:7-alpine
-    # Require a password — the previous config had no auth, so any container
-    # on the network could read/write Redis (sessions, rate-limit counters,
-    # OTP send locks, cron advisory locks).
     command: redis-server --requirepass ${REDIS_PASSWORD:-addisride_dev_only_change_me} --maxmemory 256mb --maxmemory-policy allkeys-lru
-    ports: ["6379:6379"]
+    profiles: ["dev"]
+    ports: ["127.0.0.1:6379:6379"]
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
       timeout: 3s
       retries: 10
     restart: unless-stopped
+    networks: [backend]
 
   minio:
     image: minio/minio
@@ -43,9 +66,11 @@ services:
     environment:
       MINIO_ROOT_USER: ${MINIO_ROOT_USER:-addisride}
       MINIO_ROOT_PASSWORD: ${MINIO_ROOT_PASSWORD:-addisride_dev_only_change_me_32chars}
-    ports: ["9000:9000", "9001:9001"]
+    profiles: ["dev"]
+    ports: ["127.0.0.1:9000:9000", "127.0.0.1:9001:9001"]
     volumes: ["miniodata:/data"]
     restart: unless-stopped
+    networks: [backend]
 
   web:
     build: { context: .., dockerfile: infra/Dockerfile.web }
@@ -56,12 +81,13 @@ services:
       minio: { condition: service_started }
     ports: ["3000:3000"]
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/api/v1/health"]
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/api/v1/healthz"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 30s
     restart: unless-stopped
+    networks: [frontend, backend]
 
   worker:
     build: { context: .., dockerfile: infra/Dockerfile.worker }
@@ -70,6 +96,7 @@ services:
       postgres: { condition: service_healthy }
       redis: { condition: service_healthy }
     restart: unless-stopped
+    networks: [backend]
 
   caddy:
     image: caddy:2-alpine
@@ -81,6 +108,17 @@ services:
     depends_on:
       web: { condition: service_started }
     restart: unless-stopped
+    networks: [frontend]
+
+networks:
+  # frontend: reachable from the Internet (Caddy). `web` is also on this
+  # network so Caddy can reverse-proxy to it.
+  frontend:
+  # backend: internal-only. Datastores, web, and worker live here. Caddy
+  # is NOT on this network — even if Caddy is compromised, it cannot reach
+  # the datastores directly.
+  backend:
+    internal: true
 
 volumes:
   pgdata:

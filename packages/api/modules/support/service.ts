@@ -69,13 +69,17 @@ export const supportService = {
           status: t.to, firstResponseAt: ticket.firstResponseAt ?? new Date(), assignedToId: ticket.assignedToId ?? authorId, updatedAt: new Date(),
         }).where(eq(schema.supportTickets.id, ticketId));
         await tx.insert(schema.outboxEvents).values({ channel: 'notification', payload: { type: 'support_reply', userId: ticket.userId } });
-      } else if (!isStaff && ticket.status === 'resolved') {
-        // User replying to a resolved ticket reopens it — the previous
-        // implementation didn't handle this, so the user's message was
-        // added but the ticket stayed 'resolved' and support could miss it.
-        const t = ticketState.resolve('resolved', 'user.reopened');
+      } else if (!isStaff && (ticket.status === 'resolved' || ticket.status === 'closed')) {
+        // FIX (ARCH-008): The previous implementation only handled the
+        // `resolved -> open` transition. A user replying to a `closed`
+        // ticket added a ticket_messages row but left the ticket status
+        // unchanged — the reply was effectively buried, invisible to staff
+        // monitoring the open queue. The state machine declares
+        // `closed -> open (user.reopened)` as a legal transition, so this
+        // branch now matches the state machine's contract.
+        const t = ticketState.resolve(ticket.status, 'user.reopened');
         await tx.update(schema.supportTickets).set({
-          status: t.to, resolvedAt: null, updatedAt: new Date(),
+          status: t.to, resolvedAt: null, closedAt: null, updatedAt: new Date(),
         }).where(eq(schema.supportTickets.id, ticketId));
       }
     });

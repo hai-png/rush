@@ -8,7 +8,7 @@ export function ThemeProvider({ children, initialTheme }: { children: React.Reac
     setTheme((t) => {
       const next = t === 'dark' ? 'light' : 'dark';
       document.documentElement.setAttribute('data-theme', next);
-      document.cookie = `addis-ride-theme=${next}; path=/; max-age=31536000`;
+      document.cookie = `addis-ride-theme=${next}; Path=/; Max-Age=31536000; SameSite=Lax; Secure`;
       return next;
     });
   }, []);

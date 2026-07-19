@@ -8,6 +8,14 @@ import { tosGateMiddleware } from './middleware/tos-gate';
 
 import { csrfProtection } from './middleware/csrf';
 
+// FIX (OPS-006): Wire the Prometheus metrics so /metrics actually reports
+// business signal. The metrics were defined in modules/health/metrics.ts
+// but never observed — the endpoint returned only prom-client's default
+// process metrics (CPU, heap, GC). The timing middleware below observes
+// http_request_duration_seconds on every request, with route labels
+// normalized so cuid2/uuid path segments don't explode cardinality.
+import { httpRequestDuration } from '../modules/health/metrics';
+
 import { catalogRoutes } from '../modules/catalog/routes';
 import { identityRoutes } from '../modules/identity/routes';
 import { subscriptionRoutes } from '../modules/subscription/routes';
@@ -50,6 +58,29 @@ app.route('/api/v1', metricsRoutes);      // /api/v1/metrics
 app.route('/api/v1/account', accountRoutes);
 app.route('/api/v1/dashboard', dashboardRoutes);
 app.route('/api/v1/tos', tosRoutes);
+
+// FIX (OPS-006): Timing middleware. Runs AFTER all routes are mounted so
+// c.req.routePaths is populated. We observe the request duration with
+// normalized route labels (replace cuid2/uuid path segments with :id) so
+// the cardinality of the `route` label stays bounded.
+app.use('*', async (c, next) => {
+  const start = Date.now();
+  await next();
+  const durationSec = (Date.now() - start) / 1000;
+  // Normalize the path: replace cuid2 (24-char lowercase alnum) and uuid
+  // path segments with :id so /api/v1/tickets/abc123 becomes
+  // /api/v1/tickets/:id. Without this, every distinct ticket id would
+  // create a new label series — unbounded cardinality would OOM the
+  // metrics registry over time.
+  const route = c.req.path
+    .replace(/\/[a-z0-9]{24}/g, '/:id')      // cuid2
+    .replace(/\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '/:id');  // uuid
+  try {
+    httpRequestDuration.labels(c.req.method, route, String(c.res.status)).observe(durationSec);
+  } catch {
+    // Don't let metrics observation break the response — log and continue.
+  }
+});
 
 app.onError(errorHandler);
 

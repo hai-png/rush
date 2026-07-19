@@ -16,7 +16,9 @@ describe('CRON_JOBS registry', () => {
   it('exposes the full set of cron jobs the system expects', async () => {
     const { CRON_JOBS } = await import('./cron-jobs');
     const names = CRON_JOBS.map((j) => j.name).sort();
+    // FIX (OPS-010): added 'archive-old-records' for 7-year retention enforcement.
     expect(names).toEqual([
+      'archive-old-records',
       'auto-close-tickets',
       'cleanup-pending-subscriptions',
       'cleanup-stale-payments',

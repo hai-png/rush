@@ -13,8 +13,8 @@ export type PaymentStatusResult = {
   /** The amount the provider reports was actually paid. Optional because not
    *  all providers expose this on every status query — when absent, the caller
    *  (settlePayment) records an audit warning but still proceeds. */
-  amount?: Money;
-  raw?: unknown;
+  amount?: Money | undefined;
+  raw?: unknown | undefined;
 };
 export type RefundRequest = { merchOrderId: string; refundRequestNo: string; amount: Money; reason: string };
 export type RefundResult =

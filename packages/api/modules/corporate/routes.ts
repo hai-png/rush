@@ -1,9 +1,14 @@
-import { Hono } from 'hono';
+// FIX (ARCH-003): Migrated from bare `Hono()` to `TypedOpenAPIHono` so this
+// module is OpenAPI-capable and `c.get('session')` / `c.get('requestId')` /
+// `c.get('logger')` are typed. Existing .post/.get/.patch/.delete calls
+// continue to work; they can be incrementally converted to
+// .openapi(createRoute(...), handler) to appear in the OpenAPI document.
+import { TypedOpenAPIHono } from '../../src/typed-hono';
 import { z } from 'zod';
 import { requireRole } from '../../src/middleware/auth';
 import { corporateService } from './service';
 
-export const corporateRoutes = new Hono();
+export const corporateRoutes = new TypedOpenAPIHono();
 
 corporateRoutes.post('/signup', async (c) => {
   const body = z.object({
@@ -68,19 +73,30 @@ corporateRoutes.post('/onboard', requireRole('rider'), async (c) => {
   let code: string;
   if (body.invite) {
     // H41: verify the signed invite token (signature + expiry)
+    // FIX (SEC-008 / ARCH-015): use loadEnv() so the secret is validated.
     const { timingSafeEqual, createHmac } = await import('node:crypto');
+    const { loadEnv } = await import('@addis/shared');
+    const env = loadEnv();
     const decoded = Buffer.from(body.invite, 'base64url').toString();
     const lastDot = decoded.lastIndexOf('.');
     if (lastDot < 0) return c.json({ error: { code: 'BAD_REQUEST', message: 'Invalid invite token', requestId: c.get('requestId') } }, 400);
     const payload = decoded.slice(0, lastDot);
     const sig = decoded.slice(lastDot + 1);
-    const expected = createHmac('sha256', process.env.NEXTAUTH_SECRET!).update(payload).digest('hex');
+    const expected = createHmac('sha256', env.NEXTAUTH_SECRET).update(payload).digest('hex');
     if (sig.length !== expected.length || !timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) {
       return c.json({ error: { code: 'BAD_REQUEST', message: 'Invalid invite signature', requestId: c.get('requestId') } }, 400);
     }
-    const parsed = JSON.parse(payload);
+    let parsed: { code?: string; expiresAt?: number };
+    try {
+      parsed = JSON.parse(payload);
+    } catch {
+      return c.json({ error: { code: 'BAD_REQUEST', message: 'Malformed invite token', requestId: c.get('requestId') } }, 400);
+    }
     if (typeof parsed.expiresAt !== 'number' || Date.now() > parsed.expiresAt) {
       return c.json({ error: { code: 'BAD_REQUEST', message: 'Invite token expired', requestId: c.get('requestId') } }, 400);
+    }
+    if (typeof parsed.code !== 'string' || !parsed.code) {
+      return c.json({ error: { code: 'BAD_REQUEST', message: 'Invite token missing code', requestId: c.get('requestId') } }, 400);
     }
     code = parsed.code;
   } else if (body.corporateCode) {

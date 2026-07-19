@@ -1,6 +1,12 @@
-import { Hono } from 'hono';
+// FIX (ARCH-003): Migrated from bare `Hono()` to `TypedOpenAPIHono` so this
+// module is OpenAPI-capable and `c.get('session')` / `c.get('requestId')` /
+// `c.get('logger')` are typed. Existing .post/.get/.patch/.delete calls
+// continue to work; they can be incrementally converted to
+// .openapi(createRoute(...), handler) to appear in the OpenAPI document.
+import { TypedOpenAPIHono } from '../../src/typed-hono';
 import { z } from 'zod';
 import { requireRole } from '../../src/middleware/auth';
+import { clientIp } from '../../src/ip';
 import { adminService } from './service';
 import { adminCatalogRoutes } from '../catalog/routes';
 import { documentService } from '../identity/documents';
@@ -10,7 +16,7 @@ import { Money, ALL_ROLES } from '@addis/shared';
 import { and, eq } from 'drizzle-orm';
 import { db, schema } from '@addis/db';
 
-export const adminRoutes = new Hono();
+export const adminRoutes = new TypedOpenAPIHono();
 adminRoutes.use('*', requireRole('platform_admin'));
 adminRoutes.route('/', adminCatalogRoutes);
 
@@ -28,12 +34,12 @@ adminRoutes.get('/dashboard', async (c) => c.json({ data: await adminService.das
 adminRoutes.get('/users', async (c) => c.json({ data: await adminService.listUsers(boundedLimit(c.req.query('limit'), 20, 200), c.req.query('q')) }));
 adminRoutes.patch('/users/:id', async (c) => {
   const body = z.object({ action: z.enum(['suspend', 'change_role']), role: z.enum(ALL_ROLES as [string, ...string[]]).optional() }).parse(await c.req.json());
-  const ip = c.req.header('x-forwarded-for');
+  const ip = clientIp(c);
   if (body.action === 'suspend') return c.json({ data: await adminService.suspendUser(c.get('session').userId, c.req.param('id'), ip) });
   if (!body.role) return c.json({ error: { code: 'BAD_REQUEST', message: 'role is required for change_role', requestId: c.get('requestId') } }, 400);
   return c.json({ data: await adminService.changeRole(c.get('session').userId, c.req.param('id'), body.role, ip) });
 });
-adminRoutes.post('/users/:id/impersonate', async (c) => c.json({ data: await adminService.impersonate(c.get('session').userId, c.req.param('id'), c.req.header('x-forwarded-for')) }));
+adminRoutes.post('/users/:id/impersonate', async (c) => c.json({ data: await adminService.impersonate(c.get('session').userId, c.req.param('id'), clientIp(c)) }));
 
 adminRoutes.get('/contractors/pending', async (c) => {
   const rows = await db.select().from(schema.contractorProfiles).where(eq(schema.contractorProfiles.verificationStatus, 'pending'));
@@ -89,7 +95,7 @@ adminRoutes.post('/payments/:id/verify', async (c) => {
     reason: z.string().min(3).max(500),
   }).parse(await c.req.json());
   const adminId = c.get('session').userId;
-  const ipAddress = c.req.header('x-forwarded-for') ?? null;
+  const ipAddress = clientIp(c) ?? null;
 
   const result = await db.transaction(async (tx) => {
     const { writeAudit } = await import('./audit');
@@ -153,7 +159,7 @@ adminRoutes.post('/refunds', async (c) => {
     reason: z.string().min(3).max(500),
   }).parse(await c.req.json());
   const adminId = c.get('session').userId;
-  const ipAddress = c.req.header('x-forwarded-for') ?? null;
+  const ipAddress = clientIp(c) ?? null;
   try {
     await scheduleRefund(body.paymentId, Money.fromETBString(body.amount), body.reason);
     // Audit the refund scheduling — previously invisible.
@@ -170,16 +176,17 @@ adminRoutes.post('/refunds', async (c) => {
 });
 
 // Fields that must never leave the system via a bulk export, keyed by resource name.
-// The previous denylist only stripped 2 fields from `users`; payments, subscriptions,
-// and tickets were exported raw — bulk PII exfiltration with no audit trail. Now
-// every export is audited and PII fields are stripped across all resources.
+// FIX (SEC-006): The previous denylist only stripped credentials from `users`
+// (passwordHash, twoFactorSecret, twoFactorEnabled) — phone, email, name, and
+// id were exported in cleartext, giving any platform_admin a 10K-row PII dump
+// in a single call. Now we strip all PII fields across every resource. The
+// remaining fields are the minimum needed for operational analytics
+// (status, amounts, timestamps, foreign-key references for join analysis).
 const EXPORT_FIELD_DENYLIST: Record<string, string[]> = {
-  users: ['passwordHash', 'twoFactorSecret', 'twoFactorEnabled'],
-  // H14: payments export was leaking reference (Telebirr merchOrderId — a
-  // replay primitive), refundRequestNo, and riderId (PII). Now stripped.
+  users: ['passwordHash', 'twoFactorSecret', 'twoFactorEnabled', 'phone', 'email', 'name'],
   payments: ['prepayId', 'reference', 'refundRequestNo', 'riderId'],
-  subscriptions: ['riderId'],
-  tickets: ['userId'],
+  subscriptions: ['riderId', 'morningSlot', 'eveningSlot'],
+  tickets: ['userId', 'subject', 'body'],
 };
 
 adminRoutes.get('/export/:resource', async (c) => {
@@ -196,14 +203,22 @@ adminRoutes.get('/export/:resource', async (c) => {
   }) : rawRows;
   const csv = toCsv(rows);
 
-  // Audit the export so there's a record of which admin pulled which resource
-  // and from which IP. Without this, bulk PII exfiltration was invisible.
+  // Audit the export. FIX (SEC-006): The previous implementation used
+  // fire-and-forget `.catch(() => {})` — if the DB was down (or the outbox
+  // insert failed for any reason), the export happened silently with no
+  // audit trail. Now we await the insert; if it fails, the export fails
+  // (no PII leaves the system without an audit record).
   const adminId = c.get('session').userId;
-  const ipAddress = c.req.header('x-forwarded-for') ?? null;
-  db.insert(schema.outboxEvents).values({
-    channel: 'audit',
-    payload: { action: 'admin.csv_export', actorId: adminId, resource, rowCount: rows.length, ipAddress },
-  }).catch(() => {}); // fire-and-forget — don't block the response on audit insert
+  const ipAddress = clientIp(c) ?? null;
+  try {
+    await db.insert(schema.outboxEvents).values({
+      channel: 'audit',
+      payload: { action: 'admin.csv_export', actorId: adminId, resource, rowCount: rows.length, ipAddress },
+    });
+  } catch (err) {
+    c.get('logger')?.error({ err, resource, rowCount: rows.length }, 'admin.csv_export: audit insert failed — refusing to return CSV without audit trail');
+    return c.json({ error: { code: 'INTERNAL', message: 'Export audit failed — refusing to return CSV without audit trail', requestId: c.get('requestId') } }, 500);
+  }
 
   return new Response(csv, { headers: { 'Content-Type': 'text/csv', 'Content-Disposition': `attachment; filename="${resource}.csv"` } });
 });

@@ -1,8 +1,13 @@
-import { Hono } from 'hono';
+// FIX (ARCH-003): Migrated from bare `Hono()` to `TypedOpenAPIHono` so this
+// module is OpenAPI-capable and `c.get('session')` / `c.get('requestId')` /
+// `c.get('logger')` are typed. Existing .post/.get/.patch/.delete calls
+// continue to work; they can be incrementally converted to
+// .openapi(createRoute(...), handler) to appear in the OpenAPI document.
+import { TypedOpenAPIHono } from '../../src/typed-hono';
 import { timingSafeEqual } from 'node:crypto';
 import { CRON_JOBS, CRON_JOBS_BY_NAME, withLock } from '../../src/cron-jobs';
 
-export const cronRoutes = new Hono();
+export const cronRoutes = new TypedOpenAPIHono();
 
 /**
  * Bearer-secret auth guard. The CRON_SECRET must be set (≥32 chars) — without

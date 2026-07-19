@@ -5,13 +5,19 @@ import { useMemo } from 'react';
 
 export function useApiClient() {
   const { data: session } = useSession();
-  // Memoize so we don't recreate the client on every render — the previous
-  // implementation called createAddisRideClient inline, allocating a fresh
-  // client (and its middleware chain) on every render.
+  // FIX (WEB-013): The previous memo depended on the whole `session` object,
+  // but next-auth's useSession() returns a new `data` reference on every
+  // session refresh (every ~5 min). The memo never hit, so the client was
+  // recreated on every refresh — and every component using `useApiClient`
+  // then passed a new `client` to useQuery's queryFn, triggering refetch
+  // storms across the tree. Memoize on the actual primitive that matters
+  // — the access token string — so the client only changes when the token
+  // actually changes.
+  const token = (session as any)?.accessToken;
   return useMemo(() => createAddisRideClient({
     baseUrl: process.env.NEXT_PUBLIC_APP_URL ?? '',
-    getToken: () => (session as any)?.accessToken,
-  }), [session]);
+    getToken: () => token,
+  }), [token]);
 }
 
 /**

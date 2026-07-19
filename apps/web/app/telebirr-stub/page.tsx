@@ -9,10 +9,27 @@ import { useSearchParams } from 'next/navigation';
  * Telebirr checkout flow: it shows the order details and a "Confirm Payment"
  * button that calls the webhook endpoint to simulate a successful payment.
  *
- * In production (TELEBIRR_ENV=production), this page is never reached — the
- * real Telebirr H5 page is used instead.
+ * FIX (WEB-001): The previous comment claimed "In production this page is
+ * never reached" — but it was a normal Next.js route, fully reachable at
+ * /telebirr-stub by anyone in any environment. The page POSTs an UNSIGNED
+ * webhook payload to /api/v1/webhooks/telebirr/notify. The webhook handler
+ * correctly rejects invalid signatures (returns 401), so this stub on its
+ * own does not bypass signature verification. However, defense in depth
+ * dictates the route should not exist in production at all — a future
+ * refactor that breaks signature verification would expose the stub as an
+ * instant payment-bypass primitive. We now early-return (render nothing)
+ * whenever NEXT_PUBLIC_TELEBIRR_ENV indicates production. The actual 404 is
+ * produced by Next.js middleware so the route is unreachable in the router.
  */
 export default function TelebirrStubPage() {
+  // Public env var so the check runs client-side (no SSR secret leak).
+  if (process.env.NEXT_PUBLIC_TELEBIRR_ENV === 'production' || process.env.NODE_ENV === 'production') {
+    return (
+      <div className="min-h-screen flex items-center justify-center px-6">
+        <p className="text-muted-foreground">This page is not available in production.</p>
+      </div>
+    );
+  }
   const params = useSearchParams();
   const merchOrderId = params.get('merch_order_id') ?? params.get('out_request_no') ?? '';
   const amount = params.get('total_amount') ?? '';

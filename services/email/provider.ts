@@ -39,13 +39,18 @@ export class ResendProvider implements EmailProvider {
   async send(input: EmailInput): Promise<boolean> {
     try {
       const client = this.getClient();
-      const { error } = await client.emails.send({
+      // FIX (typecheck): under exactOptionalPropertyTypes, passing
+      // `html: undefined` explicitly is rejected by Resend's types. Build
+      // the payload conditionally so the `html` key is omitted entirely
+      // when input.html is undefined.
+      const payload: { from: string; to: string; subject: string; text: string; html?: string } = {
         from: 'Addis Ride <noreply@addisride.et>',
         to: input.to,
         subject: input.subject,
         text: input.body,
-        html: input.html,
-      });
+      };
+      if (input.html) payload.html = input.html;
+      const { error } = await client.emails.send(payload);
       return !error;
     } catch {
       return false;

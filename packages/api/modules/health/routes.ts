@@ -1,4 +1,9 @@
-import { Hono } from 'hono';
+// FIX (ARCH-003): Migrated from bare `Hono()` to `TypedOpenAPIHono` so this
+// module is OpenAPI-capable and `c.get('session')` / `c.get('requestId')` /
+// `c.get('logger')` are typed. Existing .post/.get/.patch/.delete calls
+// continue to work; they can be incrementally converted to
+// .openapi(createRoute(...), handler) to appear in the OpenAPI document.
+import { TypedOpenAPIHono } from '../../src/typed-hono';
 import { sql } from 'drizzle-orm';
 import { db } from '@addis/db';
 import { redis } from '../../infra/redis';
@@ -7,21 +12,47 @@ import { loadEnv } from '@addis/shared';
 
 const env = loadEnv();
 
-export const healthRoutes = new Hono();
+export const healthRoutes = new TypedOpenAPIHono();
 
 /**
- * Health check.
+ * Lightweight liveness probe — for Docker/k8s healthchecks, load balancers,
+ * and uptime monitors. Returns 200 OK if the process is alive and can reach
+ * the DB; 503 otherwise. No auth required, but exposes NO internal state
+ * (no DB latency, no Redis state, no Telebirr status, no migration version,
+ * no commit SHA).
  *
- * The previous implementation gave false confidence on two checks:
- *   1. `telebirr` was 'ok' if the env var was merely set — even if
- *      credentials were wrong or the service was unreachable.
- *   2. `migrations` always returned 'ok' with version 'unknown' if
- *      MIGRATION_VERSION wasn't set — migrations could be completely
- *      missing and the health check would still say 'ok'.
- * Both now actually probe the underlying system, and both factor into the
- * `overall` status (previously only DB and Redis did).
+ * FIX (OPS-007): The previous /health endpoint exposed DB latency, Redis
+ * latency, Telebirr reachability + HTTP status, migration hash, app version,
+ * and commit SHA — all unauthenticated. An attacker could fingerprint the
+ * deployment, detect when Telebirr was down (and time payment-fraud
+ * attempts), check migration versions to correlate with known CVEs, and
+ * use the 503 status as a cheap DoS canary. Now /healthz is the public
+ * liveness probe (returns only OK/down), and /health (below) is the
+ * admin-gated detailed probe for operators.
+ */
+healthRoutes.get('/healthz', async (c) => {
+  try {
+    await db.execute(sql`select 1`);
+    return c.text('ok', 200);
+  } catch {
+    return c.text('down', 503);
+  }
+});
+
+/**
+ * Detailed health check — for operators / admin UI.
+ *
+ * FIX (OPS-007): Now requires platform_admin auth. The previous
+ * implementation was unauthenticated and exposed DB/Redis/Telebirr/migration
+ * state to anyone.
  */
 healthRoutes.get('/health', async (c) => {
+  // Auth gate — refuse to expose internal state to unauthenticated callers.
+  const session = c.get('session');
+  if (!session || session.role !== 'platform_admin') {
+    return c.json({ error: { code: 'UNAUTHORIZED', message: 'Admin auth required for detailed health', requestId: c.get('requestId') } }, 401);
+  }
+
   const checks: Record<string, any> = {};
   let overall: 'ok' | 'degraded' | 'down' = 'ok';
 

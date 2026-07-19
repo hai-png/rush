@@ -1,6 +1,6 @@
 import { defineStateMachine } from '@addis/shared';
 import type { SubscriptionStatus } from '@addis/shared';
-import { eq, sql } from 'drizzle-orm';
+import { and, eq } from 'drizzle-orm';
 
 export const subscriptionState = defineStateMachine<SubscriptionStatus>({
   initial: 'pending_payment',
@@ -25,7 +25,7 @@ export const subscriptionState = defineStateMachine<SubscriptionStatus>({
  * because the row's status has already moved.
  */
 export async function transitionSubscription(
-  tx: import('@addis/db').Db, subscriptionId: string, event: string,
+  tx: import('@addis/db').DbOrTx, subscriptionId: string, event: string,
 ) {
   const { schema } = await import('@addis/db');
   const [row] = await tx.select().from(schema.subscriptions).where(eq(schema.subscriptions.id, subscriptionId));
@@ -52,6 +52,3 @@ export async function transitionSubscription(
   }
   return { from: t.from, to: t.to, sideEffects: t.sideEffects ?? [] };
 }
-
-// Importing `and` here to avoid top-level churn — it's used in the CAS where clause above.
-import { and } from 'drizzle-orm';

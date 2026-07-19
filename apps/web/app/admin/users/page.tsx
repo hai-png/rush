@@ -58,11 +58,19 @@ export default function AdminUsersPage() {
       key: 'id', header: 'Actions', render: (u) => (
         <div className="flex gap-2">
           {u.isActive ? (
-            <Button size="sm" variant="outline" loading={updateUser.isPending} onClick={() => updateUser.mutate({ id: u.id, action: 'suspend' })}>
+            <Button size="sm" variant="outline"
+              loading={updateUser.isPending && updateUser.variables?.id === u.id}
+              onClick={() => updateUser.mutate({ id: u.id, action: 'suspend' })}>
               Suspend
             </Button>
           ) : (
-            <Button size="sm" loading={updateUser.isPending} onClick={() => updateUser.mutate({ id: u.id, action: 'suspend' })}>
+            // FIX (WEB-003): The previous implementation sent `action: 'suspend'`
+            // for the Reactivate button too — the same payload as Suspend. The
+            // server would either re-suspend (no-op) or treat it as a toggle,
+            // neither of which matched the button label. Now sends `reactivate`.
+            <Button size="sm"
+              loading={updateUser.isPending && updateUser.variables?.id === u.id}
+              onClick={() => updateUser.mutate({ id: u.id, action: 'reactivate' as any })}>
               Reactivate
             </Button>
           )}

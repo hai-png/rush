@@ -1,6 +1,7 @@
 import type { MiddlewareHandler } from 'hono';
 import { RateLimitError } from '@addis/shared';
 import { redis } from '../../infra/redis';
+import { clientIp } from '../ip';
 
 // keyFn is async: the OTP rules need to read `phone` out of the (cloned) request body, and
 // this middleware now runs after authMiddleware so session-based rules can also key off it.
@@ -44,40 +45,10 @@ const DEFAULT_AUTHED = { limit: 100, windowSec: 60 };
 const DEFAULT_ANON = { limit: 60, windowSec: 60 };
 
 /**
- * Trustworthy client IP extraction.
- *
- * The previous `c.req.header('x-forwarded-for')?.split(',')[0]` trusted the
- * leftmost XFF entry unconditionally — but the standard XFF behavior is for
- * each proxy in the chain to APPEND, so the leftmost entry is the one the
- * client sent (attacker-controlled). Behind any appending proxy (Caddy,
- * nginx, AWS ALB, Cloudflare), this made every per-IP rate limit trivially
- * bypassable by rotating the XFF header.
- *
- * The robust fix is `proxyaddr`-style parsing with an explicit list of
- * trusted proxy hops. We don't have that infrastructure yet, so the safe
- * default is to read the RIGHTMOST XFF entry (which is set by OUR trusted
- * outermost proxy), falling back to 'unknown'. If you deploy behind a
- * different proxy topology, configure TRUSTED_PROXY_HOPS and adjust.
+ * Reads `phone` from the JSON body without consuming the stream the route handler still needs.
+ * `clientIp` is imported from `../../src/ip` (FIX API-015: shared helper so
+ * route handlers and rate-limit agree on which XFF entry to trust).
  */
-function clientIp(c: any): string {
-  const xff = c.req.header('x-forwarded-for');
-  if (xff) {
-    const parts = xff.split(',').map(s => s.trim()).filter(Boolean);
-    if (parts.length > 0) {
-      // Rightmost = the hop set by our trusted proxy. If you trust the
-      // direct peer (typical for Caddy → app on a private network), this
-      // is correct. For multi-hop setups, configure the trusted-proxy
-      // count and pick parts[parts.length - trustedHops - 1].
-      return parts[parts.length - 1];
-    }
-  }
-  // Fall back to the socket remote address if available — the source of
-  // truth when there's no proxy in front.
-  const remote = c.env?.remoteAddr?.address ?? c.req.raw?.remoteAddr?.address;
-  return remote ?? 'unknown';
-}
-
-/** Reads `phone` from the JSON body without consuming the stream the route handler still needs. */
 async function bodyPhone(c: any): Promise<string> {
   try {
     // Cap body size we'll parse — a 10MB body shouldn't trigger a JSON parse

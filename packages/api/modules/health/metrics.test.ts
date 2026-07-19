@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { resetEnv } from '@addis/shared';
 
 /**
  * Metrics endpoint fail-closed tests. Covers the C3 fix:
@@ -7,6 +8,13 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
  *   - When METRICS_PASSWORD is set but < 16 chars, the endpoint returns 503
  *   - When METRICS_PASSWORD is >= 16 chars and the correct Basic auth is supplied,
  *     the endpoint returns 200 with Prometheus metrics
+ *
+ * FIX (TEST-010): The previous implementation introspected Hono's internal
+ * route array shape (`metricsRoutes.routes.find(...)`) and hand-rolled a
+ * fakeCtx. The internal array shape is not part of Hono's public API and
+ * has changed between versions. We now use Hono's public `request()` method
+ * which invokes the full middleware chain and route matching — no internal
+ * access, no fake context.
  */
 
 describe('metrics endpoint — fail-closed on unset/short password', () => {
@@ -15,47 +23,44 @@ describe('metrics endpoint — fail-closed on unset/short password', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     delete process.env.METRICS_PASSWORD;
+    // Force loadEnv to re-read process.env on next import.
+    resetEnv();
+    // Clear the module cache so the next dynamic import re-evaluates
+    // metrics.ts with the new env.
+    vi.resetModules();
   });
 
   afterEach(() => {
     process.env = { ...originalEnv };
+    resetEnv();
+    vi.resetModules();
   });
 
   it('returns 503 when METRICS_PASSWORD is unset', async () => {
     const { metricsRoutes } = await import('./metrics');
-    const fakeCtx: any = {
-      req: { header: () => null },
-      text: (body: string, status: number) => ({ body, status }),
-    };
-    // Find the GET /metrics handler
-    const handler = (metricsRoutes as any).routes.find((r: any) => r.method === 'GET' && r.path === '/metrics')?.handler;
-    expect(handler).toBeDefined();
-    const res = await handler(fakeCtx);
+    const res = await metricsRoutes.request('/metrics', { method: 'GET' });
     expect(res.status).toBe(503);
-    expect(res.body).toMatch(/METRICS_PASSWORD must be set/);
+    expect(await res.text()).toMatch(/METRICS_PASSWORD/);
   });
 
   it('returns 503 when METRICS_PASSWORD is shorter than 16 characters', async () => {
     process.env.METRICS_PASSWORD = 'short';
+    resetEnv();
+    vi.resetModules();
     const { metricsRoutes } = await import('./metrics');
-    const fakeCtx: any = {
-      req: { header: () => null },
-      text: (body: string, status: number) => ({ body, status }),
-    };
-    const handler = (metricsRoutes as any).routes.find((r: any) => r.method === 'GET' && r.path === '/metrics')?.handler;
-    const res = await handler(fakeCtx);
+    const res = await metricsRoutes.request('/metrics', { method: 'GET' });
     expect(res.status).toBe(503);
   });
 
   it('returns 401 when METRICS_PASSWORD is set but Authorization header is wrong', async () => {
     process.env.METRICS_PASSWORD = 'a-very-strong-metrics-password';
+    resetEnv();
+    vi.resetModules();
     const { metricsRoutes } = await import('./metrics');
-    const fakeCtx: any = {
-      req: { header: () => 'Basic d3Jvbmc6Y3JlZHM=' }, // wrong credentials
-      text: (body: string, status: number) => ({ body, status }),
-    };
-    const handler = (metricsRoutes as any).routes.find((r: any) => r.method === 'GET' && r.path === '/metrics')?.handler;
-    const res = await handler(fakeCtx);
+    const res = await metricsRoutes.request('/metrics', {
+      method: 'GET',
+      headers: { Authorization: 'Basic d3Jvbmc6Y3JlZHM=' }, // wrong credentials
+    });
     expect(res.status).toBe(401);
   });
 });

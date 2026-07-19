@@ -1,4 +1,9 @@
-import { Hono } from 'hono';
+// FIX (ARCH-003): Migrated from bare `Hono()` to `TypedOpenAPIHono` so this
+// module is OpenAPI-capable and `c.get('session')` / `c.get('requestId')` /
+// `c.get('logger')` are typed. Existing .post/.get/.patch/.delete calls
+// continue to work; they can be incrementally converted to
+// .openapi(createRoute(...), handler) to appear in the OpenAPI document.
+import { TypedOpenAPIHono } from '../../src/typed-hono';
 import { z } from 'zod';
 import { requireRole } from '../../src/middleware/auth';
 import { operationsService } from './service';
@@ -6,7 +11,7 @@ import { db, schema } from '@addis/db';
 import { eq, and } from 'drizzle-orm';
 import { redis } from '../../infra/redis';
 
-export const operationsRoutes = new Hono();
+export const operationsRoutes = new TypedOpenAPIHono();
 
 operationsRoutes.get('/trips', requireRole('contractor'), async (c) => {
   const [profile] = await db.select().from(schema.contractorProfiles).where(eq(schema.contractorProfiles.userId, c.get('session').userId));
@@ -15,8 +20,21 @@ operationsRoutes.get('/trips', requireRole('contractor'), async (c) => {
 });
 operationsRoutes.post('/trips', requireRole('contractor'), async (c) => {
   const [profile] = await db.select().from(schema.contractorProfiles).where(eq(schema.contractorProfiles.userId, c.get('session').userId));
-  const body = z.object({ shuttleId: z.string(), routeId: z.string(), window: z.enum(['morning', 'evening']), departTime: z.coerce.date() }).parse(await c.req.json());
-  const trip = await operationsService.startTrip(profile!.id, body);
+  // FIX (WEB-004): departTime is no longer accepted from the client — the
+  // server stamps it (prevents clock manipulation by the contractor).
+  const body = z.object({
+    shuttleId: z.string(),
+    routeId: z.string(),
+    window: z.enum(['morning', 'evening']),
+    // Reject any client-supplied departTime — the server stamps it.
+    departTime: z.never().optional(),
+  }).parse(await c.req.json());
+  const trip = await operationsService.startTrip(profile!.id, {
+    shuttleId: body.shuttleId,
+    routeId: body.routeId,
+    window: body.window,
+    departTime: new Date(),
+  });
   return c.json({ data: trip }, 201);
 });
 operationsRoutes.patch('/trips/:id', requireRole('contractor'), async (c) => {

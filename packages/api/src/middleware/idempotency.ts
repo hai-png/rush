@@ -71,13 +71,17 @@ export const idempotencyMiddleware: MiddlewareHandler = async (c, next) => {
     if (existing.responseStatus === PROCESSING_STATUS) {
       throw new ConflictError('A request with this Idempotency-Key is still being processed; retry shortly');
     }
-    // Replay: only cache successful (2xx) and 409/422 (idempotent conflict) responses.
-    // Caching 400/401/403/404 was wrong — the client may want to retry with a
-    // corrected request, but the cached error was replayed for 24h.
+    // Replay: only cache successful (2xx) and 409 (true idempotent conflict)
+    // responses. FIX (API-013): The previous implementation also cached 422
+    // (Unprocessable Entity) for 24h. 422 is a validation error — the client
+    // fixes the validation issue and retries with the SAME Idempotency-Key
+    // (as the spec encourages), but got the cached 422 back for 24h. 422
+    // belongs in the same bucket as 400/401/403/404: don't cache, release
+    // the claim so a corrected retry can proceed.
     if (existing.responseStatus >= 200 && existing.responseStatus < 300) {
       return c.json(existing.responseBody as any, existing.responseStatus as any);
     }
-    if (existing.responseStatus === 409 || existing.responseStatus === 422) {
+    if (existing.responseStatus === 409) {
       return c.json(existing.responseBody as any, existing.responseStatus as any);
     }
     // For other 4xx/5xx: release the claim so a legitimate retry can proceed.
@@ -103,8 +107,8 @@ export const idempotencyMiddleware: MiddlewareHandler = async (c, next) => {
     await db.update(schema.idempotencyRecords)
       .set({ responseStatus: res.status, responseBody })
       .where(eq(schema.idempotencyRecords.key, scopedKey));
-  } else if (res.status === 409 || res.status === 422) {
-    // Cache conflict/unprocessable — they're idempotent assertions.
+  } else if (res.status === 409) {
+    // Cache conflict — it's a true idempotent assertion (same resource, same state).
     const responseBody = await res.json().catch(() => ({}));
     await db.update(schema.idempotencyRecords)
       .set({ responseStatus: res.status, responseBody })

@@ -172,7 +172,15 @@ export const shuttles = pgTable('shuttles', {
   isActive: boolean('is_active').notNull().default(true),
   createdAt: ts('created_at').notNull().defaultNow(),
   updatedAt: ts('updated_at').notNull().defaultNow(),
-});
+}, (t) => ({
+  // FIX (DATA-010): Without these checks, a bug could insert capacity=0 (a
+  // shuttle with zero seats — every bookRide CAS check fails) or capacity=-5
+  // (negative — seatsBooked < -5 is always false, no one can book), or
+  // year=99999. Capacity is bounded to a sane vehicle range (1-100) and
+  // year is bounded to plausible model years.
+  capacityCheck: check('capacity_positive', sql`${t.capacity} > 0 AND ${t.capacity} <= 100`),
+  yearCheck: check('year_valid', sql`${t.year} BETWEEN 1990 AND EXTRACT(YEAR FROM now()) + 1`),
+}));
 
 export const subscriptionPlans = pgTable('subscription_plans', {
   id: text('id').primaryKey().$defaultFn(createId),
@@ -186,7 +194,17 @@ export const subscriptionPlans = pgTable('subscription_plans', {
   isActive: boolean('is_active').notNull().default(true),
   createdAt: ts('created_at').notNull().defaultNow(),
   updatedAt: ts('updated_at').notNull().defaultNow(),
-});
+}, (t) => ({
+  // FIX (DATA-006): ridesIncluded uses -1 as a magic sentinel for "unlimited".
+  // Without a CHECK, a bug could insert 0 (then rides_used < 0 is always false
+  // — incrementRidesUsed's guard blocks all increments, freezing the sub) or
+  // -5 (semantically meaningless). Constrain to either -1 OR > 0.
+  ridesIncludedCheck: check('rides_included_valid', sql`${t.ridesIncluded} = -1 OR ${t.ridesIncluded} > 0`),
+  // FIX (DATA-010 / DATA-013): durationDays must be positive (a 0-day plan
+  // expires immediately), and priceETB must be non-negative.
+  durationDaysCheck: check('duration_days_positive', sql`${t.durationDays} > 0`),
+  priceNonNeg: check('price_etb_nonneg', sql`${t.priceETB} >= 0`),
+}));
 
 export const subscriptions = pgTable('subscriptions', {
   id: text('id').primaryKey().$defaultFn(createId),
@@ -207,6 +225,11 @@ export const subscriptions = pgTable('subscriptions', {
   riderStatusIdx: index().on(t.riderId, t.status),
   statusEndIdx: index().on(t.status, t.endDate),
   corpMemberIdx: index().on(t.corporateMemberId),
+  // FIX (DATA-013): prevents endDate < startDate (a bug in subscriptionService.create
+  // could otherwise produce a subscription that immediately expires).
+  endAfterStartCheck: check('sub_end_after_start', sql`${t.endDate} > ${t.startDate}`),
+  // FIX (DATA-010): ridesUsed can never be negative.
+  ridesUsedNonNeg: check('sub_rides_used_nonneg', sql`${t.ridesUsed} >= 0`),
 }));
 
 export const trips = pgTable('trips', {
@@ -265,7 +288,18 @@ export const payments = pgTable('payments', {
 }, (t) => ({
   statusCreatedIdx: index().on(t.status, t.createdAt),
   riderIdx: index().on(t.riderId),
+  // FIX (DATA-005): Add non-negativity checks for money columns. A bug in
+  // service code (sign flip during refund allocation, Money.sub returning
+  // negative) could previously persist `amount = '-50.00'`. The Money class
+  // throws on negative sub(), but Money.fromDecimal('-50.00').toString()
+  // returns '-50.00' without throwing — so a malicious or buggy caller can
+  // persist negative money. The DB now catches it.
+  amountNonNeg: check('amount_nonneg', sql`${t.amount} >= 0`),
+  refundAmountNonNeg: check('refund_amount_nonneg', sql`${t.refundAmount} >= 0`),
   refundAmountCheck: check('refund_amount_lte_amount', sql`${t.refundAmount} <= ${t.amount}`),
+  // FIX (DATA-002): missing FK indexes used in hot paths.
+  subscriptionIdx: index().on(t.subscriptionId),
+  seatClaimIdx: index().on(t.seatClaimId),
 }));
 
 export const seatClaims = pgTable('seat_claims', {

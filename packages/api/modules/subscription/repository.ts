@@ -106,16 +106,22 @@ export const subscriptionRepo = {
    * limit (or the plan is unlimited).
    */
   async incrementRidesUsed(tx = db, subscriptionId: string) {
+    // CRITICAL FIX (DATA-001): The previous SQL had an operator-precedence bug.
+    // SQL `AND` binds tighter than `OR`, so the WHERE clause parsed as:
+    //   (id = $1 AND status = 'active' AND plan.rides_included = -1)
+    //   OR (plan.rides_included > rides_used)
+    // The second branch matched EVERY subscription in the table whose
+    // rides_used < rides_included — a single incrementRidesUsed(sub, ...) call
+    // bumped rides_used on every under-used finite-plan subscription in the DB.
+    // The fix is to parenthesize the OR so it stays scoped to the id+status row.
     await tx.execute(sql`
       UPDATE subscriptions SET rides_used = rides_used + 1, updated_at = now()
       WHERE id = ${subscriptionId}
         AND status = 'active'
         AND (
-          SELECT rides_included FROM subscription_plans WHERE id = subscriptions.plan_id
-        ) = -1
-        OR (
-          SELECT rides_included FROM subscription_plans WHERE id = subscriptions.plan_id
-        ) > rides_used
+          (SELECT rides_included FROM subscription_plans WHERE id = subscriptions.plan_id) = -1
+          OR (SELECT rides_included FROM subscription_plans WHERE id = subscriptions.plan_id) > rides_used
+        )
     `);
   },
 };

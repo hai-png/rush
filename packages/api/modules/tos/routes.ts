@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { eq } from 'drizzle-orm';
 import { db, schema } from '@addis/db';
 import { requireAuth } from '../../src/middleware/auth';
+import { clientIp } from '../../src/ip';
 import { CURRENT_TOS_VERSION } from '@addis/shared';
 
 export const tosRoutes = new TypedHono();
@@ -19,7 +20,17 @@ export const tosRoutes = new TypedHono();
  */
 tosRoutes.post('/', requireAuth, async (c) => {
   const session = getSession(c);
-  const { version } = z.object({ version: z.string() }).parse(await c.req.json());
+  // FIX (TEST-001): use safeParse instead of parse so a missing/invalid
+  // version field returns a clean 400 instead of throwing ZodError (which
+  // the error handler renders as 500).
+  const parsed = z.object({ version: z.string() }).safeParse(await c.req.json());
+  if (!parsed.success) {
+    return c.json(
+      { error: { code: 'BAD_REQUEST', message: 'version field is required and must be a string', requestId: c.get('requestId') } },
+      400,
+    );
+  }
+  const { version } = parsed.data;
   if (version !== CURRENT_TOS_VERSION) {
     return c.json(
       { error: { code: 'BAD_REQUEST', message: `Unsupported ToS version. Current is ${CURRENT_TOS_VERSION}`, requestId: c.get('requestId') } },
@@ -38,7 +49,7 @@ tosRoutes.post('/', requireAuth, async (c) => {
       .values({
         userId: session.userId,
         version,
-        ipAddress: c.req.header('x-forwarded-for') ?? null,
+        ipAddress: clientIp(c) ?? null,
         userAgent: c.req.header('user-agent') ?? null,
       })
       .onConflictDoNothing();

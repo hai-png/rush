@@ -48,11 +48,17 @@ export const otpService = {
     const { smsProvider } = await import('@addis/sms');
     const sent = await smsProvider.send(phone, `Your Addis Ride code is ${code}. Expires in ${OTP_TTL_MIN} minutes.`).catch(() => false);
 
-    // Only return the devCode when NODE_ENV is exactly 'development'. The
-    // previous `NODE_ENV !== 'production'` check returned the code in any
-    // other environment — including unset, 'staging', 'test', or a typo'd
-    // value — silently leaking OTPs in JSON responses.
-    const devCode = process.env.NODE_ENV === 'development' ? code : undefined;
+    // Only return the devCode in development OR when explicitly opted in via
+    // ALLOW_DEV_OTP=1|true. The previous `NODE_ENV !== 'production'` check
+    // returned the code in any other environment — including unset, 'staging',
+    // 'test', or a typo'd value — silently leaking OTPs in JSON responses.
+    // The ALLOW_DEV_OTP env var lets integration tests / staging environments
+    // opt in explicitly without forcing NODE_ENV=development (which would
+    // also enable pino-pretty and other dev-only behaviors).
+    const allowDev = process.env.NODE_ENV === 'development'
+      || process.env.ALLOW_DEV_OTP === '1'
+      || process.env.ALLOW_DEV_OTP === 'true';
+    const devCode = allowDev ? code : undefined;
     return { sent, devCode };
   },
 

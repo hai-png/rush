@@ -55,12 +55,25 @@ class InMemoryRedis {
   }
   async hset(k: string, v: Record<string, unknown>) {
     const existing = this.cleanup(k);
-    const merged = { ...(existing ? JSON.parse(existing.value) : {}), ...v };
+    // FIX: the previous implementation called JSON.parse(existing.value)
+    // unconditionally — but if the key was previously set via `set(k, 'initial')`
+    // (a plain string, not JSON), JSON.parse threw "Unexpected token 'i'".
+    // Parse defensively: if the existing value isn't valid JSON, treat it
+    // as an empty object (the hset replaces it with a JSON object anyway).
+    let prev: Record<string, unknown> = {};
+    if (existing) {
+      try { prev = JSON.parse(existing.value); } catch { prev = {}; }
+    }
+    const merged = { ...prev, ...v };
     this.store.set(k, { value: JSON.stringify(merged), expiresAt: existing?.expiresAt });
   }
   async hgetall(k: string) {
     const e = this.cleanup(k);
-    return e ? JSON.parse(e.value) : null;
+    if (!e) return null;
+    // FIX: same defensive parse as hset — a key set via `set(k, 'string')`
+    // would crash hgetall. Return null for non-JSON values (matches Redis
+    // semantics where hgetall on a non-hash key returns an error).
+    try { return JSON.parse(e.value); } catch { return null; }
   }
   async del(k: string) { this.store.delete(k); return 1; }
   async publish() { /* no-op locally; SSE falls back to polling */ }

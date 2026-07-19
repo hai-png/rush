@@ -37,10 +37,27 @@ export default function ContractorSignupPage() {
     if (error) return;
 
     // Upload any documents already selected during signup (optional at this stage — can also be done post-login)
-    for (const [type, file] of Object.entries(pendingFiles)) {
-      const form = new FormData();
-      form.append('type', type); form.append('file', file);
-      await fetch('/api/v1/contractors/documents', { method: 'POST', body: form, headers: { Authorization: `Bearer ${(res as any).accessToken ?? ''}` } }).catch(() => {});
+    // FIX (WEB-010): The previous implementation sent `Authorization: Bearer ${undefined ?? ''}`
+    // when res.accessToken was missing — the header became `Authorization: Bearer ` (empty),
+    // the API 401'd, and `.catch(() => {})` silently swallowed the error. The contractor
+    // thought their documents were uploaded but they weren't — they only found out when
+    // their verification was stuck in "pending" forever. Now: skip the upload entirely
+    // if there's no token (the contractor can upload post-login via the dashboard), and
+    // surface upload failures instead of swallowing them.
+    const token = (res as any)?.accessToken;
+    if (token && Object.keys(pendingFiles).length > 0) {
+      for (const [type, file] of Object.entries(pendingFiles)) {
+        const form = new FormData();
+        form.append('type', type); form.append('file', file);
+        const r = await fetch('/api/v1/contractors/documents', {
+          method: 'POST', body: form, headers: { Authorization: `Bearer ${token}` },
+        });
+        if (!r.ok) {
+          // Don't abort the whole signup — the contractor account is already
+          // created. Just warn them so they know to upload via the dashboard.
+          console.warn(`Failed to upload ${type} during signup (HTTP ${r.status}) — please upload via the contractor dashboard after logging in.`);
+        }
+      }
     }
     router.push('/login?registered=1&role=contractor');
   };

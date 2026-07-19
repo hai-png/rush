@@ -12,13 +12,14 @@ export default function ContractorDashboardPage() {
   const { data } = useQuery({ queryKey: ['contractor-dashboard'], queryFn: async () => (await client.GET('/api/v1/dashboard/contractor')).data });
 
   const startTrip = useMutation({
-    // The departTime is NOT sent from the client — the client's clock can
-    // be manipulated (back-dating trips to fraudulently claim rides,
-    // post-dating to game seat-release expirations). The server sets the
-    // departTime. We also send the window selection so the contractor can
-    // pick morning vs evening.
+    // FIX (WEB-004): The previous comment claimed "departTime is NOT sent
+    // from the client" but the very next line sent
+    // `departTime: new Date().toISOString()` — a contractor with a
+    // manipulated system clock could back-date or post-date trips to
+    // fraudulently claim rides or game seat-release expirations. We now
+    // omit departTime from the body entirely; the server stamps it.
     mutationFn: async (input: { shuttleId: string; routeId: string; window: 'morning' | 'evening' }) =>
-      client.POST('/api/v1/trips', { body: { ...input, departTime: new Date().toISOString() } }),
+      client.POST('/api/v1/trips', { body: input } as any),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: ['contractor-dashboard'] });
       push({ title: 'Trip started' });

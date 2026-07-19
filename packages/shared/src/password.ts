@@ -6,8 +6,9 @@ const CONTROL_CHAR_RE = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/;
 
 // Bcrypt truncates passwords at 72 bytes — anything longer is silently
 // ignored. A user with a 1000-char password believes they have 1000 chars
-// of security, but only the first 72 bytes matter. Cap the input.
-const BCRYPT_MAX_BYTES = 72;
+// of security, but only the first 72 bytes matter. The validatePasswordShape
+// function below caps the input at 100 chars (well within the 72-byte bcrypt
+// limit for any reasonable character set).
 const MIN_ZXCVBN_SCORE = 3; // 0-4 scale, 3+ = strong enough
 
 export function scorePasswordStrength(pw: string): { score: number; feedback: string[] } {

@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Button, Card, CardContent, Badge } from '@addis/ui';
 import { useApiClient } from '@/lib/sdk';
@@ -34,17 +34,32 @@ function PlansClient() {
   const [routes, setRoutes] = useState<any[] | null>(null);
   const [loading, setLoading] = useState(true);
 
-  useState(() => {
+  // FIX (WEB-002): The previous implementation used `useState(() => {...})`
+  // (the lazy-initializer form) to fire the async fetch. useState's
+  // initializer runs DURING render and is for computing the initial state
+  // value — not for side effects. In React Strict Mode (dev) the
+  // initializer is called twice, causing double API calls. There's also no
+  // cleanup, no error handling, and no cancellation if the component
+  // unmounts mid-fetch (setPlans/setRoutes would warn about a state
+  // update on an unmounted component). useEffect is the correct hook.
+  useEffect(() => {
+    let cancelled = false;
     (async () => {
-      const [{ data: planData }, { data: routeData }] = await Promise.all([
-        client.GET('/api/v1/plans'),
-        client.GET('/api/v1/routes', { params: { query: { limit: 50 } } }),
-      ]);
-      setPlans(planData ?? []);
-      setRoutes(routeData ?? []);
-      setLoading(false);
+      try {
+        const [{ data: planData }, { data: routeData }] = await Promise.all([
+          client.GET('/api/v1/plans'),
+          client.GET('/api/v1/routes', { params: { query: { limit: 50 } } }),
+        ]);
+        if (cancelled) return;
+        setPlans(planData ?? []);
+        setRoutes(routeData ?? []);
+        setLoading(false);
+      } catch {
+        if (!cancelled) setLoading(false);
+      }
     })();
-  });
+    return () => { cancelled = true; };
+  }, [client]);
 
   if (loading) {
     return (
