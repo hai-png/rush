@@ -1,6 +1,6 @@
 import { TypedOpenAPIHono } from '../../src/typed-hono';
 import { z } from 'zod';
-import { requireRole, requireAuth } from '../../src/middleware/auth';
+import { requireAuth } from '../../src/middleware/auth';
 import { supportService, faqService } from './service';
 
 export const supportRoutes = new TypedOpenAPIHono();

@@ -1,4 +1,4 @@
-import { and, desc, eq, gte, sql } from 'drizzle-orm';
+import { and, desc, eq, sql } from 'drizzle-orm';
 import { db, schema } from '@addis/db';
 
 export const dashboardService = {
@@ -50,8 +50,7 @@ export const dashboardService = {
   async contractor(userId: string) {
     const [profile] = await db.select().from(schema.contractorProfiles).where(eq(schema.contractorProfiles.userId, userId));
     if (!profile) return null;
-    const [{ sum: earnings }] = await db.select({ sum: sql<string>`coalesce(sum(t.seats_booked * r.fare), 0)` })
-      .from(schema.trips).as('t' as any); // simplified placeholder aggregate; real earnings ledger is a future module extension
+    // TODO: real earnings ledger is a future module extension. For now, return 0.00.
     return { verificationStatus: profile.verificationStatus, rating: profile.rating, earningsThisMonth: '0.00' };
   },
 

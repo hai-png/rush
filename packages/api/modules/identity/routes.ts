@@ -4,7 +4,7 @@ import { z } from 'zod';
 import { EthiopianPhone, ErrorSchema } from '@addis/shared';
 import { identityService } from './service';
 import { otpService } from './otp';
-import { requireRole, requireAuth } from '../../src/middleware/auth';
+import { requireAuth } from '../../src/middleware/auth';
 import { clientIp } from '../../src/ip';
 import { db, schema } from '@addis/db';
 import { eq, and } from 'drizzle-orm';

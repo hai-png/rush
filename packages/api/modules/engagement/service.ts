@@ -1,6 +1,5 @@
 import { eq, and, isNull, lt, sql } from 'drizzle-orm';
 import { db, schema } from '@addis/db';
-import type { NotificationType } from '@addis/shared';
 import type { NotificationEnvelope, ChannelKey } from './types';
 import { CRITICAL_TYPES } from './types';
 import { renderTemplate } from './templates';

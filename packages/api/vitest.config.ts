@@ -20,6 +20,13 @@ export default defineConfig({
     environment: 'node',
     exclude: ['**/*.integration.test.ts', '**/node_modules/**'],
     setupFiles: [resolve(__dirname, 'vitest.setup.ts')],
+    // FOLLOW-UP 5 (TEST-011): enforce 80% coverage thresholds when test:coverage runs.
+    coverage: {
+      provider: 'v8',
+      reporter: ['text', 'lcov'],
+      thresholds: { lines: 80, branches: 80 },
+      exclude: ['**/*.test.ts', '**/*.integration.test.ts', 'src/index.ts', 'vitest.setup.ts', 'vitest.config.ts'],
+    },
   },
   resolve: {
     alias: {

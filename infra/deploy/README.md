@@ -119,3 +119,43 @@ Create three buckets in production:
 - `/metrics` (Prometheus) — gated by `METRICS_PASSWORD`.
 - `outbox_events_depth` gauge — alerts if > 1000 (worker is falling
   behind).
+
+## S3 Object Lock for audit-chain anchors (FOLLOW-UP 1, DB-003)
+
+The audit-chain anchor cron (`anchor-audit-chain`, hourly) writes the current
+chain tip hash to `s3://BUCKET/audit-anchor/YYYY-MM-DDTHH.json`. For these
+anchors to be tamper-evident (not just tamper-evident-on-S3, which an attacker
+with S3 credentials could overwrite), the bucket MUST be configured with
+**S3 Object Lock in COMPLIANCE mode**:
+
+```bash
+# Create the bucket with Object Lock enabled (must be set at creation time).
+aws s3api create-bucket \
+  --bucket addis-ride-audit-anchors \
+  --object-lock-enabled-for-bucket
+
+# Set a default retention of 7 years + 1 day on the bucket (matches the
+# audit_logs retention window plus a safety margin).
+aws s3api put-object-lock-configuration \
+  --bucket addis-ride-audit-anchors \
+  --object-lock-configuration '{
+    "ObjectLockEnabled": "Enabled",
+    "Rule": {
+      "DefaultRetention": {
+        "Mode": "COMPLPLIANCE",
+        "Years": 7
+      }
+    }
+  }'
+```
+
+In COMPLIANCE mode, NO user (including the root account) can delete or
+overwrite an object version until the retention period expires. A DB attacker
+who tampers the audit chain cannot also overwrite the anchored tip hash — the
+`verify-audit-chain-anchors` cron (daily) detects the divergence and writes
+an `audit_chain_tamper_detected` outbox event.
+
+**MinIO note**: MinIO supports Object Lock when the bucket is created with
+`--with-object-lock`. The same COMPLIANCE-mode semantics apply.
+
+**Wasabi note**: Wasabi supports Object Lock in COMPLIANCE mode with the same API.

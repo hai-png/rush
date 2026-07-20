@@ -1,32 +1,31 @@
 import { smsProvider } from '@addis/sms';
 import { eq } from 'drizzle-orm';
 import { db, schema } from '@addis/db';
+import { notificationLogHelper } from '../lib/notification-log';
 
 /**
  * SMS outbox handler.
  *
- * FIX (INFRA-009): This handler has NO idempotency guard. If a worker crashes
- * after `smsProvider.send()` succeeds but before the outbox row is marked
- * 'delivered' (e.g. SIGTERM mid-send, DB blip on the UPDATE), the next worker
- * will re-send the SMS — the recipient gets a duplicate. The audit handler
- * (INFRA-003) is the only handler that gets full idempotency in this round
- * (via an outboxEventId stamp in audit_logs). A durable `notification_log`
- * table that every channel writes before dispatch is deferred to follow-up 3
- * (separate task); until then, SMS duplicates are mitigated only by the
- * 5-minute visibility timeout on outbox rows.
- *
- * The `evt` parameter is the full outbox row; it is currently unused but is
- * passed to every handler so the future notification_log writer has access to
- * the event id without another signature change.
+ * FOLLOW-UP 3 (INFRA-009): Durable idempotency via notification_log. The
+ * handler checks `alreadySent` at the start (skip if already delivered) and
+ * calls `recordSent` after a successful send. The unique index on
+ * (outbox_event_id, channel) is the dedup primitive — concurrent workers
+ * racing to send the same outbox event, only one INSERT wins.
  */
 export async function handle(
   payload: { userId?: string; phone?: string; body: string },
-  _evt?: typeof schema.outboxEvents.$inferSelect,
+  evt?: typeof schema.outboxEvents.$inferSelect,
 ) {
+  if (evt?.id && await notificationLogHelper.alreadySent(evt.id, 'sms')) {
+    return; // already sent — duplicate-suppressed
+  }
   let phone = payload.phone;
   if (!phone && payload.userId) {
     const [u] = await db.select({ phone: schema.users.phone }).from(schema.users).where(eq(schema.users.id, payload.userId));
     phone = u?.phone;
   }
-  if (phone) await smsProvider.send(phone, payload.body);
+  if (phone) {
+    await smsProvider.send(phone, payload.body);
+    if (evt?.id) await notificationLogHelper.recordSent(evt.id, 'sms', phone);
+  }
 }

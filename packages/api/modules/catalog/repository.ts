@@ -1,4 +1,4 @@
-import { and, desc, eq, gt, isNull, lt } from 'drizzle-orm';
+import { and, eq, gt, isNull } from 'drizzle-orm';
 import { db, schema } from '@addis/db';
 import { decodeCursor, encodeCursor } from '../../src/pagination';
 

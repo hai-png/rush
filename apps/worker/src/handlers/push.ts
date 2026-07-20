@@ -1,5 +1,6 @@
 import { eq } from 'drizzle-orm';
 import { db, schema } from '@addis/db';
+import { notificationLogHelper } from '../lib/notification-log';
 
 /**
  * Push outbox handler. Sends push notifications to mobile devices via Expo's
@@ -34,8 +35,12 @@ interface ExpoPushTicket {
 
 export async function handle(
   payload: { userId: string; title: string; body: string; link?: string },
-  _evt?: typeof schema.outboxEvents.$inferSelect,
+  evt?: typeof schema.outboxEvents.$inferSelect,
 ) {
+  // FOLLOW-UP 3 (INFRA-009): idempotency check at the start.
+  if (evt?.id && await notificationLogHelper.alreadySent(evt.id, 'push')) {
+    return; // already sent — duplicate-suppressed
+  }
   const devices = await db.select().from(schema.devices).where(eq(schema.devices.userId, payload.userId));
   const expoTokens = devices.filter(d => d.platform !== 'web').map(d => d.pushToken);
   if (!expoTokens.length) return; // nothing to send — not an error
@@ -104,6 +109,13 @@ export async function handle(
       return `ticket[${f.index}] to=${msg?.to ?? 'unknown'} error=${f.ticket.details?.error ?? f.ticket.message ?? 'unknown'}`;
     }).join('; ');
     throw new Error(`Expo push partial failure (${failures.length}/${tickets.length}): ${details}`);
+  }
+  // FOLLOW-UP 3 (INFRA-009): record the successful send for idempotency.
+  // Use the first token as the recipient (the row records "we sent to this
+  // user's device set for this outbox event"; the unique (outbox_event_id,
+  // channel) index means a retry is a no-op).
+  if (evt?.id && expoTokens.length > 0) {
+    await notificationLogHelper.recordSent(evt.id, 'push', expoTokens.join(','));
   }
   // web push (VAPID) devices handled similarly via `web-push` library — omitted for brevity
 }

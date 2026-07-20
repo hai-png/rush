@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { requireRole } from '../../src/middleware/auth';
 import { operationsService } from './service';
 import { db, schema } from '@addis/db';
-import { eq, and } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { redis } from '../../infra/redis';
 
 export const operationsRoutes = new TypedOpenAPIHono();

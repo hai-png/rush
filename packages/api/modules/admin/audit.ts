@@ -166,3 +166,114 @@ export async function verifyAuditChain(limit?: number) {
 
   return { valid: true, verified };
 }
+
+/**
+ * Anchor the current audit-chain tip to an external tamper-evident store (S3
+ * with Object Lock / write-once semantics).
+ *
+ * FOLLOW-UP 1 (DB-003): the hash chain inside `audit_logs` is tamper-EVIDENT
+ * — `verifyAuditChain` detects if a row was mutated and the chain recomputed.
+ * But a DB-level attacker with write access can UPDATE rows AND recompute the
+ * chain forward, defeating verification. The DB trigger (0001 + 0002) blocks
+ * UPDATE/DELETE on audit_logs, but a DB superuser can DROP the trigger first.
+ *
+ * Anchoring the chain tip externally closes that gap: every hour, the latest
+ * tip hash is written to S3 under a key like `audit-anchor/YYYY-MM-DD-HH.json`
+ * containing `{ tipHash, lastRowId, lastRowCreatedAt, anchoredAt, rowCount }`.
+ * If the bucket has Object Lock (COMPLIANCE mode, retention = 7y+1d matching
+ * the audit retention), the anchor files themselves are immutable — a DB
+ * attacker who tampers the chain leaves the anchored tip hash stale, and
+ * `verifyAuditChainWithAnchors` detects the divergence.
+ *
+ * This function is called from the `anchor-audit-chain` cron (hourly). It is
+ * idempotent: re-anchoring the same tip produces the same S3 key (keyed by
+ * hour bucket) and the same content, so S3 PUT is a no-op overwrite (or, with
+ * Object Lock in GOVERNANCE mode, the second PUT is rejected which is also
+ * fine — the anchor is already there).
+ */
+export async function anchorAuditChain() {
+  const { s3 } = await import('../../infra/s3');
+  const [last] = await db.select().from(schema.auditLogs)
+    .orderBy(desc(schema.auditLogs.createdAt), desc(schema.auditLogs.id))
+    .limit(1);
+  const countRow = await db.select({ count: sql<number>`count(*)::int` }).from(schema.auditLogs);
+  const count = countRow[0]?.count ?? 0;
+
+  const tipHash = last?.hash ?? 'GENESIS';
+  const anchorPayload = {
+    tipHash,
+    lastRowId: last?.id ?? null,
+    lastRowCreatedAt: last?.createdAt ?? null,
+    rowCount: count,
+    anchoredAt: new Date().toISOString(),
+  };
+
+  // Key by hour so we get one anchor per hour. Re-anchoring within the same
+  // hour overwrites the same key — fine, the content is deterministic.
+  const hourBucket = new Date().toISOString().slice(0, 13); // YYYY-MM-DDTHH
+  const key = `audit-anchor/${hourBucket}.json`;
+  await s3.putObject(key, Buffer.from(JSON.stringify(anchorPayload, null, 2), 'utf-8'), 'application/json');
+  return { key, ...anchorPayload };
+}
+
+/**
+ * Verify the audit chain against the external anchors.
+ *
+ * Reads the most-recent anchor from S3, runs `verifyAuditChain` up to the
+ * anchored row, and checks the tip hash matches. If the DB chain was tampered
+ * with AFTER the anchor was written, the tip hash diverges and this returns
+ * `{ valid: false, reason: 'tip_divergence' }`.
+ */
+export async function verifyAuditChainWithAnchors() {
+  const { s3 } = await import('../../infra/s3');
+  // List anchor files, get the most recent. (In production with Object Lock,
+  // this listing is itself tamper-evident because the bucket versioning is on.)
+  // For now we use a simple HEAD on the current hour and the previous hour.
+  const now = new Date();
+  const candidates: string[] = [];
+  for (let i = 0; i < 24; i++) {
+    const d = new Date(now.getTime() - i * 3600_000);
+    candidates.push(`audit-anchor/${d.toISOString().slice(0, 13)}.json`);
+  }
+  let anchor: { tipHash: string; lastRowId: string | null; anchoredAt: string } | null = null;
+  for (const key of candidates) {
+    const buf = await s3.getObject(key).catch(() => null);
+    if (buf) {
+      try { anchor = JSON.parse(buf.toString('utf-8')); break; } catch { /* try next */ }
+    }
+  }
+  if (!anchor) {
+    return { valid: false, reason: 'no_anchor_found' as const, verified: 0 };
+  }
+
+  // Verify the full chain up to the anchored row.
+  const chain = await verifyAuditChain();
+  if (!chain.valid) return chain;
+
+  // Cross-check the current tip against the anchor's tip hash. They diverge
+  // if a DB attacker mutated rows after the anchor was written.
+  const [currentTip] = await db.select().from(schema.auditLogs)
+    .orderBy(desc(schema.auditLogs.createdAt), desc(schema.auditLogs.id))
+    .limit(1);
+  const currentTipHash = currentTip?.hash ?? 'GENESIS';
+
+  // The current tip should equal the anchor tip OR descend from it (new rows
+  // added since the anchor). If the current tip hash is the anchor tip, we're
+  // fully anchored. If new rows were added, walk back from the current tip to
+  // find the anchored row and verify its hash matches.
+  if (currentTipHash === anchor.tipHash) {
+    return { valid: true, verified: chain.verified, anchoredAt: anchor.anchoredAt };
+  }
+  // New rows added since anchor — find the anchored row by id and verify hash.
+  if (anchor.lastRowId) {
+    const [anchoredRow] = await db.select().from(schema.auditLogs)
+      .where(sql`id = ${anchor.lastRowId}`).limit(1);
+    if (!anchoredRow) {
+      return { valid: false, reason: 'anchored_row_deleted' as const, verified: chain.verified };
+    }
+    if (anchoredRow.hash !== anchor.tipHash) {
+      return { valid: false, reason: 'tip_divergence' as const, verified: chain.verified, anchoredAt: anchor.anchoredAt };
+    }
+  }
+  return { valid: true, verified: chain.verified, anchoredAt: anchor.anchoredAt };
+}

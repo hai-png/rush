@@ -5,6 +5,6 @@
     "jsx": "react-jsx",
     "skipLibCheck": true
   },
-  "include": ["src/**/*", "app/**/*"],
+  "include": ["src/**/*", "app/**/*", "nativewind-env.d.ts", "rn-compat.d.ts"],
   "exclude": ["node_modules", "dist"]
 }

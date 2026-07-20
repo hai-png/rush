@@ -1,4 +1,3 @@
-import { useState } from 'react';
 import { View, Text, Pressable, ActivityIndicator } from 'react-native';
 import { router } from 'expo-router';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';

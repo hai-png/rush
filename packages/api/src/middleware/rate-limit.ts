@@ -98,7 +98,7 @@ export const rateLimitMiddleware: MiddlewareHandler = async (c, next) => {
   // Apply the default rule if no specific rule matched.
   if (matchingRules.length === 0) {
     const { limit, windowSec, keyFn } = session
-      ? { ...DEFAULT_AUTHED, keyFn: (c: any) => `user:${session.userId}` }
+      ? { ...DEFAULT_AUTHED, keyFn: (_c: any) => `user:${session.userId}` }
       : { ...DEFAULT_ANON, keyFn: (c: any) => `ip:${clientIp(c)}` };
     const key = `rl:${path}:${await keyFn(c)}`;
     const count = await redis.incr(key).catch(() => 1);

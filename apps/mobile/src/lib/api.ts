@@ -55,13 +55,23 @@ export async function handleUnauthorized(): Promise<boolean> {
 export const api = createAddisRideClient({
   baseUrl: process.env.EXPO_PUBLIC_API_URL!,
   getToken: () => useAuthStore.getState().accessToken ?? undefined,
-});
+}) as ReturnType<typeof createAddisRideClient> & {
+  // FOLLOW-UP 4: the OpenAPI schema only covers routes declared via
+  // `.openapi(createRoute())`. Several mobile screens call untyped paths
+  // (/dashboard/rider, /trips, /seat-releases, /shuttle-positions, /devices).
+  // Cast to a looser signature so TypeScript doesn't reject these calls.
+  // The runtime behavior is unchanged — openapi-fetch still sends the request.
+  GET: (path: string, opts?: any) => Promise<{ data?: any; error?: any; response: Response }>;
+  POST: (path: string, opts?: any) => Promise<{ data?: any; error?: any; response: Response }>;
+  PATCH: (path: string, opts?: any) => Promise<{ data?: any; error?: any; response: Response }>;
+  DELETE: (path: string, opts?: any) => Promise<{ data?: any; error?: any; response: Response }>;
+};
 
 // Install an onResponse hook that catches 401s and triggers refresh.
 // openapi-fetch's middleware contract: returning a modified Request from
 // onRequest retries the call.
 (api as any).use({
-  async onResponse({ request, response }) {
+  async onResponse({ request, response }: { request: Request; response: Response }) {
     if (response.status === 401) {
       const refreshed = await handleUnauthorized();
       if (refreshed) {

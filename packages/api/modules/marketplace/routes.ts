@@ -1,11 +1,10 @@
 import { TypedOpenAPIHono } from '../../src/typed-hono';
-import { z } from 'zod';
 import { requireRole } from '../../src/middleware/auth';
 import { CreateSeatReleaseInput, ClaimSeatInput } from './types';
 import { marketplaceService } from './service';
 import { db, schema } from '@addis/db';
 import { eq, and, gt } from 'drizzle-orm';
-import { NotFoundError, ForbiddenError } from '@addis/shared';
+import { NotFoundError } from '@addis/shared';
 
 export const marketplaceRoutes = new TypedOpenAPIHono();
 

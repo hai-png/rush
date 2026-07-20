@@ -50,7 +50,7 @@ jobs:
         env: { DATABASE_URL: postgres://test:test@localhost:5432/addisride_test }
 
       - name: Unit + integration tests
-        run: bun run test --coverage
+        run: bun run test
         env:
           DATABASE_URL: postgres://test:test@localhost:5432/addisride_test
           REDIS_URL: redis://localhost:6379
@@ -67,8 +67,12 @@ jobs:
           S3_ACCESS_KEY_ID: test
           S3_SECRET_ACCESS_KEY: test
 
-      - name: Enforce coverage gate (80%)
-        run: bun run coverage:check
+      - name: Enforce coverage gate (80% lines + branches)
+        # FOLLOW-UP 5 (TEST-011): run the new test:coverage script that enforces
+        # the 80% thresholds declared in vitest.config.ts. Previously the
+        # coverage:check script ran vitest from the repo root without the
+        # per-package configs, so thresholds were never enforced.
+        run: bun run test:coverage
 
       - name: Build all apps
         run: bun run build

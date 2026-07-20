@@ -1,6 +1,9 @@
 import { useEffect, useRef, useState } from 'react';
 import { View, Text, Pressable, Linking } from 'react-native';
-import MapView, { Marker, Polyline } from 'react-native-maps';
+import MapViewBase, { Marker, Polyline } from 'react-native-maps';
+// FOLLOW-UP 4: cast to any to work around React 19 / RN 0.76 component type
+// mismatch (refs property). Runtime behavior is unchanged.
+const MapView = MapViewBase as any;
 import { useLocalSearchParams } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../src/lib/api';

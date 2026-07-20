@@ -1,7 +1,6 @@
 import { eq, and } from 'drizzle-orm';
 import { db, schema } from '@addis/db';
-import { hashPassword, NotFoundError, ConflictError, ForbiddenError } from '@addis/shared';
-import { createId } from '@paralleldrive/cuid2';
+import { hashPassword, NotFoundError, ConflictError } from '@addis/shared';
 
 export const corporateService = {
   /**

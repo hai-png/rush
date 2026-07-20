@@ -285,7 +285,7 @@ export const CRON_JOBS: ReadonlyArray<{
             .set({ subject: '[deleted]', body: '[deleted]', updatedAt: new Date() })
             .where(eq(schema.supportTickets.userId, u.id));
           await db.update(schema.ticketMessages)
-            .set({ body: '[deleted]', updatedAt: new Date() })
+            .set({ body: '[deleted]' })
             .where(eq(schema.ticketMessages.authorId, u.id));
           // Anonymize the rider profile (NOT delete — FK constraints would break).
           await db.update(schema.riderProfiles)
@@ -324,7 +324,6 @@ export const CRON_JOBS: ReadonlyArray<{
       const { and, eq, sql } = await import("drizzle-orm");
       // Detect: payments.status = completed AND seatClaimId IS NOT NULL
       // AND no refund_retry exists for this payment.
-      const { scheduleRefund } = await import('../modules/payment/service');
       const { marketplaceService } = await import('../modules/marketplace/service');
       const claims = await db.select().from(schema.payments)
         .where(and(
@@ -379,7 +378,7 @@ export const CRON_JOBS: ReadonlyArray<{
     route: 'archive-old-records',
     intervalMs: 24 * 3600_000, // 1 day
     run: async () => {
-      const { and, lt, sql, eq, inArray } = await import('drizzle-orm');
+      const { and, lt, sql, inArray } = await import('drizzle-orm');
       const { s3 } = await import('../infra/s3');
       const SEVEN_YEARS_AGO = sql`now() - interval '7 years'`;
       const result: Record<string, number> = {};
@@ -524,6 +523,64 @@ export const CRON_JOBS: ReadonlyArray<{
         console.error('[archive-old-records] rides failed:', (err as Error).message);
       }
 
+      return result;
+    },
+  },
+  {
+    // FOLLOW-UP 1 (DB-003): External audit-chain anchoring. Writes the current
+    // chain tip hash to S3 every hour. With S3 Object Lock (COMPLIANCE mode)
+    // on the bucket, the anchor files are immutable — a DB attacker who
+    // tampers the chain leaves the anchored tip hash stale.
+    name: 'anchor-audit-chain',
+    route: 'anchor-audit-chain',
+    intervalMs: 60 * 60_000, // 1 hour
+    run: async () => {
+      const { anchorAuditChain } = await import('../modules/admin/audit');
+      return anchorAuditChain();
+    },
+  },
+  {
+    // FOLLOW-UP 3 (INFRA-009 / INFRA-017): prune old outbox events (90 days)
+    // and old notification_log rows (90 days, matching the outbox retention).
+    // Without this, both tables grow unbounded — outbox payload contains SMS
+    // bodies and email subjects (PII), and notification_log grows linearly
+    // with sends. 90 days is long enough to investigate any delivery issue.
+    name: 'cleanup-old-outbox-and-notifications',
+    route: 'cleanup-old-outbox-and-notifications',
+    intervalMs: 24 * 60 * 60_000, // 1 day
+    run: async () => {
+      const { lt } = await import('drizzle-orm');
+      const NINETY_DAYS_AGO = sql`now() - interval '90 days'`;
+      // Prune delivered/failed outbox events older than 90 days. Pending/processing
+      // rows are never pruned (they may still be retried).
+      const outbox = await db.delete(schema.outboxEvents).where(
+        sql`${schema.outboxEvents.status} in ('delivered', 'failed', 'permanent_failure') AND ${schema.outboxEvents.createdAt} < ${NINETY_DAYS_AGO}`,
+      ).returning({ id: schema.outboxEvents.id });
+      // Prune notification_log rows older than 90 days.
+      const notif = await db.delete(schema.notificationLog).where(
+        lt(schema.notificationLog.sentAt, NINETY_DAYS_AGO as any),
+      ).returning({ id: schema.notificationLog.id });
+      return { outboxPruned: outbox.length, notificationLogPruned: notif.length };
+    },
+  },
+  {
+    // FOLLOW-UP 1 (DB-003): Daily verification of the audit chain against the
+    // external anchors. If the DB chain was tampered after an anchor was
+    // written, this surfaces it.
+    name: 'verify-audit-chain-anchors',
+    route: 'verify-audit-chain-anchors',
+    intervalMs: 24 * 60 * 60_000, // 1 day
+    run: async () => {
+      const { verifyAuditChainWithAnchors } = await import('../modules/admin/audit');
+      const result = await verifyAuditChainWithAnchors();
+      if (!result.valid) {
+        // High-severity alert — tampering detected.
+        await db.insert(schema.outboxEvents).values({
+          channel: 'audit',
+          payload: { action: 'audit_chain_tamper_detected', result },
+        });
+        console.error('[verify-audit-chain-anchors] TAMPER DETECTED:', JSON.stringify(result));
+      }
       return result;
     },
   },

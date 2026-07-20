@@ -1,5 +1,5 @@
 import { addHours } from 'date-fns';
-import { and, eq, gt, desc, lte, sql } from 'drizzle-orm';
+import { and, eq, gt, desc, lte } from 'drizzle-orm';
 import { db, schema } from '@addis/db';
 import { Money, ConflictError, BadRequestError, NotFoundError, proratedRideValue, PAYMENT_RETENTION_YEARS, loadEnv } from '@addis/shared';
 import { getPaymentProvider } from '@addis/payments';

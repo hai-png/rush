@@ -2,7 +2,7 @@ import { createId } from '@paralleldrive/cuid2';
 import { sql } from 'drizzle-orm';
 import {
   pgTable, pgEnum, text, boolean, integer, real, decimal, jsonb,
-  timestamp, date, index, uniqueIndex, check,
+  timestamp, date, index, uniqueIndex, check, primaryKey,
 } from 'drizzle-orm/pg-core';
 
 // ---------- enums ----------
@@ -561,11 +561,23 @@ export const telebirrNotifyEvents = pgTable('telebirr_notify_events', {
   // silently destroy the notification record. RESTRICT forces the caller to
   // explicitly handle the dependency (e.g. by keeping the payment row and
   // anonymizing its PII instead of deleting it).
-  merchOrderId: text('merch_order_id').primaryKey().references(() => payments.reference, { onDelete: 'restrict' }),
+  //
+  // FOLLOW-UP 2 (PAY-002): composite PK on (merchOrderId, outRequestNo, receivedAt).
+  // Telebirr can send out-of-order/supplementary notifications for the same order
+  // (e.g. 'failed' on timeout then 'settled' when it actually completes). The old
+  // single-column PK on merchOrderId dropped the second notification, leaving the
+  // payment in the wrong state. The composite PK records every distinct notification
+  // and the webhook handler applies a state-machine override on conflict.
+  merchOrderId: text('merch_order_id').notNull().references(() => payments.reference, { onDelete: 'restrict' }),
   tradeStatus: text('trade_status').notNull(),
-  outRequestNo: text('out_request_no'),
+  outRequestNo: text('out_request_no').notNull(),
   receivedAt: ts('received_at').notNull().defaultNow(),
-});
+}, (t) => ({
+  // Composite PK: each distinct Telebirr notification is recorded.
+  pk: primaryKey({ columns: [t.merchOrderId, t.outRequestNo, t.receivedAt] }),
+  // Index for "find latest notification for this order" queries.
+  merchIdx: index('telebirr_notify_events_merch_order_id_index').on(t.merchOrderId, t.receivedAt),
+}));
 
 export const sessions = pgTable('sessions', {
   id: text('id').primaryKey().$defaultFn(createId),
@@ -581,4 +593,20 @@ export const sessions = pgTable('sessions', {
   userIdIdx: index().on(t.userId),
   expiresAtIdx: index().on(t.expiresAt),
   userExpiresAtIdx: index().on(t.userId, t.expiresAt),
+}));
+
+// FOLLOW-UP 3 (INFRA-009): Durable notification_log for SMS/email/push idempotency.
+// Records every successfully-sent message, keyed by (outbox_event_id, channel),
+// so handlers can skip re-sends on outbox retry. 90-day retention (matches outbox).
+export const notificationLog = pgTable('notification_log', {
+  id: text('id').primaryKey().$defaultFn(createId),
+  outboxEventId: text('outbox_event_id').notNull(),
+  channel: text('channel').notNull(),
+  providerMessageId: text('provider_message_id'),
+  recipient: text('recipient').notNull(),
+  sentAt: ts('sent_at').notNull().defaultNow(),
+}, (t) => ({
+  outboxChannelUniq: uniqueIndex('notification_log_outbox_channel_uniq').on(t.outboxEventId, t.channel),
+  recipientSentIdx: index('notification_log_recipient_sent_at_index').on(t.recipient, t.sentAt),
+  sentIdx: index('notification_log_sent_at_index').on(t.sentAt),
 }));

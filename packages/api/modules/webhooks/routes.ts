@@ -33,47 +33,85 @@ webhookRoutes.post('/telebirr/notify', async (c) => {
   }
 
   if (event.type === 'payment.settled' || event.type === 'payment.failed') {
-    // replay protection
-    const inserted = await db.insert(schema.telebirrNotifyEvents)
-      .values({ merchOrderId: event.merchOrderId, tradeStatus: event.type })
-      .onConflictDoNothing()
-      .returning();
-    if (inserted.length === 0) return c.text('SUCCESS'); // already processed
+    // FOLLOW-UP 2 (PAY-002): composite PK on (merchOrderId, outRequestNo, receivedAt)
+    // means each distinct Telebirr notification is recorded — no more dropped
+    // supplementary notifications. The handler then applies a state-machine
+    // override: if the new event is more authoritative than the current payment
+    // status, transition the payment; otherwise it's a stale duplicate, no-op.
+    const outRequestNo = (event as any).outRequestNo ?? `auto-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const receivedAt = new Date();
+    try {
+      await db.insert(schema.telebirrNotifyEvents)
+        .values({ merchOrderId: event.merchOrderId, tradeStatus: event.type, outRequestNo, receivedAt });
+    } catch (err: any) {
+      // Composite PK conflict means we already recorded this exact notification
+      // (same merchOrderId + outRequestNo + receivedAt) — true duplicate, no-op.
+      if (err.code === '23505') return c.text('SUCCESS');
+      throw err;
+    }
 
+    // Read the current payment state to decide if the new event overrides it.
+    const [payment] = await db.select().from(schema.payments).where(eq(schema.payments.reference, event.merchOrderId));
+    if (!payment) {
+      // No payment for this merchOrderId — log and ack so Telebirr doesn't retry.
+      c.get('logger')?.warn({ merchOrderId: event.merchOrderId }, 'webhook: notification for unknown payment reference');
+      return c.text('SUCCESS');
+    }
+
+    // FOLLOW-UP 2: state-machine override. 'payment.settled' is authoritative
+    // over 'pending' AND 'failed' (a late settlement after a timeout-failure
+    // must recover the payment). 'payment.failed' only applies if the payment
+    // is still 'pending' — a 'failed' after 'completed' is a chargeback and
+    // is handled separately (not by re-failing the payment).
     if (event.type === 'payment.settled') {
-      const settled = await settlePayment(event.merchOrderId, event.amount);
-      if (settled) {
-        const [payment] = await db.select().from(schema.payments).where(eq(schema.payments.reference, event.merchOrderId));
-        if (payment?.seatClaimId) {
+      if (payment.status === 'pending') {
+        const settled = await settlePayment(event.merchOrderId, event.amount);
+        if (settled && payment.seatClaimId) {
           await db.insert(schema.outboxEvents).values({
             channel: 'audit',
-            payload: {
-              action: 'claim_settlement_pending',
-              entityId: payment.seatClaimId,
-              paymentId: payment.id,
-            },
+            payload: { action: 'claim_settlement_pending', entityId: payment.seatClaimId, paymentId: payment.id },
           });
           try {
             await marketplaceService.onClaimPaymentSettled(payment.seatClaimId);
             await db.insert(schema.outboxEvents).values({
               channel: 'audit',
-              payload: {
-                action: 'claim_settlement_completed',
-                entityId: payment.seatClaimId,
-                paymentId: payment.id,
-              },
+              payload: { action: 'claim_settlement_completed', entityId: payment.seatClaimId, paymentId: payment.id },
             });
           } catch (err) {
-            // FIX (API-012): use the structured logger, not console.error.
             c.get('logger')?.error(
               { paymentId: payment.id, seatClaimId: payment.seatClaimId, err },
               'onClaimPaymentSettled failed — reconcile-claims cron will retry',
             );
           }
         }
+      } else if (payment.status === 'failed') {
+        // FOLLOW-UP 2: late settlement recovering a timed-out payment.
+        // settlePayment's CAS `WHERE status='pending'` won't match (status is 'failed'),
+        // so we need to explicitly re-open the payment to 'pending' first, then settle.
+        // This is the recovery path for the PAY-002 race.
+        await db.transaction(async (tx) => {
+          await tx.update(schema.payments)
+            .set({ status: 'pending', updatedAt: new Date() })
+            .where(and(eq(schema.payments.id, payment.id), eq(schema.payments.status, 'failed')));
+          await tx.insert(schema.outboxEvents).values({
+            channel: 'audit',
+            payload: { action: 'payment.reopened_from_failed', entityId: payment.id, reason: 'late_settlement_notification' },
+          });
+        });
+        await settlePayment(event.merchOrderId, event.amount);
+        await db.insert(schema.outboxEvents).values({
+          channel: 'audit',
+          payload: { action: 'payment.recovered_late_settlement', entityId: payment.id },
+        });
       }
-    } else {
-      await failPayment(event.merchOrderId, event.raw);
+      // If payment.status is 'completed' / 'refunded' / 'partially_refunded', this
+      // is a duplicate settlement notification — no-op.
+    } else { // event.type === 'payment.failed'
+      if (payment.status === 'pending') {
+        await failPayment(event.merchOrderId, event.raw);
+      }
+      // If payment.status is 'completed', this is a chargeback — handled
+      // separately via the refund.succeeded path, not by re-failing the payment.
     }
     return c.text('SUCCESS');
   }

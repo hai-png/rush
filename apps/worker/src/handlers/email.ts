@@ -1,6 +1,7 @@
 import { emailProvider } from '@addis/email';
 import { eq } from 'drizzle-orm';
 import { db, schema } from '@addis/db';
+import { notificationLogHelper } from '../lib/notification-log';
 
 /**
  * Email outbox handler. Sends transactional email via the @addis/email provider
@@ -10,14 +11,15 @@ import { db, schema } from '@addis/db';
  *
  * Throws on failure so the outbox retry/backoff path engages.
  *
- * FIX (INFRA-009): This handler has NO idempotency guard — see the matching
- * note on the SMS handler. A duplicate-delivery event results in a duplicate
- * email. A durable `notification_log` table is deferred to follow-up 3.
+ * FOLLOW-UP 3 (INFRA-009): Durable idempotency via notification_log.
  */
 export async function handle(
   payload: { userId: string; subject: string; body: string; to?: string; html?: string },
-  _evt?: typeof schema.outboxEvents.$inferSelect,
+  evt?: typeof schema.outboxEvents.$inferSelect,
 ) {
+  if (evt?.id && await notificationLogHelper.alreadySent(evt.id, 'email')) {
+    return; // already sent — duplicate-suppressed
+  }
   let to = payload.to;
   if (!to) {
     const [user] = await db.select({ email: schema.users.email }).from(schema.users).where(eq(schema.users.id, payload.userId));
@@ -27,4 +29,5 @@ export async function handle(
 
   const ok = await emailProvider.send({ to, subject: payload.subject, body: payload.body, html: payload.html });
   if (!ok) throw new Error(`Email delivery failed for ${to}`);
+  if (evt?.id) await notificationLogHelper.recordSent(evt.id, 'email', to);
 }

@@ -16,7 +16,8 @@
     "db:seed": "bun run --cwd packages/db seed",
     "openapi:gen": "bun run --cwd packages/api openapi:gen",
     "sdk:gen": "openapi-typescript packages/api/openapi.json -o packages/sdk/src/schema.d.ts",
-    "coverage:check": "vitest run --coverage"
+    "coverage:check": "vitest run --coverage",
+    "test:coverage": "turbo run test:coverage"
   },
   "devDependencies": {
     "@playwright/test": "^1.49.0",

@@ -1,6 +1,6 @@
 import { TypedOpenAPIHono } from '../../src/typed-hono';
 import { timingSafeEqual } from 'node:crypto';
-import { CRON_JOBS, CRON_JOBS_BY_NAME, withLock } from '../../src/cron-jobs';
+import { CRON_JOBS, withLock } from '../../src/cron-jobs';
 
 export const cronRoutes = new TypedOpenAPIHono();
 

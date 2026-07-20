@@ -1,4 +1,4 @@
-import { and, eq, lte, sql, inArray } from 'drizzle-orm';
+import { and, eq, sql, inArray } from 'drizzle-orm';
 import { db, schema } from '@addis/db';
 import { Money, BadRequestError, NotFoundError } from '@addis/shared';
 import { getPaymentProvider } from '@addis/payments';

@@ -1,7 +1,6 @@
-import { and, eq } from 'drizzle-orm';
+import { eq } from 'drizzle-orm';
 import { db, schema } from '@addis/db';
 import { NotFoundError } from '@addis/shared';
-import { ACCOUNT_DELETION_GRACE_DAYS } from '@addis/shared';
 import archiver from 'archiver';
 import { PassThrough } from 'node:stream';
 

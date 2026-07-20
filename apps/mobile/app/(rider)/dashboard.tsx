@@ -5,7 +5,7 @@ import { useState } from 'react';
 import { api } from '../../src/lib/api';
 
 export default function RiderDashboardScreen() {
-  const { data, isLoading, refetch } = useQuery({
+  const { data, refetch } = useQuery({
     queryKey: ['rider-dashboard'],
     queryFn: async () => (await api.GET('/api/v1/dashboard/rider')).data,
   });

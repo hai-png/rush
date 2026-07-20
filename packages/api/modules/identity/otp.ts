@@ -6,7 +6,6 @@ import { redis } from '../../infra/redis';
 import { otpCounter } from '../health/metrics';
 
 const OTP_TTL_MIN = 5;
-const MAX_ATTEMPTS = 5;
 const SEND_LIMIT_PER_10MIN = 3;
 const VERIFY_LIMIT_PER_10MIN = 10;
 
