@@ -11,12 +11,17 @@
  *   2. Seeds deterministic e2e test users with unique phone numbers
  *      (keyed by E2E_RUN_ID env var, defaulting to a timestamp) so
  *      parallel CI runs don't collide.
- *   3. Stores the test user credentials in process.env so the e2e tests
+ *   3. Inserts an already-active subscription for the primary rider so the
+ *      dashboard "active" assertion passes without needing a real webhook
+ *      settlement (TELEBIRR_ENV=testbed short-circuits checkout to the
+ *      /telebirr-stub page; no real payment provider is exercised).
+ *   4. Stores the test user credentials in process.env so the e2e tests
  *      can read them via `process.env.E2E_RIDER_PHONE` etc.
  */
 import { migrate } from 'drizzle-orm/postgres-js/migrator';
 import postgres from 'postgres';
 import { drizzle } from 'drizzle-orm/postgres-js';
+import { eq } from 'drizzle-orm';
 import * as schema from '../packages/db/src/schema';
 import { hashPassword } from '../packages/shared/src/password';
 
@@ -40,10 +45,9 @@ export default async function globalSetup() {
   const password = 'e2e-test-password-strong!!';
 
   // Clean up any prior e2e users with the same phones (from a previous run
-  // that didn't teardown). This makes the setup idempotent.
+  // that didn't teardown). This makes the setup idempotent. Cascading deletes
+  // (riderProfiles → subscriptions) clean up dependent rows automatically.
   await db.delete(schema.users).where(
-    // drizzle-orm doesn't have an `in` operator on the column directly here;
-    // use raw SQL for the cleanup.
     client`phone IN (${riderPhone}, ${rider2Phone})`
   ).catch(() => {}); // best-effort — if the users don't exist, the delete is a no-op
 
@@ -56,11 +60,11 @@ export default async function globalSetup() {
     phoneVerified: true,
     isActive: true,
   }).returning();
-  await db.insert(schema.riderProfiles).values({
+  const [riderProfile] = await db.insert(schema.riderProfiles).values({
     userId: rider.id,
     homeArea: 'Bole',
     workArea: 'Merkato',
-  });
+  }).returning();
 
   // Seed a second rider (for seat-claim tests).
   const [rider2] = await db.insert(schema.users).values({
@@ -75,7 +79,50 @@ export default async function globalSetup() {
     userId: rider2.id,
     homeArea: 'CMC',
     workArea: 'Piazza',
-  });
+  }).returning();
+
+  // FIX (TEST-003/004): ensure a route + plan exist (idempotent — re-running
+  // the suite on a DB that was previously seeded must not fail the unique
+  // constraint on route/plan names), then insert an already-active
+  // subscription for the primary rider. The dashboard's "active" assertion
+  // can therefore pass without exercising a real webhook settlement — the
+  // testbed telebirr stub short-circuits checkout, and the spec no longer
+  // needs to hit a test-only webhook endpoint.
+  const [route] = await db.insert(schema.routes).values({
+    name: `E2E Route ${suffix}`,
+    origin: 'Bole',
+    destination: 'Merkato',
+    distanceKm: 12.5,
+    durationMin: 35,
+    originLatLng: [9.0, 38.7],
+    destLatLng: [9.03, 38.75],
+    morningWindow: { start: '06:30', end: '09:00' },
+    eveningWindow: { start: '16:30', end: '19:30' },
+    fare: '60.00',
+  }).onConflictDoNothing().returning();
+  const routeRow = route ?? (await db.select().from(schema.routes).where(eq(schema.routes.name, `E2E Route ${suffix}`)).limit(1))[0];
+
+  const [plan] = await db.insert(schema.subscriptionPlans).values({
+    name: `E2E Monthly ${suffix}`,
+    durationDays: 30,
+    ridesIncluded: -1,
+    priceETB: '1200.00',
+    description: 'E2E test plan.',
+    isPopular: true,
+  }).onConflictDoNothing().returning();
+  const planRow = plan ?? (await db.select().from(schema.subscriptionPlans).where(eq(schema.subscriptionPlans.name, `E2E Monthly ${suffix}`)).limit(1))[0];
+
+  const startDate = new Date();
+  const endDate = new Date(Date.now() + 30 * 86400_000);
+  await db.insert(schema.subscriptions).values({
+    riderId: riderProfile.id,
+    planId: planRow.id,
+    routeId: routeRow.id,
+    status: 'active',
+    ridesUsed: 0,
+    startDate,
+    endDate,
+  }).returning();
 
   // Expose the e2e credentials to the test files via process.env.
   process.env.E2E_RIDER_PHONE = riderPhone;

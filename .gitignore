@@ -2,8 +2,10 @@
 node_modules
 .pnp
 .pnp.js
-bun.lockb
-bun.lock
+# FIX (INFRA-001): bun.lock is the single source of truth for dependency
+# resolution and MUST be committed. Previously both `bun.lockb` and
+# `bun.lock` were gitignored, so CI/dev/prod resolved different versions
+# depending on when each ran `bun install`.
 
 # Build artifacts
 .next/

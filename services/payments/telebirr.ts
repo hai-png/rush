@@ -124,10 +124,16 @@ export class TelebirrProvider implements PaymentProvider {
     // signed payload can replay it indefinitely (settle the same payment
     // multiple times, re-trigger refunds, etc.). The previous parseWebhook
     // verified the signature but had no freshness check.
+    // FIX (PAY-004): reject missing/non-numeric timestamp (replay-suspicion).
     const timestampMs = typeof payload.timestamp === 'number'
       ? payload.timestamp
-      : typeof payload.timestamp === 'string' ? Number(payload.timestamp) : undefined;
-    if (timestampMs !== undefined && Date.now() - timestampMs > 5 * 60_000) {
+      : typeof payload.timestamp === 'string' && payload.timestamp.trim() !== '' && !isNaN(Number(payload.timestamp))
+        ? Number(payload.timestamp)
+        : undefined;
+    if (timestampMs === undefined) {
+      throw new Error('Telebirr webhook missing numeric timestamp — possible replay');
+    }
+    if (Date.now() - timestampMs > 5 * 60_000) {
       throw new Error('Telebirr webhook timestamp too old (replay suspected)');
     }
 

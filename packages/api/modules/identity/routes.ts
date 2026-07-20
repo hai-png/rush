@@ -9,6 +9,15 @@ import { clientIp } from '../../src/ip';
 import { db, schema } from '@addis/db';
 import { eq, and } from 'drizzle-orm';
 
+// CRITICAL FIX (SEC-001): commit 0efae30 deleted the `identityRoutes`
+// declaration and the `RegisterInput` schema. Restored here in full.
+export const identityRoutes = new TypedOpenAPIHono();
+
+const RegisterInput = z.discriminatedUnion('kind', [
+  z.object({ kind: z.literal('rider'), name: z.string().min(2), phone: EthiopianPhone, password: z.string().min(10), homeArea: z.string(), workArea: z.string() }),
+  z.object({ kind: z.literal('contractor'), name: z.string().min(2), phone: EthiopianPhone, password: z.string().min(10), licenseNumber: z.string(), experienceYears: z.number().int().min(0) }),
+]);
+
 // auth endpoints. These now appear in the generated OpenAPI document with
 // request/response schemas, so the SDK types them end-to-end.
 const RegisterResponseSchema = z.object({

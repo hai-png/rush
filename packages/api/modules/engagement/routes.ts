@@ -1,6 +1,30 @@
-// JSON straight to the service's `.set({ ...input })`, allowing the
-// caller to write any JSON structure into the `prefs` jsonb column
-// (including prototype-pollution-style keys). Now the structure is
+// CRITICAL FIX (SEC-001): commit 0efae30 deleted this file's import block,
+// `engagementRoutes` declaration, `requireAuth` middleware, and the first
+// 4 notification routes. Restored here in full.
+import { TypedOpenAPIHono } from '../../src/typed-hono';
+import { z } from 'zod';
+import { requireAuth } from '../../src/middleware/auth';
+import { engagementService } from './service';
+import { db, schema } from '@addis/db';
+import { eq, and } from 'drizzle-orm';
+
+export const engagementRoutes = new TypedOpenAPIHono();
+engagementRoutes.use('*', requireAuth);
+
+engagementRoutes.get('/notifications', async (c) => {
+  const { parseLimit } = await import('../../src/limit');
+  const limit = parseLimit(c.req.query('limit'));
+  const { rows, cursor } = await engagementService.listForUser(c.get('session').userId, limit, c.req.query('cursor'));
+  return c.json({ data: rows, meta: { cursor, limit } });
+});
+engagementRoutes.get('/notifications/unread-count', async (c) => c.json({ data: { count: await engagementService.unreadCount(c.get('session').userId) } }));
+engagementRoutes.patch('/notifications/:id', async (c) => { await engagementService.markRead(c.get('session').userId, c.req.param('id')); return c.body(null, 204); });
+engagementRoutes.delete('/notifications/:id', async (c) => { await engagementService.remove(c.get('session').userId, c.req.param('id')); return c.body(null, 204); });
+
+// FIX (ARCH-002): Strict schema for notification preferences. The previous
+// handler passed raw JSON straight to the service's `.set({ ...input })`,
+// allowing the caller to write any JSON structure into the `prefs` jsonb
+// column (including prototype-pollution-style keys). Now the structure is
 // validated: prefs is a record of notification type -> partial channel
 // map, and quietHoursStart/End are HH:MM strings.
 const ChannelKeyZ = z.enum(['inApp', 'push', 'sms', 'email']);

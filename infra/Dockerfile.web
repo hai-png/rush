@@ -7,13 +7,15 @@
 #   - Multi-stage: deps stage caches bun install, builder stage produces
 #     the .next output, runner stage is minimal.
 #   - Non-root user: the web process runs as uid 10001 ('nextjs').
-#   - Healthcheck wired to /api/v1/health.
+#   - Healthcheck wired to /api/v1/healthz (FIX INFRA-002: previously
+#     /api/v1/health which is admin-gated).
 #   - Only the production output is copied — no source, no dev deps.
 
 FROM oven/bun:1.1-slim AS deps
 WORKDIR /app
 # Copy lockfile + package manifests first so install is cached.
-COPY bun.lockb package.json turbo.json tsconfig.base.json ./
+# FIX (INFRA-001): copy bun.lock (committed) — bun.lockb is no longer used.
+COPY bun.lock package.json turbo.json tsconfig.base.json ./
 COPY apps/web/package.json apps/web/
 COPY packages/api/package.json packages/api/
 COPY packages/db/package.json packages/db/
@@ -55,6 +57,9 @@ USER nextjs
 EXPOSE 3000
 
 HEALTHCHECK --interval=30s --timeout=5s --start-period=30s --retries=3 \
-  CMD wget -q --spider http://localhost:3000/api/v1/health || exit 1
+  CMD wget -q --spider http://localhost:3000/api/v1/healthz || exit 1
+# FIX (INFRA-002): probe /api/v1/healthz (the unauthenticated liveness probe).
+# The previous probe hit /api/v1/health, which is admin-gated, so the
+# container reported unhealthy even though the app was serving fine.
 
 CMD ["bun", "run", "--cwd", "apps/web", "start"]

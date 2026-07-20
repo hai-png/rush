@@ -7,9 +7,18 @@
 // we deliberately pass undefined (not empty string) to trigger the template
 // path. Passing empty strings would bypass the template and store an empty
 // notification row.
+//
+// FIX (INFRA-009): This handler has NO idempotency guard — see the matching
+// note on the SMS handler. A duplicate delivery results in a duplicate
+// in-app notification row. A durable `notification_log` table that every
+// channel writes before dispatch is deferred to follow-up 3 (separate task).
 import { engagementService } from '@addis/api/modules/engagement/service';
+import { schema } from '@addis/db';
 
-export async function handle(payload: { type: string; userId: string; [k: string]: unknown }) {
+export async function handle(
+  payload: { type: string; userId: string; [k: string]: unknown },
+  _evt?: typeof schema.outboxEvents.$inferSelect,
+) {
   await engagementService.dispatch({
     userId: payload.userId,
     type: payload.type as any,

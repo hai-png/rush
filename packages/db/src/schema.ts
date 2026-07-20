@@ -1,5 +1,5 @@
 import { createId } from '@paralleldrive/cuid2';
-import { sql, and } from 'drizzle-orm';
+import { sql } from 'drizzle-orm';
 import {
   pgTable, pgEnum, text, boolean, integer, real, decimal, jsonb,
   timestamp, date, index, uniqueIndex, check,
@@ -98,7 +98,11 @@ export const contractorDocuments = pgTable('contractor_documents', {
   checksumSha256: text('checksum_sha256').notNull(),
   scanStatus: documentScanStatus('scan_status').notNull().default('pending'),
   uploadedAt: ts('uploaded_at').notNull().defaultNow(),
-}, (t) => ({ contractorIdx: index().on(t.contractorId, t.type) }));
+}, (t) => ({
+  contractorIdx: index().on(t.contractorId, t.type),
+  // FIX (DB-011): dedup duplicate document uploads by content hash.
+  contractorChecksumUniq: uniqueIndex('contractor_documents_contractor_checksum_uniq').on(t.contractorId, t.checksumSha256),
+}));
 
 export const corporates = pgTable('corporates', {
   id: text('id').primaryKey().$defaultFn(createId),
@@ -141,6 +145,8 @@ export const corporateMembers = pgTable('corporate_members', {
   // FIX (DATA-002): full (non-partial) index on userId for queries that
   // don't filter deletedAt (e.g. admin lists, retention-cleanup).
   userIdIdx: index().on(t.userId),
+  // FIX (DB-010): corporate-reset-monthly cron's WHERE lastResetAt < date_trunc('month', now())
+  lastResetIdx: index().on(t.lastResetAt),
 }));
 
 export const routes = pgTable('routes', {
@@ -441,6 +447,8 @@ export const outboxEvents = pgTable('outbox_events', {
 }, (t) => ({
   statusNextIdx: index().on(t.status, t.nextAttemptAt),
   channelIdx: index().on(t.channel, t.status),
+  // FIX (DB-009): GIN index for send-expiry-reminders cron's NOT EXISTS subquery on payload->>'type' / payload->>'subscriptionId'
+  payloadGinIdx: index('outbox_events_payload_gin').using('gin', sql`${t.payload} jsonb_path_ops`),
 }));
 
 export const idempotencyRecords = pgTable('idempotency_records', {

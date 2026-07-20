@@ -35,9 +35,15 @@ export const supportService = {
     return ticket;
   },
 
-  async listForUser(userId: string, isStaff: boolean) {
-    if (isStaff) return db.select().from(schema.supportTickets).orderBy(schema.supportTickets.createdAt);
-    return db.select().from(schema.supportTickets).where(eq(schema.supportTickets.userId, userId));
+  async listForUser(userId: string, isStaff: boolean, opts?: { limit?: number }) {
+    // FIX (DB-014): apply limit clamp to both paths.
+    const rawLimit = opts?.limit ?? 50;
+    const limit = Math.min(Math.max(1, Math.trunc(rawLimit)), 500);
+    if (isStaff) return db.select().from(schema.supportTickets).orderBy(schema.supportTickets.createdAt).limit(limit);
+    return db.select().from(schema.supportTickets)
+      .where(eq(schema.supportTickets.userId, userId))
+      .orderBy(schema.supportTickets.createdAt)
+      .limit(limit);
   },
 
   async getTicket(userId: string, isStaff: boolean, ticketId: string) {
@@ -88,6 +94,10 @@ export const supportService = {
   async setStatus(adminId: string, ticketId: string, event: 'staff.resolved' | 'user.reopened') {
     const [ticket] = await db.select().from(schema.supportTickets).where(eq(schema.supportTickets.id, ticketId));
     if (!ticket) throw new NotFoundError('Ticket not found');
+    // FIX (SEC-002): ownership check for user.reopened (IDOR fix).
+    if (event === 'user.reopened' && ticket.userId !== adminId) {
+      throw new ForbiddenError('Not your ticket');
+    }
     const t = ticketState.resolve(ticket.status, event);
     // Populate resolvedById when transitioning to 'resolved' — the column
     // was added to the schema but never written by the previous implementation,

@@ -1,10 +1,14 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 /**
- * Ticket service tests. The authorization (owner vs. attacker) happens in the
- * route handler via getTicket(), not in the service — the service's setStatus
- * assumes the caller has already been authorized. These tests verify the
- * state-machine transitions and DB updates work correctly.
+ * Ticket service tests. The SEC-002 fix added an IDOR ownership check inside
+ * `supportService.setStatus` itself (not just in the route handler): when the
+ * event is `user.reopened`, the caller's id must match the ticket's userId.
+ * These tests verify:
+ *   1. The happy-path transition still works when the caller IS the owner.
+ *   2. A non-owner caller is rejected with "Not your ticket" (IDOR fix).
+ *   3. Staff-driven transitions (staff.resolved) bypass the ownership check.
+ *   4. NotFoundError is thrown when the ticket doesn't exist.
  */
 
 const TICKET_ROW = {
@@ -48,10 +52,20 @@ vi.mock('./state', () => ({
 describe('supportService.setStatus', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('transitions a resolved ticket to open on user.reopened', async () => {
+  it('transitions a resolved ticket to open on user.reopened (owner caller)', async () => {
     const { supportService } = await import('./service');
-    const result = await supportService.setStatus('user-1', 'ticket-1', 'user.reopened');
+    // FIX (SEC-002): pass the ticket's actual owner as the caller so the
+    // IDOR ownership check passes.
+    const result = await supportService.setStatus('user-owner-1', 'ticket-1', 'user.reopened');
     expect(result.to).toBe('open');
+  });
+
+  it('rejects a non-owner caller on user.reopened (SEC-002 IDOR fix)', async () => {
+    const { supportService } = await import('./service');
+    // An attacker who only knows the ticket id cannot reopen another user's
+    // ticket — the service itself enforces ownership, not just the route.
+    await expect(supportService.setStatus('user-attacker', 'ticket-1', 'user.reopened'))
+      .rejects.toThrow(/not your ticket/i);
   });
 
   it('transitions an open ticket to resolved on staff.resolved', async () => {
@@ -69,7 +83,9 @@ describe('supportService.setStatus', () => {
     const chain = (db.select as any)();
     chain.where.mockResolvedValueOnce([]);
     const { supportService } = await import('./service');
-    await expect(supportService.setStatus('user-1', 'nonexistent', 'user.reopened'))
+    // Use the owner id so the IDOR check (which runs after the NotFoundError
+    // check) doesn't fire even if the test is reordered in the future.
+    await expect(supportService.setStatus('user-owner-1', 'nonexistent', 'user.reopened'))
       .rejects.toThrow(/not found/i);
   });
 });

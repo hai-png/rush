@@ -4,7 +4,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
 import { useRouter } from 'next/navigation';
-import { Stepper, Button, Input, Label, FieldError, PhoneInput } from '@addis/ui';
+import { Stepper, Button, Input, Label, FieldError, PhoneInput, useToast } from '@addis/ui';
 import { useApiClient } from '@/lib/sdk';
 
 const Schema = z.object({
@@ -18,23 +18,62 @@ const Schema = z.object({
 type FormValues = z.infer<typeof Schema>;
 const STEPS = ['Account', 'Commute', 'Review'];
 
+// FIX (FE-007): The previous onSubmit handler did
+//   `if (error) return;`
+// — silently swallowing every API error. A rider who hit a 409 (duplicate
+// phone), a breach-listed password rejection, or a 5xx saw the form just
+// sit there with no feedback. Now we surface a code-specific message via
+// both a toast (visible feedback) and an aria-live `<p role="alert">` so
+// screen readers announce it. The alert message is also returned for
+// unit-testing.
+function describeSignupError(err: any): string {
+  const code = err?.error?.code ?? err?.code;
+  const message: string | undefined = err?.error?.message ?? err?.message;
+  const status: number | undefined = err?.response?.status;
+  if (status === 409 || code === 'CONFLICT') {
+    return 'This phone number is already registered. Try logging in instead.';
+  }
+  if (status === 400 || code === 'BAD_REQUEST') {
+    if (message && /breach/i.test(message)) {
+      return 'This password has appeared in a known data breach. Please choose a different one.';
+    }
+    return message ?? 'Some details are invalid. Please review and try again.';
+  }
+  if (status && status >= 500) {
+    return 'Something went wrong on our end. Please try again in a moment.';
+  }
+  return message ?? 'Could not create your account. Please try again.';
+}
+
 export default function RiderSignupPage() {
   const [step, setStep] = useState(0);
   const router = useRouter();
   const client = useApiClient();
+  const { push: pushToast } = useToast();
+  // FE-007: serverError is rendered in a <p role="alert"> so screen
+  // readers announce it. Cleared on every new submit attempt and on
+  // successful navigation between steps.
+  const [serverError, setServerError] = useState<string | null>(null);
   const { register, handleSubmit, trigger, setValue, watch, formState: { errors, isSubmitting } } =
     useForm<FormValues>({ resolver: zodResolver(Schema), defaultValues: { phone: '+251' } });
 
   const stepFields: (keyof FormValues)[][] = [['name', 'phone', 'password'], ['homeArea', 'workArea'], ['tosAccepted']];
 
-  const next = async () => { if (await trigger(stepFields[step])) setStep((s) => Math.min(s + 1, STEPS.length - 1)); };
-  const back = () => setStep((s) => Math.max(s - 1, 0));
+  const next = async () => { if (await trigger(stepFields[step])) { setServerError(null); setStep((s) => Math.min(s + 1, STEPS.length - 1)); } };
+  const back = () => { setServerError(null); setStep((s) => Math.max(s - 1, 0)); };
 
   const onSubmit = async (data: FormValues) => {
+    setServerError(null);
     const { error } = await client.POST('/api/v1/auth/register', {
       body: { kind: 'rider', name: data.name, phone: data.phone, password: data.password, homeArea: data.homeArea, workArea: data.workArea },
     });
-    if (error) return;
+    if (error) {
+      // FE-007: surface API errors via toast + aria-live alert.
+      const msg = describeSignupError(error);
+      setServerError(msg);
+      pushToast({ title: msg, variant: 'error' });
+      return;
+    }
     router.push('/login?registered=1');
   };
 
@@ -67,6 +106,14 @@ export default function RiderSignupPage() {
             </label>
             <FieldError>{errors.tosAccepted?.message as string}</FieldError>
           </>
+        )}
+
+        {/* FE-007: aria-live alert for server-side errors. role="alert"
+            makes screen readers announce it immediately when it appears. */}
+        {serverError && (
+          <p role="alert" aria-live="assertive" className="text-sm text-destructive">
+            {serverError}
+          </p>
         )}
 
         <div className="flex gap-3 pt-2">

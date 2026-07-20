@@ -12,8 +12,20 @@ import { fileTypeFromBuffer } from 'file-type';
  * Previously this was a stub that just console.log'd the payload. Now it does
  * a real basic scan. A full ClamAV sidecar integration would replace the
  * sniff check with an actual virus signature scan.
+ *
+ * FIX (INFRA-009): Like the other handlers, this one has no durable
+ * idempotency guard. The MIME-mismatch path throws after flagging the doc,
+ * so a duplicate delivery would re-throw without re-mutating the doc row
+ * (the `[SUSPICIOUS: ...]` prefix is idempotent on a second run since the
+ * filename already starts with it). The non-mismatch path is a no-op on
+ * re-delivery. So in practice the side effects are idempotent, but the
+ * outbox will still log a "dead-letter" if the throw happens maxAttempts
+ * times. A durable `notification_log` is deferred to follow-up 3.
  */
-export async function handle(payload: { kind: string; storageKey?: string; [k: string]: unknown }) {
+export async function handle(
+  payload: { kind: string; storageKey?: string; [k: string]: unknown },
+  _evt?: typeof schema.outboxEvents.$inferSelect,
+) {
   switch (payload.kind) {
     case 'clamav_scan': {
       if (!payload.storageKey) throw new Error('clamav_scan payload missing storageKey');

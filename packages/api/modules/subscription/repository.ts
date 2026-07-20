@@ -1,4 +1,4 @@
-import { and, eq, lt, sql } from 'drizzle-orm';
+import { and, eq, lt, sql, inArray } from 'drizzle-orm';
 import { db, schema } from '@addis/db';
 
 export const subscriptionRepo = {
@@ -76,6 +76,15 @@ export const subscriptionRepo = {
       .returning({ id: schema.subscriptions.id, riderId: schema.subscriptions.riderId });
 
     if (cancelled.length > 0) {
+      // FIX (PAY-003): also fail associated pending payments in the same tx.
+      // Without this, a late Telebirr webhook strands the user's money.
+      const subIds = cancelled.map(s => s.id);
+      await tx.update(schema.payments)
+        .set({ status: 'failed', updatedAt: new Date() })
+        .where(and(
+          inArray(schema.payments.subscriptionId, subIds),
+          eq(schema.payments.status, 'pending'),
+        ));
       await tx.insert(schema.outboxEvents).values(
         cancelled.map(s => ({
           channel: 'audit' as const,

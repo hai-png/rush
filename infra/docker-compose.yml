@@ -50,10 +50,29 @@ services:
   redis:
     image: redis:7-alpine
     command: redis-server --requirepass ${REDIS_PASSWORD:-addisride_dev_only_change_me} --maxmemory 256mb --maxmemory-policy allkeys-lru
+    # FIX (INFRA-013): Upstash-vs-self-hosted auth mismatch.
+    #
+    # The app connects to Redis via one of two modes (see packages/shared/src/env.ts):
+    #   - Upstash (managed): REDIS_URL=https://...upstash.io + REDIS_TOKEN=<token>
+    #     (REST + TLS; token sent as `Authorization: Bearer <token>`)
+    #   - Self-hosted (this service): REDIS_URL=rediss://...?password=<password>
+    #     (native Redis AUTH; password sent via AUTH command)
+    #
+    # docker-compose.yml starts Redis with --requirepass ${REDIS_PASSWORD},
+    # so the correct app-side config for THIS service is to put the password
+    # in the REDIS_URL query string (rediss://redis:6379?password=<pw>) — NOT
+    # REDIS_TOKEN (that would be Upstash-only and silently fail the AUTH
+    # handshake here). The two modes are NOT interchangeable; mixing them is a
+    # silent failure mode that has bitten us before. Document the chosen mode
+    # for each environment in infra/.env.example.
     profiles: ["dev"]
     ports: ["127.0.0.1:6379:6379"]
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      # FIX (INFRA-013): the previous healthcheck ran `redis-cli ping` with
+      # no auth — under --requirepass, that returns NOAUTH and the healthcheck
+      # reported the container as unhealthy even though Redis was serving
+      # traffic fine. Pass the password via `-a` (with a shell escape).
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
       interval: 5s
       timeout: 3s
       retries: 10

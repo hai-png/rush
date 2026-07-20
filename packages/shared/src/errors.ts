@@ -17,9 +17,34 @@ export class RateLimitError extends AppError {
   constructor(public readonly retryAfterSec: number) { super(429, 'RATE_LIMITED', 'Too many requests'); }
 }
 
+/**
+ * Map any thrown value to an HTTP error envelope.
+ *
+ * FIX (API-004 / API-005): the previous implementation only handled AppError
+ * subclasses; ZodError fell through to 500 (should be 400) and
+ * InvalidTransitionError fell through to 500 (should be 409).
+ */
 export function toErrorEnvelope(err: unknown, requestId: string) {
   if (err instanceof AppError) {
     return { status: err.httpStatus, body: { error: { code: err.code, message: err.message, details: err.details, requestId } } };
+  }
+  // FIX (API-004): ZodError -> 400 Bad Request with structured details.
+  if (err && typeof err === 'object' && 'name' in err && err.name === 'ZodError' && 'issues' in err) {
+    const issues = (err as { issues: Array<{ path: (string | number)[]; message: string }> }).issues;
+    const first = issues[0];
+    const path = first ? first.path.join('.') : '(root)';
+    const message = first ? first.message : 'Validation failed';
+    return {
+      status: 400,
+      body: { error: { code: 'BAD_REQUEST', message: `Validation failed at '${path}': ${message}`, details: { issues }, requestId } },
+    };
+  }
+  // FIX (API-005): InvalidTransitionError -> 409 Conflict.
+  if (err && typeof err === 'object' && 'name' in err && err.name === 'InvalidTransitionError') {
+    return {
+      status: 409,
+      body: { error: { code: 'CONFLICT', message: (err as Error).message, requestId } },
+    };
   }
   return { status: 500, body: { error: { code: 'INTERNAL', message: 'Internal server error', requestId } } };
 }

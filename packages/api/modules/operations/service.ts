@@ -1,4 +1,4 @@
-import { and, eq, sql } from 'drizzle-orm';
+import { and, eq, sql, inArray } from 'drizzle-orm';
 import { db, schema } from '@addis/db';
 import { NotFoundError, ConflictError, BadRequestError, ForbiddenError } from '@addis/shared';
 import { subscriptionRepo } from '../subscription/repository';
@@ -50,23 +50,28 @@ export const operationsService = {
         .set({ status: 'no_show', updatedAt: new Date() })
         .where(and(eq(schema.rides.tripId, tripId), eq(schema.rides.status, 'booked')));
 
-      for (const r of boarded) {
-        // Only increment ridesUsed if the subscription is still active and
-        // (for limited plans) hasn't exceeded its ride quota. The previous
-        // implementation called incrementRidesUsed unconditionally — a rider
-        // whose subscription expired mid-trip still got ridesUsed bumped,
-        // and a rider could exceed their plan's ridesIncluded silently.
-        if (r.subscriptionId) {
-          const [sub] = await tx.select().from(schema.subscriptions).where(eq(schema.subscriptions.id, r.subscriptionId));
-          if (sub && sub.status === 'active') {
-            const [plan] = await tx.select().from(schema.subscriptionPlans).where(eq(schema.subscriptionPlans.id, sub.planId));
-            // plan.ridesIncluded === -1 means unlimited
-            if (plan && (plan.ridesIncluded === -1 || sub.ridesUsed < plan.ridesIncluded)) {
-              await subscriptionRepo.incrementRidesUsed(tx, r.subscriptionId);
-            }
+      // FIX (DB-005): bulk UPDATE seat_claims + bulk SELECT subs+plans.
+      const seatClaimIds = boarded.map(r => r.seatClaimId).filter((id): id is string => id != null);
+      if (seatClaimIds.length > 0) {
+        await tx.update(schema.seatClaims)
+          .set({ status: 'used', updatedAt: new Date() })
+          .where(and(inArray(schema.seatClaims.id, seatClaimIds), eq(schema.seatClaims.status, 'confirmed')));
+      }
+      const subIds = [...new Set(boarded.map(r => r.subscriptionId).filter((id): id is string => id != null))];
+      if (subIds.length > 0) {
+        const subs = await tx.select().from(schema.subscriptions)
+          .where(and(inArray(schema.subscriptions.id, subIds), eq(schema.subscriptions.status, 'active')));
+        const planIds = [...new Set(subs.map(s => s.planId))];
+        const plans = planIds.length > 0
+          ? await tx.select().from(schema.subscriptionPlans).where(inArray(schema.subscriptionPlans.id, planIds))
+          : [];
+        const planById = new Map(plans.map(p => [p.id, p]));
+        for (const sub of subs) {
+          const plan = planById.get(sub.planId);
+          if (plan && (plan.ridesIncluded === -1 || sub.ridesUsed < plan.ridesIncluded)) {
+            await subscriptionRepo.incrementRidesUsed(tx, sub.id);
           }
         }
-        if (r.seatClaimId) await tx.update(schema.seatClaims).set({ status: 'used', updatedAt: new Date() }).where(eq(schema.seatClaims.id, r.seatClaimId));
       }
       await tx.insert(schema.outboxEvents).values({ channel: 'audit', payload: { action: 'trip.completed', entityId: tripId } });
       return trip;
@@ -94,15 +99,16 @@ export const operationsService = {
       throw new BadRequestError('A subscriptionId or seatClaimId is required to book a ride');
     }
     const [trip] = await db.select().from(schema.trips).where(eq(schema.trips.id, input.tripId));
-    if (!trip || trip.status !== 'scheduled') throw new BadRequestError('Trip not open for booking');
+    // FIX (API-001): accept 'scheduled' OR 'in_transit' (startTrip creates as 'in_transit').
+    if (!trip || (trip.status !== 'scheduled' && trip.status !== 'in_transit')) {
+      throw new BadRequestError('Trip not open for booking');
+    }
     const [shuttle] = await db.select().from(schema.shuttles).where(eq(schema.shuttles.id, trip.shuttleId));
 
-    // Verify ownership of subscriptionId and seatClaimId.
     if (input.subscriptionId) {
       const [sub] = await db.select().from(schema.subscriptions).where(eq(schema.subscriptions.id, input.subscriptionId));
       if (!sub || sub.riderId !== riderId) throw new ForbiddenError('Subscription does not belong to this rider');
       if (sub.status !== 'active') throw new BadRequestError('Subscription is not active');
-      // Enforce ride quota at booking time too, not just at completion.
       const [plan] = await db.select().from(schema.subscriptionPlans).where(eq(schema.subscriptionPlans.id, sub.planId));
       if (plan && plan.ridesIncluded !== -1 && sub.ridesUsed >= plan.ridesIncluded) {
         throw new BadRequestError('Subscription ride quota exhausted');
@@ -114,24 +120,22 @@ export const operationsService = {
       if (claim.status !== 'confirmed') throw new BadRequestError('Seat claim is not confirmed');
     }
 
+    // FIX (API-003): wrap CAS + INSERT in one transaction.
     try {
-      // Atomic capacity check + increment. The CAS update only succeeds if
-      // the current seatsBooked is still under capacity — concurrent
-      // bookers race-safely: only N<=capacity of them win.
-      const capacity = shuttle?.capacity ?? 0;
-      const updated = await db.update(schema.trips)
-        .set({ seatsBooked: sql`${schema.trips.seatsBooked} + 1`, updatedAt: new Date() })
-        .where(and(
-          eq(schema.trips.id, trip.id),
-          eq(schema.trips.status, 'scheduled'),
-          sql`${schema.trips.seatsBooked} < ${capacity}`,
-        ))
-        .returning();
-      if (updated.length === 0) {
-        throw new ConflictError('Trip is full');
-      }
-      const [ride] = await db.insert(schema.rides).values({ riderId, ...input, status: 'booked' }).returning();
-      return ride;
+      return await db.transaction(async (tx) => {
+        const capacity = shuttle?.capacity ?? 0;
+        const updated = await tx.update(schema.trips)
+          .set({ seatsBooked: sql`${schema.trips.seatsBooked} + 1`, updatedAt: new Date() })
+          .where(and(
+            eq(schema.trips.id, trip.id),
+            inArray(schema.trips.status, ['scheduled', 'in_transit']),
+            sql`${schema.trips.seatsBooked} < ${capacity}`,
+          ))
+          .returning();
+        if (updated.length === 0) throw new ConflictError('Trip is full');
+        const [ride] = await tx.insert(schema.rides).values({ riderId, ...input, status: 'booked' }).returning();
+        return ride;
+      });
     } catch (e: any) {
       if (e.code === '23505') throw new ConflictError('Already booked on this trip');
       throw e;

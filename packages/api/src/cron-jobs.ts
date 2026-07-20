@@ -142,20 +142,28 @@ export const CRON_JOBS: ReadonlyArray<{
       const { settlePayment, failPayment } = await import('../modules/payment/service');
       const stale = await db.select().from(schema.payments)
         .where(and(eq(schema.payments.status, 'pending'), eq(schema.payments.method, 'telebirr'), lt(schema.payments.createdAt, sql`now() - interval '1 hour'`)));
-      let settled = 0, failedCount = 0;
+      let settled = 0, failedCount = 0, skippedNoAmount = 0;
       for (const p of stale) {
         const result = await getPaymentProvider('telebirr').verifyPayment(p.reference);
         if (result.status === 'completed') {
-          // Pass the provider-reported amount through to settlePayment so the
-          // amount-mismatch check actually runs. The previous call omitted the
-          // amount, silently skipping the check (H35). If the provider doesn't
-          // return an amount, settlePayment will record an audit warning.
+          // FIX (PAY-006): refuse to settle without amount verification.
+          if (!result.amount) {
+            console.error(
+              `[reconcile-payments] paymentId=${p.id} reference=${p.reference} provider returned completed status but no amount — refusing to settle without amount verification`,
+            );
+            await db.insert(schema.outboxEvents).values({
+              channel: 'audit',
+              payload: { action: 'payment.reconcile_skipped_no_amount', entityId: p.id, reference: p.reference },
+            });
+            skippedNoAmount++;
+            continue;
+          }
           await settlePayment(p.reference, result.amount);
           settled++;
         }
         else if (result.status === 'failed') { await failPayment(p.reference, result.raw); failedCount++; }
       }
-      return { checked: stale.length, settled, failed: failedCount };
+      return { checked: stale.length, settled, failed: failedCount, skippedNoAmount };
     },
   },
   {
@@ -392,6 +400,13 @@ export const CRON_JOBS: ReadonlyArray<{
           // archival itself is audited (ironic but legally required — the
           // retention job's actions must be traceable).
           await db.transaction(async (tx) => {
+            // FIX (INFRA-007 / SEC-003): the audit_logs append-only trigger
+            // (packages/db/migrations/0001_audit_append_only.sql) blocks all
+            // DELETEs unless the session flag `app.audit_retention_purge` is
+            // set to 'on' inside the transaction. SET LOCAL scopes the flag
+            // to this transaction only — once we commit, the flag clears and
+            // a normal connection can't accidentally delete audit rows.
+            await tx.execute(sql`SET LOCAL app.audit_retention_purge = 'on'`);
             await tx.delete(schema.auditLogs).where(
               inArray(schema.auditLogs.id, oldAudit.map(r => r.id))
             );

@@ -113,26 +113,25 @@ webhookRoutes.post('/telebirr/notify', async (c) => {
     }
     const retry = updated[0];
     if (event.type === 'refund.succeeded') {
-      // Accumulate refundAmount on the payment row, mirroring the logic in
-      // processRefundRetries. The previous implementation had a bug where
-      // refundAmount was overwritten instead of accumulated — we preserve
-      // the fix here.
+      // FIX (DB-006): wrap in one transaction with SELECT FOR UPDATE.
       const { Money } = await import('@addis/shared');
-      const [payment] = await db.select().from(schema.payments).where(eq(schema.payments.id, retry.paymentId));
-      if (payment) {
+      await db.transaction(async (tx) => {
+        const [payment] = await tx.select().from(schema.payments)
+          .where(eq(schema.payments.id, retry.paymentId)).for('update');
+        if (!payment) return;
         const currentRefundAmount = payment.refundAmount ? Money.fromDecimal(payment.refundAmount) : Money.ZERO;
         const newRefundAmount = currentRefundAmount.add(Money.fromDecimal(retry.amount));
         const allRefunded = newRefundAmount.eq(Money.fromDecimal(payment.amount));
-        await db.update(schema.payments).set({
+        await tx.update(schema.payments).set({
           status: allRefunded ? 'refunded' : 'partially_refunded',
           refundAmount: newRefundAmount.toString(),
           refundedAt: new Date(), updatedAt: new Date(),
         }).where(eq(schema.payments.id, payment.id));
-        await db.insert(schema.outboxEvents).values({
+        await tx.insert(schema.outboxEvents).values({
           channel: 'notification',
           payload: { type: 'refund_completed', userId: payment.riderId },
         });
-      }
+      });
     } else {
       const [payment] = await db.select().from(schema.payments).where(eq(schema.payments.id, retry.paymentId));
       if (payment) {

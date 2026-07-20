@@ -9,6 +9,26 @@ const QUEUE_KEY = 'addisride.offlineQueue';
 // would otherwise fill storage and crash the app on the next write.
 const MAX_QUEUE_SIZE = 100;
 
+// FIX (FE-005): listener registry for `onAuthRequiredForFlush`. When the
+// flush loop hits a 401, it pauses (preserving remaining items) and emits
+// this event so the UI can route the user to re-authentication. The
+// previous implementation treated 401 as a permanent rejection (status<500
+// → drop) — a queued seat-claim made while the session was alive but
+// flushed after the JWT expired was silently lost.
+type AuthRequiredListener = (info: { item: QueuedMutation; status: number }) => void;
+const authRequiredListeners = new Set<AuthRequiredListener>();
+
+export function onAuthRequiredForFlush(fn: AuthRequiredListener): () => void {
+  authRequiredListeners.add(fn);
+  return () => { authRequiredListeners.delete(fn); };
+}
+
+function emitAuthRequired(item: QueuedMutation, status: number) {
+  authRequiredListeners.forEach((fn) => {
+    try { fn({ item, status }); } catch { /* listener errors must not break the flush loop */ }
+  });
+}
+
 async function readQueue(): Promise<QueuedMutation[]> {
   const raw = await AsyncStorage.getItem(QUEUE_KEY);
   return raw ? JSON.parse(raw) : [];
@@ -98,29 +118,50 @@ async function sendMutation(input: Omit<QueuedMutation, 'id' | 'createdAt'>): Pr
  *  dropping data the server had permanently rejected. Now sendMutation
  *  returns a structured `{ ok, status }` so we can distinguish:
  *    - ok=true                 → success, drop from queue
- *    - ok=false, status<500    → permanent rejection (400/401/403/409),
+ *    - ok=false, status===401  → auth expired: PAUSE, preserve remaining
+ *                                items (including this one), emit
+ *                                onAuthRequiredForFlush (FE-005)
+ *    - ok=false, status<500    → permanent rejection (400/403/409),
  *                                drop from queue (don't retry forever)
  *    - ok=false, status>=500   → transient, keep in queue for next flush
  */
-export async function flushQueue(): Promise<{ flushed: number; remaining: number }> {
+export async function flushQueue(): Promise<{ flushed: number; remaining: number; pausedForAuth: boolean }> {
   const queue = await readQueue();
   const remaining: QueuedMutation[] = [];
   let flushed = 0;
+  let pausedForAuth = false;
 
+  // Use for-of so `item` is `QueuedMutation` (not `T | undefined` from
+  // `noUncheckedIndexedAccess`). Track index separately for the 401
+  // pause-slice (preserve this item AND every item after it).
+  let i = 0;
   for (const item of queue) {
     const { ok, status } = await sendMutation(item);
     if (ok) {
       flushed++;
+      i++;
       continue;
+    }
+    if (status === 401) {
+      // FE-005: pause — preserve this item AND every item after it. The
+      // session is expired; subsequent items would all 401 too. Emit the
+      // event so the UI can route to re-auth, then stop the loop.
+      remaining.push(...queue.slice(i));
+      await writeQueue(remaining);
+      emitAuthRequired(item, status);
+      pausedForAuth = true;
+      return { flushed, remaining: remaining.length, pausedForAuth };
     }
     if (status < 500) {
       // permanent rejection — drop it, don't block the rest of the queue
+      i++;
       continue;
     }
     remaining.push(item); // 5xx — retry next time
+    i++;
   }
   await writeQueue(remaining);
-  return { flushed, remaining: remaining.length };
+  return { flushed, remaining: remaining.length, pausedForAuth };
 }
 
 export async function pendingCount(): Promise<number> {
@@ -131,5 +172,28 @@ export async function pendingCount(): Promise<number> {
 export function subscribeToConnectivity() {
   return NetInfo.addEventListener((state) => {
     if (state.isConnected) flushQueue().catch(() => {});
+  });
+}
+
+/** FE-005: auto-flush when a fresh login lands. Call this once at app root
+ *  with the auth store's `subscribe` function. When `accessToken`
+ *  transitions from null/old to a new value, attempt a flush — items
+ *  queued while offline (or while the previous session was expired) get
+ *  delivered under the new session. */
+export function subscribeToAuthFlush(
+  subscribe: (listener: (state: { accessToken: string | null }, prev: { accessToken: string | null }) => void) => () => void,
+) {
+  let lastToken: string | null = null;
+  let booted = false;
+  return subscribe((state) => {
+    // Skip the initial hydration emit (prev.accessToken is undefined on
+    // first fire). Only react to a real transition INTO a fresh token.
+    if (!booted) { booted = true; lastToken = state.accessToken ?? null; return; }
+    const newToken = state.accessToken ?? null;
+    if (newToken && newToken !== lastToken) {
+      // Fresh login (or refresh). Attempt a flush.
+      flushQueue().catch(() => {});
+    }
+    lastToken = newToken;
   });
 }

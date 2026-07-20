@@ -1,6 +1,25 @@
-// request ?limit=999999999 and OOM the process. Previous code did
-// `Number(c.req.query('limit') ?? 20)` with no cap — and `Number('abc')`
-// produced NaN, which Drizzle treated as `LIMIT NULL` (all rows).
+// CRITICAL FIX (SEC-001): commit 0efae30 deleted this file's import block,
+// `adminRoutes` declaration, and the `requireRole('platform_admin')` middleware
+// that was the ONLY auth gate on every admin endpoint. Restored here in full.
+import { TypedOpenAPIHono } from '../../src/typed-hono';
+import { z } from 'zod';
+import { requireRole } from '../../src/middleware/auth';
+import { clientIp } from '../../src/ip';
+import { adminService } from './service';
+import { adminCatalogRoutes } from '../catalog/routes';
+import { documentService } from '../identity/documents';
+import { corporateService } from '../corporate/service';
+import { scheduleRefund } from '../payment/service';
+import { Money, ALL_ROLES } from '@addis/shared';
+import { and, eq } from 'drizzle-orm';
+import { db, schema } from '@addis/db';
+
+export const adminRoutes = new TypedOpenAPIHono();
+adminRoutes.use('*', requireRole('platform_admin'));
+adminRoutes.route('/', adminCatalogRoutes);
+
+// Bound the `limit` query param so a malicious or careless admin client can't
+// request ?limit=999999999 and OOM the process.
 function boundedLimit(raw: string | undefined, def: number, max = 200): number {
   const n = Number(raw ?? def);
   if (!Number.isFinite(n) || n < 1) return def;

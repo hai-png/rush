@@ -1,4 +1,4 @@
-import { and, eq, lte, sql } from 'drizzle-orm';
+import { and, eq, lte, sql, inArray } from 'drizzle-orm';
 import { db, schema } from '@addis/db';
 import { Money, BadRequestError, NotFoundError } from '@addis/shared';
 import { getPaymentProvider } from '@addis/payments';
@@ -140,15 +140,14 @@ const BACKOFF_MIN = [15, 30, 60, 120, 240];
  * a DB row lock), and ACCUMULATE refundAmount rather than overwriting.
  */
 export async function processRefundRetries(limit = 50) {
+  // FIX (PAY-010): Re-queue rows stuck in 'processing' (worker crash mid-flight).
+  await db.execute(sql`
+    UPDATE refund_retries SET status = 'pending', updated_at = now()
+    WHERE status = 'processing' AND updated_at < now() - interval '15 minutes'
+  `);
+
   // Claim rows with SELECT FOR UPDATE SKIP LOCKED so concurrent workers
   // don't double-process the same refund.
-  //
-  // FIX (OPS-001 / SEC-005): The previous implementation had a `.catch()`
-  // fallback that did a plain SELECT with NO locking — a TOCTOU race where
-  // two workers could both select the same rows, both call provider.refund(),
-  // and DOUBLE-REFUND the customer. The fallback fired on ANY SQL error,
-  // including transient connection blips. Now: errors propagate. Fail loud
-  // rather than silently degrade to an unsafe path that defrauds the platform.
   const claimed = await db.execute(sql`
     UPDATE refund_retries SET status = 'processing', updated_at = now()
     WHERE id IN (
@@ -169,9 +168,7 @@ export async function processRefundRetries(limit = 50) {
     if (!payment) continue;
     const provider = getPaymentProvider(payment.method);
 
-    // Run the provider call OUTSIDE the transaction. If it fails, we update
-    // the retry row's attempts/nextAttemptAt in a separate transaction; the
-    // payment row is never locked during the (potentially slow) network call.
+    // Run the provider call OUTSIDE the transaction.
     let result;
     try {
       result = await provider.refund({
@@ -179,31 +176,36 @@ export async function processRefundRetries(limit = 50) {
         amount: Money.fromDecimal(retry.amount), reason: retry.reason,
       });
     } catch (err) {
-      // Network error — treat as transient, schedule retry.
       result = { status: 'failed' as const, error: (err as Error).message, permanent: false };
     }
 
     await db.transaction(async (tx) => {
       if (result.status === 'succeeded') {
-        await tx.update(schema.refundRetries).set({ status: 'succeeded', updatedAt: new Date() }).where(eq(schema.refundRetries.id, retry.id));
-        // ACCUMULATE refundAmount rather than overwrite. The previous
-        // `set({ refundAmount: retry.amount })` clobbered prior partial
-        // refunds — the payment's refundAmount field only ever reflected
-        // the most recent refund, hiding how much had actually been
-        // refunded in total.
-        const currentRefundAmount = payment.refundAmount ? Money.fromDecimal(payment.refundAmount) : Money.ZERO;
+        // FIX (PAY-001): CAS update with status filter — skip if webhook already processed.
+        const updatedRetry = await tx.update(schema.refundRetries)
+          .set({ status: 'succeeded', updatedAt: new Date() })
+          .where(and(
+            eq(schema.refundRetries.id, retry.id),
+            inArray(schema.refundRetries.status, ['pending', 'processing']),
+          ))
+          .returning();
+        if (updatedRetry.length === 0) return; // webhook already processed
+        // FIX (PAY-001): Re-read payment inside tx with FOR UPDATE.
+        const [freshPayment] = await tx.select().from(schema.payments)
+          .where(eq(schema.payments.id, payment.id)).for('update');
+        if (!freshPayment) return;
+        const currentRefundAmount = freshPayment.refundAmount ? Money.fromDecimal(freshPayment.refundAmount) : Money.ZERO;
         const newRefundAmount = currentRefundAmount.add(Money.fromDecimal(retry.amount));
-        const allRefunded = newRefundAmount.eq(Money.fromDecimal(payment.amount));
+        const allRefunded = newRefundAmount.eq(Money.fromDecimal(freshPayment.amount));
         await tx.update(schema.payments).set({
           status: allRefunded ? 'refunded' : 'partially_refunded',
           refundAmount: newRefundAmount.toString(),
           refundedAt: new Date(), updatedAt: new Date(),
-        }).where(eq(schema.payments.id, payment.id));
-        if (payment.subscriptionId) {
-          const { subscriptionRepo } = await import('../subscription/repository');
-          await subscriptionRepo.decrementRidesUsed(tx, payment.subscriptionId);
-        }
-        await tx.insert(schema.outboxEvents).values({ channel: 'notification', payload: { type: 'refund_completed', userId: payment.riderId } });
+        }).where(eq(schema.payments.id, freshPayment.id));
+        // FIX (PAY-009): Do NOT call decrementRidesUsed — refunds must not
+        // restore ride quota (the released ride's quota was already consumed
+        // at marketplace.release time per API-002 fix).
+        await tx.insert(schema.outboxEvents).values({ channel: 'notification', payload: { type: 'refund_completed', userId: freshPayment.riderId } });
         refundCounter.labels('succeeded').inc();
       } else {
         const attempts = retry.attempts + 1;

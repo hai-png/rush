@@ -14,7 +14,14 @@
 - **Sensitivity:** High — documents are government-issued IDs
 - **Mitigations:**
   - AES-256 encryption at rest (S3)
-  - ClamAV malware scan on upload
+  - FIX (INFRA-010): magic-byte MIME sniffing on upload — the uploaded
+    buffer's actual file type is sniffed via the `file-type` library and
+    compared to the declared MIME type; mismatches are flagged and rejected.
+    (Previously documented here as "ClamAV malware scan on upload" — that
+    was inaccurate; no ClamAV sidecar is deployed. The actual scan is the
+    magic-byte MIME sniff in `apps/worker/src/handlers/webhook.ts`. A full
+    ClamAV sidecar integration would replace the sniff check with an
+    actual virus signature scan; that is tracked as a future enhancement.)
   - Access limited to contractor + platform_admin
   - Presigned URLs with 15-minute TTL
   - Audit-logged access

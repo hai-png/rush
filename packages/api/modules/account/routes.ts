@@ -1,3 +1,27 @@
+// CRITICAL FIX (SEC-001): commit 0efae30 deleted this file's import block,
+// `accountRoutes` declaration, and `requireAuth` middleware. Restored here.
+import { createRoute } from '@hono/zod-openapi';
+import { TypedOpenAPIHono } from '../../src/typed-hono';
+import { z } from 'zod';
+import { ErrorSchema, UnauthorizedError, verifyPassword } from '@addis/shared';
+import { requireAuth } from '../../src/middleware/auth';
+import { accountService } from './service';
+import { db, schema } from '@addis/db';
+import { eq } from 'drizzle-orm';
+
+export const accountRoutes = new TypedOpenAPIHono();
+accountRoutes.use('*', requireAuth);
+
+const UpdateAccountInput = z.object({
+  name: z.string().min(2).optional(),
+  homeArea: z.string().optional(),
+  workArea: z.string().optional(),
+}).strict();
+
+accountRoutes.get('/', async (c) => c.json({ data: await accountService.get(c.get('session').userId) }));
+accountRoutes.patch('/', async (c) => c.json({ data: await accountService.update(c.get('session').userId, UpdateAccountInput.parse(await c.req.json())) }));
+
+// FIX (ARCH-003): Full OpenAPI route definition for the security-critical
 // account-deletion endpoint. Now appears in the SDK with the password
 // requirement visible to clients.
 const deleteAccountRoute = createRoute({

@@ -1,5 +1,5 @@
 import * as React from 'react';
-import { Input, Label, FieldError } from '../primitives/input';
+import { Input, Label } from '../primitives/input';
 
 /** Enforces Ethiopian +251 format visually while storing the canonical E.164 string.
  *

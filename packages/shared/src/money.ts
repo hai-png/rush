@@ -17,7 +17,10 @@ export class Money {
    */
   static fromDecimal(d: Decimal | string | number): Money {
     const input = typeof d === 'number' ? String(d) : d;
-    return new Money(new Decimal(input).toDecimalPlaces(2, Decimal.ROUND_HALF_UP));
+    const dec = new Decimal(input).toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
+    // FIX (PAY-008): reject negative amounts at construction.
+    if (dec.isNegative()) throw new Error(`Money amount cannot be negative: ${input}`);
+    return new Money(dec);
   }
   static fromETBString(s: string): Money {
     if (!/^\d+(\.\d{1,2})?$/.test(s)) throw new Error(`Invalid ETB amount: ${s}`);

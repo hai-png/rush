@@ -1,5 +1,5 @@
 'use client';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { CreditCard, Landmark } from 'lucide-react';
 import { Button, Card, CardContent } from '@addis/ui';
@@ -12,7 +12,7 @@ import { useToast } from '@addis/ui';
 // would be redirected to an arbitrary URL (phishing, malware drive-by).
 const ALLOWED_CHECKOUT_HOSTS = new Set([
   'superapp.ethiomobilemoney.et',     // Telebirr production
-  'developerportal.ethiotelebirr.et', // Telebirr testbed
+  'developerportal.ethiotelecom.et', // Telebirr testbed
   'localhost',                         // dev
 ]);
 
@@ -23,6 +23,43 @@ function isAllowedCheckoutUrl(url: string): boolean {
   } catch {
     return false;
   }
+}
+
+// FIX (FE-006): The previous idempotency key was `checkout:${planId}:${routeId}`
+// — stable FOREVER for a given (plan, route). If a rider started checkout,
+// abandoned it, came back minutes later, and re-submitted, the server's
+// idempotency layer returned the CACHED response (the original Telebirr
+// checkout URL) instead of minting a fresh subscription. The cached URL was
+// typically already expired or already consumed. We now salt the key with a
+// `sessionStorage`-backed per-page-load nonce so:
+//   - Within a single page-load, the key is stable → double-click /
+//     strict-mode double-mount dedupes server-side (one subscription).
+//   - Across page-loads (full reload, new tab, or after a successful
+//     checkout), the nonce differs → the server treats it as a fresh
+//     request and mints a new subscription + new Telebirr checkout URL.
+// The nonce is cleared on successful checkout (POST 2xx) and when the
+// `?checkout_done=1` query param is present (the Telebirr redirect-back
+// signal) so the next visit starts a fresh nonce.
+const NONCE_STORAGE_KEY = 'addisride.checkout.nonce';
+
+function getOrCreateNonce(): string {
+  if (typeof window === 'undefined') return 'ssr-placeholder';
+  try {
+    const existing = window.sessionStorage.getItem(NONCE_STORAGE_KEY);
+    if (existing) return existing;
+    const fresh = crypto.randomUUID();
+    window.sessionStorage.setItem(NONCE_STORAGE_KEY, fresh);
+    return fresh;
+  } catch {
+    // sessionStorage can throw in private-mode browsers; fall back to a
+    // per-mount random value (loses strict-mode dedupe but stays correct).
+    return crypto.randomUUID();
+  }
+}
+
+function clearNonce() {
+  if (typeof window === 'undefined') return;
+  try { window.sessionStorage.removeItem(NONCE_STORAGE_KEY); } catch { /* noop */ }
 }
 
 export default function CheckoutPage() {
@@ -36,15 +73,27 @@ export default function CheckoutPage() {
   const planId = params.get('planId');
   const routeId = params.get('routeId');
 
-  // Generate a STABLE idempotency key per checkout session (plan + route).
-  // The previous implementation regenerated `crypto.randomUUID()` on every
-  // click — double-click bypassed idempotency entirely (two subscriptions
-  // attempted, second caught by the business rule but the first payment
-  // may already be in flight).
+  // Per-page-load nonce — useState initializer runs once per mount and
+  // reads from sessionStorage so React Strict Mode's double-mount (and
+  // HMR) reuse the same nonce rather than minting two.
+  const [nonce] = useState(() => getOrCreateNonce());
+
+  // Generate a STABLE idempotency key per checkout session (plan + route +
+  // page-load nonce). Stable across re-renders within a single page-load
+  // (double-click / strict-mode-safe), different across page-loads (so a
+  // rider who abandons and returns gets a fresh server-side request).
   const idempotencyKey = useMemo(() => {
     if (!planId || !routeId) return null;
-    return `checkout:${planId}:${routeId}`;
-  }, [planId, routeId]);
+    return `checkout:${planId}:${routeId}:${nonce}`;
+  }, [planId, routeId, nonce]);
+
+  // FE-006: clear the nonce when the Telebirr redirect-back signal is
+  // present so the next visit to /checkout starts a fresh checkout flow.
+  useEffect(() => {
+    if (params.get('checkout_done') === '1') {
+      clearNonce();
+    }
+  }, [params]);
 
   const submit = async () => {
     if (!planId || !routeId || !idempotencyKey) {
@@ -58,6 +107,11 @@ export default function CheckoutPage() {
     });
     setLoading(false);
     if (error) { push({ title: error.message ?? 'Could not start checkout', variant: 'error' }); return; }
+
+    // FE-006: clear the nonce on successful checkout so a subsequent visit
+    // (e.g., via the browser back button) mints a fresh subscription
+    // instead of reusing the now-consumed idempotency key.
+    clearNonce();
 
     const checkout = (data as any).meta?.checkout;
     if (checkout?.status === 'checkout') {

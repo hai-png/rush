@@ -6,7 +6,8 @@
 
 FROM oven/bun:1.1-slim AS deps
 WORKDIR /app
-COPY bun.lockb package.json turbo.json tsconfig.base.json ./
+# FIX (INFRA-001): copy bun.lock (committed) — bun.lockb is no longer used.
+COPY bun.lock package.json turbo.json tsconfig.base.json ./
 COPY apps/worker/package.json apps/worker/ 2>/dev/null || true
 COPY packages/api/package.json packages/api/
 COPY packages/db/package.json packages/db/

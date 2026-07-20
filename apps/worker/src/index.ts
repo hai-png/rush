@@ -13,13 +13,13 @@ loadEnv(); // validate env at startup
 const WORKER_ID = `worker-${process.pid}-${Date.now()}`;
 const workerLogger = logger.child({ component: 'worker', workerId: WORKER_ID });
 
-const HANDLERS: Record<string, (payload: any) => Promise<void>> = {
-  notification: async (p) => (await import('./handlers/notification')).handle(p),
-  sms: async (p) => (await import('./handlers/sms')).handle(p),
-  push: async (p) => (await import('./handlers/push')).handle(p),
-  email: async (p) => (await import('./handlers/email')).handle(p),
-  audit: async (p) => (await import('./handlers/audit')).handle(p),
-  webhook: async (p) => (await import('./handlers/webhook')).handle(p),
+const HANDLERS: Record<string, (payload: any, evt: any) => Promise<void>> = {
+  notification: async (p, evt) => (await import('./handlers/notification')).handle(p, evt),
+  sms: async (p, evt) => (await import('./handlers/sms')).handle(p, evt),
+  push: async (p, evt) => (await import('./handlers/push')).handle(p, evt),
+  email: async (p, evt) => (await import('./handlers/email')).handle(p, evt),
+  audit: async (p, evt) => (await import('./handlers/audit')).handle(p, evt),
+  webhook: async (p, evt) => (await import('./handlers/webhook')).handle(p, evt),
 };
 
 const BACKOFF_SEC = [30, 60, 300, 900, 3600];
@@ -64,7 +64,11 @@ async function drainOutbox() {
 
   for (const evt of rows) {
     try {
-      await HANDLERS[evt.channel](evt.payload);
+      // FIX (INFRA-003): pass the full outbox event to the handler so it has
+      // access to evt.id (for idempotency stamps) and other metadata
+      // (attempts, createdAt, etc.). The audit handler uses evt.id to detect
+      // duplicate deliveries and skip re-inserting into audit_logs.
+      await HANDLERS[evt.channel](evt.payload, evt);
       await db.update(schema.outboxEvents).set({ status: 'delivered' as any, updatedAt: new Date() }).where(eq(schema.outboxEvents.id, evt.id));
     } catch (err) {
       const attempts = evt.attempts + 1;

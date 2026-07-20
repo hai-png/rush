@@ -1,25 +1,51 @@
 'use client';
-import { ChevronLeft, ChevronRight, ArrowUpDown } from 'lucide-react';
+import { ArrowUpDown, ChevronLeft, ChevronRight } from 'lucide-react';
 import { Skeleton } from '../primitives/skeleton';
 
-export type Column<T> = { key: keyof T & string; header: string; render?: (row: T) => React.ReactNode };
+export type Column<T> = {
+  key: keyof T & string;
+  header: string;
+  render?: (row: T) => React.ReactNode;
+  /** When true, the column header renders as a clickable sort toggle. */
+  sortable?: boolean;
+};
 
 export function DataTable<T extends { id: string }>({
-  columns, rows, loading, cursor, onNextPage, onPrevPage, hasPrev,
+  columns, rows, loading, cursor, onNextPage, onPrevPage, hasPrev, onSort,
 }: {
   columns: Column<T>[]; rows: T[]; loading?: boolean;
   cursor?: string; onNextPage?: () => void; onPrevPage?: () => void; hasPrev?: boolean;
+  /** Click handler for sortable column headers. Receives the column key. */
+  onSort?: (key: string) => void;
 }) {
   return (
     <div role="region" aria-label="Data table" className="rounded-2xl border border-border overflow-x-auto">
       <table className="w-full text-sm">
         <thead className="bg-secondary">
           <tr>
-            {columns.map((col) => (
-              <th key={col.key} scope="col" className="text-left font-medium px-4 py-3">
-                {col.header}
-              </th>
-            ))}
+            {columns.map((col) => {
+              const sortable = !!col.sortable && !!onSort;
+              // The header text is placed directly inside the <th> (no wrapping
+              // <span> or <button>) so `getByText('Name')` in tests matches a
+              // single element. The whole <th> is clickable; the ArrowUpDown
+              // icon is a sibling SVG with no text content, so it doesn't
+              // create a second match.
+              return (
+                <th
+                  key={col.key}
+                  scope="col"
+                  className={`text-left font-medium px-4 py-3 ${sortable ? 'cursor-pointer select-none hover:bg-secondary/70' : ''}`}
+                  role={sortable ? 'button' : undefined}
+                  tabIndex={sortable ? 0 : undefined}
+                  onClick={sortable ? () => onSort!(col.key) : undefined}
+                  onKeyDown={sortable ? (e) => { if (e.key === 'Enter') onSort!(col.key); } : undefined}
+                  aria-label={sortable ? `Sort by ${col.header}` : undefined}
+                >
+                  {col.header}
+                  {col.sortable && <ArrowUpDown className="inline h-3 w-3 ml-1 opacity-60" aria-hidden />}
+                </th>
+              );
+            })}
           </tr>
         </thead>
         <tbody>

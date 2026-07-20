@@ -1,14 +1,17 @@
 import { addHours } from 'date-fns';
-import { and, eq, gt, desc, lte } from 'drizzle-orm';
+import { and, eq, gt, desc, lte, sql } from 'drizzle-orm';
 import { db, schema } from '@addis/db';
 import { Money, ConflictError, BadRequestError, NotFoundError, proratedRideValue, PAYMENT_RETENTION_YEARS, loadEnv } from '@addis/shared';
 import { getPaymentProvider } from '@addis/payments';
+import { createId } from '@paralleldrive/cuid2';
 import { scheduleRefund } from '../payment/service';
+import { subscriptionRepo } from '../subscription/repository';
 
 const env = loadEnv();
 const SEAT_RELEASE_TTL_HOURS = Number(process.env.SEAT_RELEASE_TTL_HOURS ?? 4);
 function addYears(d: Date, years: number) { const c = new Date(d); c.setFullYear(c.getFullYear() + years); return c; }
-function generateMerchOrderId() { return `CLM${Date.now()}${Math.random().toString(36).slice(2, 8)}`; }
+// FIX (PAY-011): use cuid2
+function generateMerchOrderId() { return `CLM${createId()}`; }
 
 export const marketplaceService = {
   async release(riderId: string, input: { subscriptionId: string; releaseDate: string; window: 'morning' | 'evening' }) {
@@ -30,14 +33,38 @@ export const marketplaceService = {
     const [route] = await db.select().from(schema.routes).where(eq(schema.routes.id, sub.routeId));
     if (!plan || !route) throw new NotFoundError('Plan or route not found');
 
-    const refundAmount = proratedRideValue(Money.fromDecimal(plan.priceETB), plan.ridesIncluded, Money.fromDecimal(route.fare));
+    // FIX (API-002): Quota check + increment ridesUsed on release. Without this,
+    // a rider could release ALL seats, get a full refund, and STILL take all rides.
+    if (plan.ridesIncluded > 0) {
+      const ridesLeft = plan.ridesIncluded - sub.ridesUsed;
+      if (ridesLeft <= 0) {
+        throw new BadRequestError('Subscription ride quota exhausted — no seats available to release');
+      }
+    }
+
+    // FIX (PAY-005): use payment.amount (actual paid), not plan.priceETB (list).
+    let refundAmount: Money;
+    if (plan.ridesIncluded > 0) {
+      const [payment] = await db.select().from(schema.payments)
+        .where(and(eq(schema.payments.subscriptionId, sub.id), eq(schema.payments.status, 'completed')))
+        .orderBy(desc(schema.payments.createdAt)).limit(1);
+      if (payment) {
+        refundAmount = Money.fromDecimal(payment.amount).div(plan.ridesIncluded);
+      } else {
+        refundAmount = proratedRideValue(Money.fromDecimal(plan.priceETB), plan.ridesIncluded, Money.fromDecimal(route.fare));
+      }
+    } else {
+      refundAmount = proratedRideValue(Money.fromDecimal(plan.priceETB), plan.ridesIncluded, Money.fromDecimal(route.fare));
+    }
 
     try {
       const [release] = await db.insert(schema.seatReleases).values({
         subscriptionId: sub.id, riderId, routeId: sub.routeId, window: input.window,
         releaseDate: input.releaseDate, refundAmount: refundAmount.toString(),
-        expiresAt: addHours(new Date(`${input.releaseDate}T00:00:00Z`), 24 + SEAT_RELEASE_TTL_HOURS), // end of release day + TTL
+        expiresAt: addHours(new Date(`${input.releaseDate}T00:00:00Z`), 24 + SEAT_RELEASE_TTL_HOURS),
       }).returning();
+      // FIX (API-002): consume the released ride's quota.
+      await subscriptionRepo.incrementRidesUsed(db, sub.id);
       await db.insert(schema.outboxEvents).values({ channel: 'notification', payload: { type: 'seat_released', userId: riderId } });
       return release;
     } catch (e: any) {
@@ -50,7 +77,13 @@ export const marketplaceService = {
     const [release] = await db.select().from(schema.seatReleases).where(eq(schema.seatReleases.id, releaseId));
     if (!release || release.riderId !== riderId) throw new NotFoundError('Release not found');
     if (release.status !== 'open') throw new ConflictError('Release cannot be cancelled in its current state');
-    await db.update(schema.seatReleases).set({ status: 'cancelled', cancelledAt: new Date(), updatedAt: new Date() }).where(eq(schema.seatReleases.id, releaseId));
+    await db.transaction(async (tx) => {
+      await tx.update(schema.seatReleases).set({ status: 'cancelled', cancelledAt: new Date(), updatedAt: new Date() }).where(eq(schema.seatReleases.id, releaseId));
+      // FIX (API-002): restore the rider's quota consumed at release time.
+      if (release.subscriptionId) {
+        await subscriptionRepo.decrementRidesUsed(tx, release.subscriptionId);
+      }
+    });
   },
 
   /** Atomic claim via CAS update — race-free even with concurrent claimers. */

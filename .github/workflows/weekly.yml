@@ -17,8 +17,11 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
+        with: { bun-version: 1.1.42 }
       - run: bun install --frozen-lockfile
-      - run: bunx audit-ci --moderate
+      # FIX (INFRA-001): audit-ci reads package-lock.json by default; point it
+      # at the committed bun.lock instead so it actually has something to scan.
+      - run: bunx audit-ci --moderate --lockfile-directory=.
 
   dast:
     runs-on: ubuntu-latest

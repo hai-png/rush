@@ -60,11 +60,16 @@
 - Contractor documents: deleted (S3 + DB) after 7 years by archive-old-records cron
 
 ## DPA status
-DPAs are required for all subprocessors before onboarding:
-- [ ] Telebirr (payment processing)
-- [ ] Africa's Talking (SMS delivery)
-- [ ] Expo (push notifications)
-- [ ] Sentry (error monitoring)
-- [ ] Resend (email delivery)
+FIX (INFRA-005): DPAs are **to be signed before each subprocessor goes live**
+with Addis Ride production data. The template at
+`infra/compliance/dpa-template.md` is ready for execution; the checkboxes
+below track signature status. No subprocessor may receive production user
+data until its box is checked and the signed DPA is filed in the compliance
+drive.
+- [ ] Telebirr (payment processing) — to be signed before go-live
+- [ ] Africa's Talking (SMS delivery) — to be signed before go-live
+- [ ] Expo (push notifications) — to be signed before go-live
+- [ ] Sentry (error monitoring) — to be signed before go-live
+- [ ] Resend (email delivery) — to be signed before go-live
 
 Template: infra/compliance/dpa-template.md (updated with audit rights, sub-processor list, SCCs, and termination provisions — see COMPL-004)

@@ -16,8 +16,19 @@
 | Contractors | {{contractor_count}} | {{contractor_pii_categories}} |
 | Payments | {{payment_count}} | {{payment_pii_categories}} |
 
-## Notification to Ethiopian Communications Authority
-**Contact:** communications@eca.et (per Proclamation 1321/2024 Art. 30)
+## Notification to the Ethiopian Data Protection Authority
+**FIX (INFRA-006):** The previous template named the "Ethiopian Communications
+Authority" (ECA), which regulates *telecommunications* under the
+Communications Service Proclamation — not data protection. The correct
+supervisory authority for personal-data breaches is the **Ethiopian Data
+Protection Authority** designated under Proclamation 1321/2024. Verify the
+current authority name and contact via the Ministry of Innovation and
+Technology (MInT) before any notification — the authority structure may
+still be in transition post-proclamation. See
+`infra/incident-response.md` for the canonical escalation contact.
+
+**Authority:** Ethiopian Data Protection Authority (Proclamation 1321/2024, Art. 30)
+**Contact:** {{dpa_authority_email}} (verify via MInT before notification)
 
 Notification sent via: {{notification_method}}
 Notification timestamp: {{notification_sent_at}}

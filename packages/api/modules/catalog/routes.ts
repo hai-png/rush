@@ -1,3 +1,13 @@
+// CRITICAL FIX (SEC-001): commit 0efae30 deleted this file's import block
+// and the `catalogRoutes` declaration. Restored here in full.
+import { TypedOpenAPIHono } from '../../src/typed-hono';
+import { requireRole } from '../../src/middleware/auth';
+import { catalogService } from './service';
+import { CreateRouteInput, UpdateRouteInput, CreateShuttleInput, UpdateShuttleInput } from './types';
+
+export const catalogRoutes = new TypedOpenAPIHono();
+
+// Public
 catalogRoutes.get('/routes', async (c) => {
   // FIX (API-003): Use the shared parseLimit() helper (1..100 clamp) instead
   // of raw `Number(c.req.query('limit') ?? 20)`, which accepted ?limit=99999999
