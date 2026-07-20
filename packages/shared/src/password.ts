@@ -1,16 +1,6 @@
 import zxcvbn from 'zxcvbn';
 import { loadEnv } from './env';
 
-// Edge-runtime compatibility:
-//   - `bcryptjs` is loaded lazily via dynamic `import()` so it is NOT pulled
-//     into the client bundle. The functions that use it (`hashPassword`,
-//     `verifyPassword`) are server-only, but the pure helpers
-//     (`scorePasswordStrength`, `validatePasswordShape`) are safe to use
-//     client-side (e.g. in a signup form for live strength feedback).
-//   - `node:crypto` is replaced with Web Crypto (`crypto.subtle`) for the
-//     HIBP SHA-1 hash. Web Crypto is available in both Node.js (>= 15)
-//     and the Edge Runtime, so the same code works everywhere.
-
 const CONTROL_CHAR_RE = /[\x00-\x08\x0B\x0C\x0E-\x1F\x7F]/;
 
 const MIN_ZXCVBN_SCORE = 3;
@@ -43,7 +33,6 @@ export async function hashPassword(pw: string, cost?: number): Promise<string> {
   if (actualCost < 10 || actualCost > 15) {
     throw new Error(`Invalid bcrypt cost ${actualCost} — must be between 10 and 15`);
   }
-  // Lazy-load bcryptjs so it's never bundled into client code.
   const { default: bcrypt } = await import('bcryptjs');
   return bcrypt.hash(pw, actualCost);
 }
@@ -58,8 +47,7 @@ export async function verifyPassword(pw: string, hash: string): Promise<boolean>
   }
 }
 
-// Web Crypto-based SHA-1 for the HIBP k-anonymity check. Works on both
-// Node.js and Edge Runtime (no `node:crypto` dependency).
+// Web Crypto SHA-1 (works on Node and Edge).
 async function sha1HexUpper(input: string): Promise<string> {
   const data = new TextEncoder().encode(input);
   const digest = await crypto.subtle.digest('SHA-1', data);

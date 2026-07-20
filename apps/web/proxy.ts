@@ -1,10 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-// Next.js 16 renamed `middleware.ts` to `proxy.ts` (and the `middleware`
-// export to `proxy`). The file runs on the Edge Runtime, which does NOT
-// have Node.js globals like `Buffer` or `node:crypto`. Use Web APIs
-// (`btoa`, `crypto.getRandomValues`) instead.
-
+// Edge Runtime: no Node globals (Buffer/node:crypto); use Web APIs only.
 export function proxy(req: NextRequest) {
 
   if (req.nextUrl.pathname === '/telebirr-stub' &&
@@ -12,14 +8,9 @@ export function proxy(req: NextRequest) {
     return new NextResponse(null, { status: 404 });
   }
 
-  // Edge-runtime-safe nonce: `crypto.randomUUID()` returns a UUID string;
-  // base64-encode it with `btoa` (Web API) instead of `Buffer.from(...).toString('base64')`
-  // (Node.js, not available on Edge).
   const nonce = btoa(crypto.randomUUID());
 
-  // FE-001: build CSP connect-src from env vars instead of hardcoding Telebirr
-  // prod URL (which broke testbed checkout) and Sentry root URL (which is
-  // wrong — Sentry ingest uses <org>.ingest.sentry.io).
+  // FE-001: CSP connect-src built from env vars, not hardcoded hosts.
   const telebirrHost = process.env.NEXT_PUBLIC_TELEBIRR_ENV === 'production'
     ? 'https://superapp.ethiomobilemoney.et'
     : 'https://developerportal.ethiotelebirr.et';
