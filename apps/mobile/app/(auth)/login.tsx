@@ -15,18 +15,6 @@ export default function LoginScreen() {
   const [error, setError] = useState<string | null>(null);
   const setAuth = useAuthStore((s) => s.setAuth);
 
-  // FIX (FE-004): The previous implementation called
-  // POST /api/v1/auth/token with { phone, password } and treated any 401 as
-  // "invalid credentials" — but 2FA-enabled users (mandatory for
-  // platform_admin and corporate_admin) get 401 with
-  // error.code === 'TWO_FA_REQUIRED'. They could never log in. Now we:
-  //   1. Detect TWO_FA_REQUIRED on the initial credentials call → switch to
-  //      a 6-digit code-entry stage.
-  //   2. Re-submit /api/v1/auth/token with { phone, password, code }.
-  //   3. Wrong code → 401 (without TWO_FA_REQUIRED) → stay on 2FA stage,
-  //      show "Incorrect code".
-  //   4. 423 → account locked → switch to a locked stage with a clear
-  //      message and a "try again later" CTA (no more retries accepted).
   const submitCredentials = async () => {
     setLoading(true); setError(null);
     const res = await api.POST('/api/v1/auth/token', { body: { phone, password } }) as any;
@@ -61,7 +49,7 @@ export default function LoginScreen() {
         setStage('locked');
         return;
       }
-      // Wrong code → 401 (without TWO_FA_REQUIRED). Stay on 2FA stage.
+
       setError('Incorrect code — please try again.');
       return;
     }

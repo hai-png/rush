@@ -22,11 +22,6 @@ const ROLE_VARIANT: Record<string, 'default' | 'secondary' | 'success' | 'warnin
   platform_admin: 'destructive',
 };
 
-/**
- * Admin user management page. Lists all users with search, allows suspending /
- * reactivating accounts, and changing roles. All actions go through the existing
- * PATCH /api/v1/admin/users/:id endpoint.
- */
 export default function AdminUsersPage() {
   const client = useApiClient();
   const qc = useQueryClient();
@@ -64,8 +59,7 @@ export default function AdminUsersPage() {
               Suspend
             </Button>
           ) : (
-            // FIX (WEB-003 / UX-007): Reactivate now sends 'reactivate' action.
-            // Server support added in admin/routes.ts + admin/service.ts.
+
             <Button size="sm"
               loading={updateUser.isPending && updateUser.variables?.id === u.id}
               onClick={() => updateUser.mutate({ id: u.id, action: 'reactivate' })}>

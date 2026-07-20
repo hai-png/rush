@@ -48,8 +48,7 @@ export default function AdminFaqPage() {
             <div><p className="font-medium">{a.question}</p><p className="text-sm text-muted-foreground">{a.answer}</p></div>
             <button
               onClick={() => {
-                // Confirm before delete — the previous implementation
-                // deleted on a single click with no confirmation dialog.
+
                 if (window.confirm(`Delete FAQ article "${a.question}"?`)) {
                   remove.mutate(a.id);
                 }

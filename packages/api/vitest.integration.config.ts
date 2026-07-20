@@ -1,21 +1,13 @@
 import { defineConfig } from 'vitest/config';
 import { resolve } from 'node:path';
 
-/**
- * Integration test config. Uses a longer test timeout (60s) for testcontainer
- * startup, and resolves @addis/* workspace imports via the repo's tsconfig
- * paths.
- *
- * The default vitest.config.ts runs unit tests (mocked DB); this config runs
- * integration tests against a real Postgres testcontainer.
- */
 export default defineConfig({
   test: {
     environment: 'node',
     include: ['**/*.integration.test.ts'],
     testTimeout: 60_000,
     hookTimeout: 60_000,
-    pool: 'forks', // testcontainers needs fork pool (not threads)
+    pool: 'forks',
   },
   resolve: {
     alias: {

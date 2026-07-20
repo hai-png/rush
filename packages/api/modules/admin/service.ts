@@ -18,15 +18,12 @@ export const adminService = {
 
   async listUsers(limit: number, search?: string) {
     const { ilike, or } = await import('drizzle-orm');
-    // Escape LIKE wildcards in the search input so a search for '%' doesn't
-    // match everything. The previous implementation interpolated raw search
-    // into `%${search}%` — a search for '%' returned all rows, '_' matched
-    // any single char, etc. Now we escape them.
+
     const escapeLike = (s: string) => s.replace(/[%_\\]/g, c => `\\${c}`);
     const escaped = search ? escapeLike(search) : undefined;
     const where = escaped ? or(ilike(schema.users.name, `%${escaped}%`), ilike(schema.users.phone, `%${escaped}%`)) : undefined;
     const rows = await db.select().from(schema.users).where(where).limit(limit);
-    // Never return credential material to the admin UI, even to platform_admin.
+
     return rows.map(({ passwordHash: _ph, twoFactorSecret: _tfs, ...safe }) => safe);
   },
 
@@ -42,20 +39,11 @@ export const adminService = {
     });
   },
 
-  /**
-   * Reactivate a previously-suspended user. FIX (UX-007): The admin UI had a
-   * Reactivate button that sent `action: 'reactivate'`, but the server didn't
-   * support it — the Zod enum only allowed 'suspend' and 'change_role'. This
-   * method sets isActive=true. We do NOT bump tokenVersion (the user's
-   * existing sessions are still invalid — they must log in fresh). We do NOT
-   * restore deleted sessions (that would be a security hole — the sessions
-   * were deleted on suspension for a reason).
-   */
   async reactivateUser(adminId: string, userId: string, ipAddress?: string) {
     return db.transaction(async (tx) => {
       const [before] = await tx.select().from(schema.users).where(eq(schema.users.id, userId));
       if (!before) throw new NotFoundError('User not found');
-      if (before.isActive) return before; // already active — idempotent no-op
+      if (before.isActive) return before;
       const [after] = await tx.update(schema.users).set({ isActive: true, updatedAt: new Date() }).where(eq(schema.users.id, userId)).returning();
       await writeAudit(tx as any, { actorId: adminId, action: 'user.reactivated', entityType: 'user', entityId: userId, before, after, ipAddress });
       return after;
@@ -64,16 +52,9 @@ export const adminService = {
 
   async changeRole(adminId: string, userId: string, role: string, ipAddress?: string) {
     return db.transaction(async (tx) => {
-      // Self-protection: an admin changing their own role could lock
-      // themselves out of the admin UI (e.g. demoting self to rider).
+
       if (adminId === userId) throw new ForbiddenError('Cannot change your own role');
-      // H15 fix: forbid escalation to platform_admin. A compromised platform_admin
-      // could otherwise grant platform_admin to any user (or to a second account
-      // they control), establishing persistent backdoor access. Promotions to
-      // platform_admin should require a separate break-glass flow (out of scope
-      // here) — the day-to-day changeRole route must refuse this target role.
-      // Demotions FROM platform_admin are allowed (the self-protection check
-      // above blocks demoting yourself; demoting another admin is fine).
+
       if (role === 'platform_admin') {
         throw new ForbiddenError('Cannot promote to platform_admin via this endpoint — use the break-glass flow');
       }
@@ -85,22 +66,6 @@ export const adminService = {
     });
   },
 
-  /**
-   * Impersonation mints a real session token for another user and is one of the most
-   * dangerous admin capabilities in the system, so it gets two extra checks beyond the
-   * `requireRole('platform_admin')` already applied at the router level:
-   *   1. The calling admin must actually have 2FA enabled — enforced in
-   *      requireRole via TWO_FA_REQUIRED_ROLES (was previously just a
-   *      comment that nothing enforced).
-   *   2. A platform_admin may never impersonate another platform_admin — otherwise a single
-   *      compromised admin account is a path to full control of every other admin account.
-   *   3. The session row is now marked as an impersonation session
-   *      (impersonatedBy column on the sessions table, when present), so
-   *      the audit trail shows the admin's identity even after the JWT
-   *      expires. Previously the impersonatedBy claim was in the JWT but
-   *      never propagated to the session, making impersonation invisible
-   *      in /sessions listings.
-   */
   async impersonate(adminId: string, targetUserId: string, ipAddress?: string) {
     const [admin] = await db.select().from(schema.users).where(eq(schema.users.id, adminId));
     if (!admin?.twoFactorEnabled) throw new ForbiddenError('Impersonation requires the calling admin to have 2FA enabled');

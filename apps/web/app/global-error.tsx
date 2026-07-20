@@ -4,11 +4,6 @@ import * as Sentry from '@sentry/nextjs';
 import { Button } from '@addis/ui';
 import { AlertTriangle } from 'lucide-react';
 
-/**
- * Global error boundary. Catches unhandled errors in any server component
- * or route handler that isn't caught by a more specific error.tsx (e.g. the
- * one in dashboard/rider/). Reports to Sentry and offers a reset button.
- */
 export default function GlobalError({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
   useEffect(() => {
     Sentry.captureException(error);

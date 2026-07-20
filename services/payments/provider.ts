@@ -10,9 +10,7 @@ export type CheckoutResult =
   | { status: 'manual'; instructions: BankTransferInstructions };
 export type PaymentStatusResult = {
   status: 'pending' | 'completed' | 'failed';
-  /** The amount the provider reports was actually paid. Optional because not
-   *  all providers expose this on every status query — when absent, the caller
-   *  (settlePayment) records an audit warning but still proceeds. */
+
   amount?: Money | undefined;
   raw?: unknown | undefined;
 };

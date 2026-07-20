@@ -1,10 +1,6 @@
 import { redirect } from 'next/navigation';
 import { auth } from '@/auth';
 
-/**
- * Corporate dashboard layout. Guards /dashboard/corporate/* — only
- * authenticated users with role='corporate_admin' can access.
- */
 export default async function CorporateDashboardLayout({ children }: { children: React.ReactNode }) {
   const session = await auth();
   if (!session) redirect('/login?next=/dashboard/corporate');

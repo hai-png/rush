@@ -8,16 +8,6 @@ import { NotFoundError } from '@addis/shared';
 
 export const marketplaceRoutes = new TypedOpenAPIHono();
 
-/**
- * Resolve the caller's riderProfile.id from their session.userId.
- *
- * The schema FKs `seatReleases.riderId`, `seatClaims.riderId`, `payments.riderId`,
- * and `rides.riderId` all target `riderProfiles.id`, but the session only
- * contains `users.id`. The previous routes passed `session.userId` straight
- * through — at best an FK violation on insert, at worst (if FK enforcement
- * was disabled) the row was stored with the wrong identifier and could never
- * be found again by queries that correctly used `profile.id`.
- */
 async function riderProfileIdFor(userId: string): Promise<string> {
   const [profile] = await db.select().from(schema.riderProfiles).where(eq(schema.riderProfiles.userId, userId));
   if (!profile) throw new NotFoundError('Rider profile not found');
@@ -33,28 +23,18 @@ marketplaceRoutes.get('/seat-releases', requireRole('rider'), async (c) => {
 });
 marketplaceRoutes.post('/seat-releases', requireRole('rider'), async (c) => {
   const body = CreateSeatReleaseInput.parse(await c.req.json());
-  // Use the rider's profile.id, not their session.userId.
+
   const riderId = await riderProfileIdFor(c.get('session').userId);
   const row = await marketplaceService.release(riderId, body);
   return c.json({ data: row }, 201);
 });
 
-/**
- * GET /seat-releases/:id — ownership check.
- *
- * The previous implementation returned ANY seat release by ID, including
- * other riders' releases (with refundAmount, subscriptionId, riderId).
- * Financial data leak via IDOR. Now: the caller either owns the release,
- * OR (for the marketplace list) we return only the public fields.
- */
 marketplaceRoutes.get('/seat-releases/:id', requireRole('rider'), async (c) => {
   const [row] = await db.select().from(schema.seatReleases).where(eq(schema.seatReleases.id, c.req.param('id')));
   if (!row) throw new NotFoundError('Release not found');
   const riderId = await riderProfileIdFor(c.get('session').userId);
   if (row.riderId !== riderId) {
-    // Marketplace releases are listed publicly via GET /seat-releases, but
-    // individual releases should only be visible to the owner. Return 404
-    // (not 403) to avoid confirming existence to non-owners.
+
     throw new NotFoundError('Release not found');
   }
   return c.json({ data: row });

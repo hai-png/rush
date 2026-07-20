@@ -1,6 +1,3 @@
-// CRITICAL FIX (SEC-001): commit 0efae30 deleted this file's import block,
-// `corporateRoutes` declaration, the corporate-signup route, and the
-// UpdateCorporateInput schema. Restored here in full.
 import { TypedOpenAPIHono } from '../../src/typed-hono';
 import { z } from 'zod';
 import { requireRole } from '../../src/middleware/auth';
@@ -33,13 +30,6 @@ corporateRoutes.patch('/', requireRole('corporate_admin'), async (c) => c.json({
 
 corporateRoutes.get('/members', requireRole('corporate_admin'), async (c) => c.json({ data: await corporateService.listMembers(c.get('session').userId) }));
 
-// Strict schema for member updates — the previous route passed raw JSON
-// straight to the service's `.set({ ...input })`, a mass-assignment
-// vulnerability. A corporate admin could send
-// `{ corporateId: "other-corp", userId: "attacker-id", ridesUsedThisMonth: 0 }`
-// and the service would write all of it — moving a member to a different
-// corporate, changing the user pointer, or resetting ride counts. Now only
-// approvalStatus and isActive are accepted.
 const UpdateMemberInput = z.object({
   approvalStatus: z.enum(['approved', 'rejected', 'pending']).optional(),
   isActive: z.boolean().optional(),
@@ -54,15 +44,14 @@ corporateRoutes.delete('/members/:id', requireRole('corporate_admin'), async (c)
 corporateRoutes.post('/invites', requireRole('corporate_admin'), async (c) => c.json({ data: await corporateService.generateInvite(c.get('session').userId) }));
 
 corporateRoutes.post('/onboard', requireRole('rider'), async (c) => {
-  // FIX (SEC-004): legacy raw-code path removed — only signed invite accepted.
+
   const body = z.object({
     invite: z.string(),
     employeeId: z.string(),
   }).parse(await c.req.json());
 
   let code: string;
-  // H41: verify the signed invite token (signature + expiry)
-  // FIX (SEC-008 / ARCH-015): use loadEnv() so the secret is validated.
+
   const { timingSafeEqual, createHmac } = await import('node:crypto');
   const { loadEnv } = await import('@addis/shared');
   const env = loadEnv();

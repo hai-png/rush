@@ -5,18 +5,6 @@ import { useRouter } from 'next/navigation';
 import { CheckCircle2, Loader2 } from 'lucide-react';
 import { Button } from '@addis/ui';
 
-/**
- * Telebirr redirect-back URL (TELEBIRR_REDIRECT_URL).
- *
- * Telebirr redirects here after the user completes (or cancels) the H5 checkout.
- * The payment itself is confirmed asynchronously via the /webhooks/telebirr/notify
- * webhook — this page just confirms to the user that they can return to the
- * dashboard and that their subscription will activate once the webhook fires.
- *
- * We poll /api/v1/dashboard/rider for up to 30 seconds; if the activeSubscription
- * appears, we show a success state. If not, we show a "still processing" state
- * and let the user go to their dashboard to check later.
- */
 export default function CheckoutCompletePage() {
   const params = useSearchParams();
   const router = useRouter();
@@ -25,15 +13,11 @@ export default function CheckoutCompletePage() {
 
   useEffect(() => {
     let attempts = 0;
-    const maxAttempts = 15; // 15 polls × 2s = 30s max
+    const maxAttempts = 15;
     const interval = setInterval(async () => {
       attempts++;
       try {
-        // The web app uses NextAuth cookie-based auth — no explicit
-        // Authorization header needed (cookies are sent automatically for
-        // same-origin requests). The original implementation sent an empty
-        // Bearer token via localStorage.getItem('addisride.accessToken'),
-        // which is a mobile-app pattern that doesn't apply to the web app.
+
         const res = await fetch('/api/v1/dashboard/rider', { credentials: 'include' });
         if (res.ok) {
           const json = await res.json();
@@ -44,11 +28,11 @@ export default function CheckoutCompletePage() {
           }
         }
       } catch {
-        // ignore — keep polling
+
       }
       if (attempts >= maxAttempts) {
         clearInterval(interval);
-        // Stay in 'processing' — the webhook may still fire.
+
       }
     }, 2000);
     return () => clearInterval(interval);

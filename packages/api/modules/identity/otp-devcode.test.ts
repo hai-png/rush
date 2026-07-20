@@ -1,15 +1,8 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
-/**
- * OTP devCode gating tests. Covers the C7 follow-up:
- *   - devCode is undefined by default (even in non-production)
- *   - devCode is returned only when ALLOW_DEV_OTP=1 or ALLOW_DEV_OTP=true
- *   - devCode is undefined when ALLOW_DEV_OTP is set to any other value
- */
-
 vi.mock('@addis/db', () => ({
   db: {
-    // Chain: db.update(table).set(...).where(...) — return an object with .set() that returns .where()
+
     update: vi.fn(() => ({ set: vi.fn(() => ({ where: vi.fn() })) })),
     insert: vi.fn(() => ({ values: vi.fn() })),
   },
@@ -26,8 +19,7 @@ vi.mock('../../infra/redis', () => ({
 }));
 
 vi.mock('@addis/sms', () => ({
-  // The SMS provider always reports success in tests; the devCode gating logic
-  // is independent of whether SMS delivery actually succeeded.
+
   smsProvider: { send: vi.fn(async () => true) },
 }));
 
@@ -36,9 +28,9 @@ describe('otpService.send — devCode gating', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
-    // Default: no ALLOW_DEV_OTP set
+
     delete process.env.ALLOW_DEV_OTP;
-    // Use staging so the "production + AFRICAS_TALKING_API_KEY" 503 path doesn't fire
+
     process.env.NODE_ENV = 'staging';
     delete process.env.AFRICAS_TALKING_API_KEY;
   });

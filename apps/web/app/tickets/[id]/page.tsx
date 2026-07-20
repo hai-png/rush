@@ -15,7 +15,7 @@ export default function TicketDetailPage() {
   const { data: messages } = useQuery({
     queryKey: ['ticket-messages', id],
     queryFn: async () => (await client.GET('/api/v1/tickets/{id}/messages', { params: { path: { id } } })).data,
-    refetchInterval: 15_000, // polling per §15
+    refetchInterval: 15_000,
   });
 
   const reply = useMutation({

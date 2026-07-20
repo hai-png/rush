@@ -1,11 +1,6 @@
 import { redirect } from 'next/navigation';
 import { auth } from '@/auth';
 
-/**
- * Rider dashboard layout. Guards /dashboard/rider/* — only authenticated users
- * with role='rider' can access. Contractors and corporate_admins are redirected
- * to their own dashboards.
- */
 export default async function RiderDashboardLayout({ children }: { children: React.ReactNode }) {
   const session = await auth();
   if (!session) redirect('/login?next=/dashboard/rider');

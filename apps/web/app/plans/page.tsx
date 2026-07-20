@@ -5,15 +5,6 @@ import { Button, Card, CardContent } from '@addis/ui';
 import { useApiClient } from '@/lib/sdk';
 import { PlanPickerClient } from './plan-picker-client';
 
-/**
- * Plan picker page. Lists available subscription plans, lets the rider select
- * one + a route, then navigates to /checkout with the selection.
- *
- * The presentational layer lives in `plan-picker-client.tsx` (extracted in
- * TEST-001 so it can be unit-tested in isolation); this wrapper handles data
- * fetching + loading + error states and forwards the loaded data to the
- * client component.
- */
 export default function PlansPage() {
   return <PlansClient />;
 }
@@ -24,17 +15,11 @@ function PlansClient() {
   const [selectedPlan] = useState<string | null>(params.get('planId'));
   const [selectedRoute] = useState<string | null>(params.get('routeId'));
 
-  // Inline data fetching — in a production app this would be useQuery hooks,
-  // but for a single-page picker this keeps the component self-contained.
   const [plans, setPlans] = useState<any[] | null>(null);
   const [routes, setRoutes] = useState<any[] | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(false);
 
-  // FIX (WEB-002 / UX-005): useEffect with cleanup + error state. The
-  // previous useState-initializer pattern fired twice in Strict Mode and
-  // had no error handling. Now: on fetch failure, set `error=true` so the
-  // render shows a retry button instead of an empty grid.
   useEffect(() => {
     let cancelled = false;
     (async () => {

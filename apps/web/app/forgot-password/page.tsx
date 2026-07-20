@@ -7,8 +7,6 @@ import { useRouter } from 'next/navigation';
 import { Button, Input, Label, FieldError, PhoneInput, useToast } from '@addis/ui';
 import { useApiClient } from '@/lib/sdk';
 
-// Validate OTP as 6 digits (not just any 6-char string) — the previous
-// schema accepted 'abcdef' as a valid code, deferring only to the API.
 const PhoneSchema = z.object({ phone: z.string().regex(/^\+251(9|7)\d{8}$/) });
 const ResetSchema = z.object({
   code: z.string().length(6).regex(/^\d{6}$/, 'Code must be 6 digits'),
@@ -30,9 +28,7 @@ export default function ForgotPasswordPage() {
     setServerError(null);
     const { error } = await client.POST('/api/v1/auth/password/reset', { body: { phone: data.phone } });
     if (error) {
-      // Don't transition to reset stage if the API errored — the previous
-      // implementation always transitioned, telling the user "code sent to
-      // {phone}" even if the phone didn't exist, enabling user enumeration.
+
       setServerError(error.message ?? 'Could not send code');
       return;
     }

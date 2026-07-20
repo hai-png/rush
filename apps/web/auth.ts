@@ -3,31 +3,13 @@ import Credentials from 'next-auth/providers/credentials';
 import { identityService } from '@addis/api/modules/identity/service';
 import { TwoFactorRequiredError } from '@addis/shared';
 
-/**
- * NextAuth Credentials provider, bridged to the API's identityService.login().
- *
- * Two-factor auth: identityService.login() throws TwoFactorRequiredError when the user
- * has 2FA enabled (mandatory for platform_admin and corporate_admin per
- * TWO_FA_REQUIRED_ROLES). Previously this catch block swallowed that error and
- * returned null, so 2FA-enabled users saw a generic "Invalid credentials"
- * message and could not log in via the web app at all.
- *
- * We now surface TwoFactorRequiredError back to the client via a stable error
- * code on the signIn() result (`error: 'TwoFactorRequired'`) so the login page
- * can redirect to a 2FA-code entry step. The actual code is then passed back
- * through `credentials.code` on the second signIn() call, which
- * identityService.login() forwards to otplib's authenticator.check().
- */
 export const { handlers, auth, signIn, signOut } = NextAuth({
   session: { strategy: 'jwt', maxAge: 30 * 24 * 3600 },
   providers: [
     Credentials({
       credentials: { phone: {}, password: {}, code: {} },
       async authorize(creds, req) {
-        // FIX (META-013): Use the rightmost X-Forwarded-For entry (set by
-        // our trusted proxy) instead of the raw header (which is the whole
-        // comma-separated list, or the leftmost attacker-controlled entry).
-        // Mirrors the logic in packages/api/src/ip.ts clientIp().
+
         const xff = req.headers.get('x-forwarded-for');
         let ip: string | undefined;
         if (xff) {
@@ -44,18 +26,14 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
             ip,
             code,
           );
-          // Store our own signed JWT as the NextAuth token payload — single
-          // source of truth. The accessToken is the API's jose-signed JWT;
-          // getServerApiClient reads it back via auth().
+
           return { id: user.id, role: user.role, phone: user.phone, accessToken };
         } catch (err) {
           if (err instanceof TwoFactorRequiredError) {
-            // Throwing here lets NextAuth surface the specific error code to
-            // the client via
-            // `signIn('credentials', { ..., redirect: false }).error === 'TwoFactorRequired'`.
+
             throw new Error('TwoFactorRequired');
           }
-          return null; // any other auth failure → generic "Invalid credentials"
+          return null;
         }
       },
     }),

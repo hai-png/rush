@@ -3,18 +3,6 @@ import { useSearchParams } from 'next/navigation';
 import { Card, CardContent, Button } from '@addis/ui';
 import { Landmark, Copy, ArrowLeft } from 'lucide-react';
 
-/**
- * CBE bank transfer instructions page.
- *
- * After a rider selects CBE Birr as their payment method, the API returns
- * `checkout.status === 'manual'` with bank transfer instructions. The checkout
- * page redirects here with the reference + amount as query params so the rider
- * can see exactly what to transfer and the reference code to use.
- *
- * CBE has no live webhook in v1 — an admin manually verifies the bank transfer
- * via /admin/payments and clicks "Verify manually" once the funds appear in the
- * bank statement.
- */
 export default function CbeInstructionsPage() {
   const params = useSearchParams();
   const reference = params.get('ref') ?? '';

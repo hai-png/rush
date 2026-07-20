@@ -1,31 +1,19 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-/**
- * Two-factor login flow tests. Covers the C1 fix:
- *   - identityService.login throws TwoFactorRequiredError when user.twoFactorEnabled is true
- *     and no twoFactorCode is supplied
- *   - identityService.login succeeds when the correct 6-digit code is supplied
- *   - identityService.login throws UnauthorizedError when an incorrect code is supplied
- *
- * We mock @addis/db to return a user with twoFactorEnabled=true and a known secret,
- * then exercise identityService.login() directly.
- */
-
 vi.mock('@addis/db', () => {
   const user = {
     id: 'user-admin-1',
     phone: '+251911100001',
-    passwordHash: '$2a$12$mockhash', // verifyPassword is mocked to return true
+    passwordHash: '$2a$12$mockhash',
     role: 'platform_admin',
     isActive: true,
     deletedAt: null,
     twoFactorEnabled: true,
-    twoFactorSecret: 'JBSWY3DPEHPK3PXP', // well-known test TOTP secret
+    twoFactorSecret: 'JBSWY3DPEHPK3PXP',
     tokenVersion: 0,
     tosVersion: 'v2_0',
   };
-  // insert().values() returns a thenable that also has .catch() — mock it as a
-  // promise so the audit-outbox inserts in login() don't crash.
+
   const insertChain = {
     values: vi.fn(() => Promise.resolve()),
   };
@@ -46,8 +34,7 @@ vi.mock('@addis/shared', async () => {
   const actual = await vi.importActual('@addis/shared');
   return {
     ...actual,
-    // verifyPassword always returns true for these tests — the password itself isn't
-    // what we're exercising, only the 2FA branching logic on top of a valid password.
+
     verifyPassword: vi.fn(async () => true),
     hashPassword: vi.fn(async (pw: string) => `mock-hash-of-${pw}`),
     isPasswordBreached: vi.fn(async () => false),
@@ -70,7 +57,7 @@ vi.mock('jose', () => ({
 vi.mock('otplib', () => ({
   authenticator: {
     check: vi.fn((code: string, secret: string) => {
-      // For the test secret 'JBSWY3DPEHPK3PXP', accept code '123456' as valid, reject all others.
+
       return code === '123456' && secret === 'JBSWY3DPEHPK3PXP';
     }),
     generateSecret: vi.fn(() => 'NEWSECRET'),
@@ -106,7 +93,7 @@ describe('identityService.login 2FA flow', () => {
 
 describe('identityService.login with 2FA disabled', () => {
   it('succeeds without a code when the user does not have 2FA enabled', async () => {
-    // Re-mock @addis/db for this test to return a user with twoFactorEnabled=false
+
     vi.resetModules();
     vi.doMock('@addis/db', () => ({
       db: {

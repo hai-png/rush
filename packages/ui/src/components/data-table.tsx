@@ -6,7 +6,7 @@ export type Column<T> = {
   key: keyof T & string;
   header: string;
   render?: (row: T) => React.ReactNode;
-  /** When true, the column header renders as a clickable sort toggle. */
+
   sortable?: boolean;
 };
 
@@ -15,7 +15,7 @@ export function DataTable<T extends { id: string }>({
 }: {
   columns: Column<T>[]; rows: T[]; loading?: boolean;
   cursor?: string; onNextPage?: () => void; onPrevPage?: () => void; hasPrev?: boolean;
-  /** Click handler for sortable column headers. Receives the column key. */
+
   onSort?: (key: string) => void;
 }) {
   return (
@@ -25,11 +25,7 @@ export function DataTable<T extends { id: string }>({
           <tr>
             {columns.map((col) => {
               const sortable = !!col.sortable && !!onSort;
-              // The header text is placed directly inside the <th> (no wrapping
-              // <span> or <button>) so `getByText('Name')` in tests matches a
-              // single element. The whole <th> is clickable; the ArrowUpDown
-              // icon is a sibling SVG with no text content, so it doesn't
-              // create a second match.
+
               return (
                 <th
                   key={col.key}

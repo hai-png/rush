@@ -6,10 +6,6 @@ vi.mock('@addis/db', () => {
 });
 vi.mock('@addis/payments', () => ({ getPaymentProvider: () => ({ createCheckout: vi.fn().mockResolvedValue({ status: 'checkout', checkoutUrl: 'https://x', prepayId: 'p1' }) }) }));
 
-// FIX (TEST-001 / marketplace mock): marketplaceService calls `loadEnv()` at
-// module-load time. Even though the root vitest.setup.ts sets all required
-// env vars, stub loadEnv explicitly so this test is hermetic — it doesn't
-// depend on the root setup file running before this test imports the service.
 vi.mock('@addis/shared', async (importOriginal) => {
   const actual = await importOriginal() as typeof import('@addis/shared');
   return {

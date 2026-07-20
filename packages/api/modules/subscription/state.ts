@@ -13,17 +13,6 @@ export const subscriptionState = defineStateMachine<SubscriptionStatus>({
   ],
 });
 
-/**
- * Applies a transition to a row inside an existing transaction.
- *
- * The previous implementation did SELECT-then-UPDATE with no CAS guard —
- * two concurrent `cancel` calls both SELECT (see `active`), both resolve
- * to `cancelled`, both UPDATE. Worse, if `payment.settled` and `cancel`
- * raced, the cancel could overwrite the settle, losing the payment
- * settlement. Now the UPDATE has `WHERE id = ? AND status = ?` (CAS), so
- * only the first transition wins; the second throws InvalidTransitionError
- * because the row's status has already moved.
- */
 export async function transitionSubscription(
   tx: import('@addis/db').DbOrTx, subscriptionId: string, event: string,
 ) {
@@ -32,20 +21,15 @@ export async function transitionSubscription(
   if (!row) throw new Error(`Subscription ${subscriptionId} not found`);
   const t = subscriptionState.resolve(row.status, event);
 
-  // CAS update: only update if the status hasn't changed since we read it.
-  // If zero rows are updated, another transaction beat us — re-read and
-  // throw InvalidTransitionError for the new state.
   const updated = await tx.update(schema.subscriptions)
     .set({ status: t.to, updatedAt: new Date() })
     .where(and(eq(schema.subscriptions.id, subscriptionId), eq(schema.subscriptions.status, row.status)))
     .returning();
   if (updated.length === 0) {
-    // Someone else transitioned this subscription concurrently. Re-read to
-    // throw an accurate error.
+
     const [fresh] = await tx.select().from(schema.subscriptions).where(eq(schema.subscriptions.id, subscriptionId));
     if (fresh) {
-      // Re-resolve against the new state — will throw InvalidTransitionError
-      // if the event is now illegal, which is the correct behavior.
+
       subscriptionState.resolve(fresh.status, event);
     }
     throw new Error(`Subscription ${subscriptionId} transition lost to concurrent writer`);

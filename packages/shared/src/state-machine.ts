@@ -11,7 +11,7 @@ export function defineStateMachine<S extends string>(def: { initial: S; transiti
   return {
     initial: def.initial,
     transitions: def.transitions,
-    /** Pure: resolve next state for (current, event); throws if illegal. */
+
     resolve(current: S, event: string): Transition<S> {
       const t = def.transitions.find(t => t.from === current && t.event === event);
       if (!t) throw new InvalidTransitionError(current, event);

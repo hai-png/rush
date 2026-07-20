@@ -1,26 +1,8 @@
 import * as Sentry from '@sentry/node';
 import { loadEnv } from '@addis/shared';
 
-loadEnv(); // fail-fast on boot
+loadEnv();
 
-/**
- * FIX (INFRA-011): the previous init had no PII controls. The worker handles
- * outbox events whose payloads routinely include phone numbers, email
- * addresses, payment references, and (for the audit channel) actor IDs +
- * entity IDs. Sentry's default auto-capture would ship all of that to the
- * Sentry servers — a GDPR / Proclamation 1321/2024 compliance problem on its
- * own (subprocessor transferring PII without a DPA), and a credential leak
- * risk if any payload ever includes a token (it shouldn't, but the scrubber
- * is the defense-in-depth).
- *
- * sendDefaultPii:false disables auto-IP capture and user-agent IP collection.
- * The beforeSend hook additionally scrubs:
- *   - request.headers.authorization / cookies / body
- *   - any field whose key matches /phone|email|password|token/i
- * See apps/web/instrumentation.ts for the full rationale (the same scrubber
- * is used in both runtimes; it's duplicated here rather than shared because
- * the worker and web have separate @sentry SDK imports and bundlers).
- */
 Sentry.init({
   dsn: process.env.SENTRY_DSN,
   environment: process.env.NODE_ENV,

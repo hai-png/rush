@@ -2,10 +2,6 @@ import Link from 'next/link';
 import { Button } from '@addis/ui';
 import { Compass } from 'lucide-react';
 
-/**
- * Global 404 page. Rendered by Next.js when no route matches the URL.
- * Kept intentionally minimal — the design system handles the visual chrome.
- */
 export default function NotFound() {
   return (
     <div className="min-h-screen flex items-center justify-center px-6">

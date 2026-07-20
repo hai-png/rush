@@ -1,5 +1,3 @@
-// CRITICAL FIX (SEC-001): commit 0efae30 deleted this file's import block
-// and the `catalogRoutes` declaration. Restored here in full.
 import { TypedOpenAPIHono } from '../../src/typed-hono';
 import { requireRole } from '../../src/middleware/auth';
 import { catalogService } from './service';
@@ -7,11 +5,8 @@ import { CreateRouteInput, UpdateRouteInput, CreateShuttleInput, UpdateShuttleIn
 
 export const catalogRoutes = new TypedOpenAPIHono();
 
-// Public
 catalogRoutes.get('/routes', async (c) => {
-  // FIX (API-003): Use the shared parseLimit() helper (1..100 clamp) instead
-  // of raw `Number(c.req.query('limit') ?? 20)`, which accepted ?limit=99999999
-  // and forced a huge table scan.
+
   const { parseLimit } = await import('../../src/limit');
   const limit = parseLimit(c.req.query('limit'));
   const { rows, cursor } = await catalogService.listRoutes(limit, c.req.query('cursor'));
@@ -20,7 +15,6 @@ catalogRoutes.get('/routes', async (c) => {
 catalogRoutes.get('/routes/:id', async (c) => c.json({ data: await catalogService.getRoute(c.req.param('id')) }));
 catalogRoutes.get('/plans', async (c) => c.json({ data: await catalogService.listPlans() }));
 
-// Admin — mounted at /api/v1/admin/*
 export const adminCatalogRoutes = new TypedOpenAPIHono();
 adminCatalogRoutes.use('*', requireRole('platform_admin'));
 

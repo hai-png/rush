@@ -2,26 +2,13 @@ import { sql } from 'drizzle-orm';
 import { db, schema, type Db } from '@addis/db';
 import { writeAudit } from '../modules/admin/audit';
 
-/**
- * Shared cron-job helper. Previously the cron routes (packages/api/modules/cron/routes.ts)
- * and the worker (apps/worker/src/index.ts) had two independent copies of the same
- * `withLock(name, fn)` helper, which the worker's own code comment acknowledged "can
- * drift — worth consolidating into a shared helper."
- *
- * Both paths now import this single implementation. The lock name is the same across
- * both, so whichever deployment runs the job first wins the advisory lock — running
- * both against the same database is safe (the loser just returns `{ skipped: true }`).
- *
- * Audit entries are written via the same `writeAudit()` writer as everything else, so
- * the hash-chained audit log stays consistent regardless of which path ran the job.
- */
 export async function withLock<T>(name: string, fn: () => Promise<T>): Promise<
   | { ok: true; result: T; at: string }
   | { skipped: true; reason: 'lock-held' }
 > {
   return db.transaction(async (tx) => {
     const lockResult = await tx.execute(sql`select pg_try_advisory_xact_lock(hashtext(${name})) as locked`);
-    // postgres-js returns an array-like with rows; cast to extract the locked boolean.
+
     const rows = lockResult as unknown as Array<{ locked?: boolean }>;
     if (!rows[0]?.locked) {
       return { skipped: true, reason: 'lock-held' as const };
@@ -37,25 +24,18 @@ export async function withLock<T>(name: string, fn: () => Promise<T>): Promise<
   });
 }
 
-/**
- * The set of cron jobs that both the HTTP routes and the worker intervals run.
- * Each entry is the lock name (used by withLock) and the function to execute.
- *
- * Both packages/api/modules/cron/routes.ts and apps/worker/src/index.ts import
- * this map so a new job added here is automatically picked up by both paths.
- */
 export const CRON_JOBS: ReadonlyArray<{
   name: string;
-  /** HTTP route segment, e.g. 'expire-subscriptions' → POST /api/v1/cron/expire-subscriptions */
+
   route: string;
-  /** Worker setInterval period in milliseconds. */
+
   intervalMs: number;
   run: () => Promise<unknown>;
 }> = [
   {
     name: 'expire-subscriptions',
     route: 'expire-subscriptions',
-    intervalMs: 60 * 60_000, // 1 hour
+    intervalMs: 60 * 60_000,
     run: async () => {
       const { subscriptionRepo } = await import('../modules/subscription/repository');
       return subscriptionRepo.expireDue();
@@ -64,12 +44,10 @@ export const CRON_JOBS: ReadonlyArray<{
   {
     name: 'expire-seat-releases',
     route: 'expire-seat-releases',
-    intervalMs: 15 * 60_000, // 15 min
+    intervalMs: 15 * 60_000,
     run: async () => {
       const { and, eq, lt } = await import('drizzle-orm');
-      // Fire per-release notifications — the seat_release_expired notification
-      // type exists in the schema and has a template, but no code dispatched it
-      // in the original implementation.
+
       const expired = await db.update(schema.seatReleases)
         .set({ status: 'expired', updatedAt: new Date() })
         .where(and(eq(schema.seatReleases.status, 'open'), lt(schema.seatReleases.expiresAt, new Date())))
@@ -80,15 +58,6 @@ export const CRON_JOBS: ReadonlyArray<{
         );
       }
 
-      // FIX (SEC-007 / META-001): A 'claimed' release whose checkout URL
-      // expired (Telebirr's timeout_express: '120m') was never returned to
-      // the open pool. Now: a release claimed for >30m with a still-pending
-      // payment is reverted to 'open'. META-001 fix: the previous code
-      // looked up payments by `payments.seatClaimId = release.id`, but
-      // release.id is seatReleases.id and payments.seatClaimId is a FK to
-      // seatClaims.id — different ID spaces, so the query never matched.
-      // The correct join is: seatClaims.seatReleaseId = release.id →
-      // payments.seatClaimId = seatClaims.id.
       const staleClaims = await db.select().from(schema.seatReleases)
         .where(and(
           eq(schema.seatReleases.status, 'claimed'),
@@ -97,7 +66,7 @@ export const CRON_JOBS: ReadonlyArray<{
         .limit(50);
       for (const release of staleClaims) {
         await db.transaction(async (tx) => {
-          // Find the seatClaim for this release, then the payment for that claim.
+
           const [claim] = await tx.select().from(schema.seatClaims)
             .where(eq(schema.seatClaims.seatReleaseId, release.id))
             .limit(1);
@@ -117,7 +86,7 @@ export const CRON_JOBS: ReadonlyArray<{
   {
     name: 'cleanup-pending-subscriptions',
     route: 'cleanup-pending-subscriptions',
-    intervalMs: 30 * 60_000, // 30 min
+    intervalMs: 30 * 60_000,
     run: async () => {
       const { subscriptionRepo } = await import('../modules/subscription/repository');
       return subscriptionRepo.cancelStalePending();
@@ -126,7 +95,7 @@ export const CRON_JOBS: ReadonlyArray<{
   {
     name: 'process-refund-retries',
     route: 'process-refund-retries',
-    intervalMs: 15 * 60_000, // 15 min
+    intervalMs: 15 * 60_000,
     run: async () => {
       const { processRefundRetries } = await import('../modules/payment/service');
       return processRefundRetries();
@@ -135,7 +104,7 @@ export const CRON_JOBS: ReadonlyArray<{
   {
     name: 'reconcile-payments',
     route: 'reconcile-payments',
-    intervalMs: 30 * 60_000, // 30 min
+    intervalMs: 30 * 60_000,
     run: async () => {
       const { and, eq, lt } = await import('drizzle-orm');
       const { getPaymentProvider } = await import('@addis/payments');
@@ -146,7 +115,7 @@ export const CRON_JOBS: ReadonlyArray<{
       for (const p of stale) {
         const result = await getPaymentProvider('telebirr').verifyPayment(p.reference);
         if (result.status === 'completed') {
-          // FIX (PAY-006): refuse to settle without amount verification.
+
           if (!result.amount) {
             console.error(
               `[reconcile-payments] paymentId=${p.id} reference=${p.reference} provider returned completed status but no amount — refusing to settle without amount verification`,
@@ -169,7 +138,7 @@ export const CRON_JOBS: ReadonlyArray<{
   {
     name: 'cleanup-stale-payments',
     route: 'cleanup-stale-payments',
-    intervalMs: 60 * 60_000, // 1 hour
+    intervalMs: 60 * 60_000,
     run: async () => {
       const { and, lt, eq } = await import('drizzle-orm');
       return db.update(schema.payments).set({ status: 'failed', updatedAt: new Date() })
@@ -180,32 +149,15 @@ export const CRON_JOBS: ReadonlyArray<{
   {
     name: 'send-expiry-reminders',
     route: 'send-expiry-reminders',
-    intervalMs: 60 * 60_000, // 1 hour
+    intervalMs: 60 * 60_000,
     run: async () => {
       const { and, eq, sql, not, exists } = await import('drizzle-orm');
-      // FIX (OPS-008): The previous implementation had no idempotency
-      // guard. The advisory lock in withLock is transaction-scoped
-      // (pg_try_advisory_xact_lock), released the moment the transaction
-      // commits. The worker runs this job every 1h via setInterval; if an
-      // external cron-job.org also fires POST /api/v1/cron/send-expiry-reminders
-      // within the same hour (or if the worker's setInterval drifts), the
-      // second invocation acquires the lock fresh, re-runs the SELECT (same
-      // 2-3 day window), and inserts ANOTHER batch of identical
-      // subscription_expiring notifications. Users get duplicate "your
-      // subscription expires in 2 days" SMS/email.
-      //
-      // The fix: only select subscriptions that don't already have a
-      // matching outbox event in the last 24h. This makes the job
-      // idempotent within a 24h window regardless of how many times it
-      // fires. The advisory lock still prevents concurrent in-process
-      // double-firing; this guard prevents cross-process / cross-tick
-      // double-firing.
+
       const rows = await db.select().from(schema.subscriptions)
         .where(and(
           eq(schema.subscriptions.status, 'active'),
           sql`${schema.subscriptions.endDate} between now() + interval '2 days' and now() + interval '3 days'`,
-          // Exclude subscriptions that already received a subscription_expiring
-          // notification in the last 24h.
+
           not(exists(
             sql`SELECT 1 FROM outbox_events
                 WHERE outbox_events.channel = 'notification'
@@ -226,11 +178,10 @@ export const CRON_JOBS: ReadonlyArray<{
   {
     name: 'corporate-reset-monthly',
     route: 'corporate-reset-monthly',
-    intervalMs: 24 * 3600_000, // 1 day
+    intervalMs: 24 * 3600_000,
     run: async () => {
       const { lt } = await import('drizzle-orm');
-      // Fire per-member notifications — the corporate_reset notification type
-      // exists in the schema and has a template, but no code dispatched it.
+
       const reset = await db.update(schema.corporateMembers)
         .set({ ridesUsedThisMonth: 0, lastResetAt: new Date() })
         .where(lt(schema.corporateMembers.lastResetAt, sql`date_trunc('month', now())`))
@@ -246,54 +197,34 @@ export const CRON_JOBS: ReadonlyArray<{
   {
     name: 'retention-cleanup',
     route: 'retention-cleanup',
-    intervalMs: 24 * 3600_000, // 1 day
+    intervalMs: 24 * 3600_000,
     run: async () => {
       const { and, eq, lt, sql } = await import('drizzle-orm');
       const otps = await db.delete(schema.otpCodes).where(lt(schema.otpCodes.createdAt, sql`now() - interval '7 days'`)).returning({ id: schema.otpCodes.id });
       const resets = await db.delete(schema.passwordResetTokens).where(lt(schema.passwordResetTokens.createdAt, sql`now() - interval '7 days'`)).returning({ id: schema.passwordResetTokens.id });
       const notifs = await db.delete(schema.notifications).where(and(sql`${schema.notifications.readAt} is not null`, lt(schema.notifications.createdAt, sql`now() - interval '90 days'`))).returning({ id: schema.notifications.id });
-      // Purge expired sessions — previously never cleaned up, causing the sessions
-      // table to grow without bound. verifySession() already rejects expired
-      // sessions, but keeping them around wastes space and slows session lookups.
+
       const sessions = await db.delete(schema.sessions).where(lt(schema.sessions.expiresAt, sql`now()`)).returning({ id: schema.sessions.id });
-      // Purge old idempotency records (past their 24h retention window).
+
       const idempotency = await db.delete(schema.idempotencyRecords).where(lt(schema.idempotencyRecords.expiresAt, sql`now()`)).returning({ key: schema.idempotencyRecords.key });
 
-      // Anonymize users past their 30-day deletion grace period.
-      //
-      // CRITICAL FIX: The original implementation had three serious bugs:
-      //   1. `set({ riderId: null })` on payments.riderId — but the column is
-      //      NOT NULL, so the UPDATE threw, and retention-cleanup failed for
-      //      every deleted user. Anonymization never completed.
-      //   2. Tried to delete riderProfiles while subscriptions still FK-reference
-      //      them with onDelete: 'restrict' — also throws.
-      //   3. Only anonymized the user row — payments, subscriptions, rides,
-      //      tickets, and messages all retained the original PII.
-      //
-      // Fix: anonymize the FK-referencing rows IN PLACE rather than nulling out
-      // their riderId. The riderId columns stay valid (pointing at the
-      // anonymized rider profile), but all PII fields in dependent tables are
-      // scrubbed. The rider profile itself is anonymized (not deleted) so FK
-      // constraints remain satisfied.
       const deletedUsers = await db.select().from(schema.users).where(and(sql`${schema.users.deletedAt} is not null`, lt(schema.users.deletedAt, sql`now() - interval '30 days'`)));
       for (const u of deletedUsers) {
         const profiles = await db.select().from(schema.riderProfiles).where(eq(schema.riderProfiles.userId, u.id));
         for (const profile of profiles) {
-          // Anonymize PII in dependent rows. Don't null out riderId — the
-          // column is NOT NULL. Instead, scrub the PII fields themselves.
+
           await db.update(schema.supportTickets)
             .set({ subject: '[deleted]', body: '[deleted]', updatedAt: new Date() })
             .where(eq(schema.supportTickets.userId, u.id));
           await db.update(schema.ticketMessages)
             .set({ body: '[deleted]' })
             .where(eq(schema.ticketMessages.authorId, u.id));
-          // Anonymize the rider profile (NOT delete — FK constraints would break).
+
           await db.update(schema.riderProfiles)
             .set({ homeArea: '[deleted]', workArea: '[deleted]', updatedAt: new Date() })
             .where(eq(schema.riderProfiles.id, profile.id));
         }
-        // Anonymize the user row itself. Phone must remain unique — use a
-        // deterministic prefix so re-runs are idempotent.
+
         await db.update(schema.users).set({
           name: 'Deleted User', email: null, phone: `deleted-${u.id.slice(0, 8)}`,
           passwordHash: 'deleted', twoFactorSecret: null, twoFactorEnabled: false,
@@ -310,7 +241,7 @@ export const CRON_JOBS: ReadonlyArray<{
   {
     name: 'auto-close-tickets',
     route: 'auto-close-tickets',
-    intervalMs: 60 * 60_000, // 1 hour
+    intervalMs: 60 * 60_000,
     run: async () => {
       const { supportService } = await import('../modules/support/service');
       return supportService.autoCloseStale();
@@ -319,11 +250,10 @@ export const CRON_JOBS: ReadonlyArray<{
   {
     name: 'reconcile-claims',
     route: 'reconcile-claims',
-    intervalMs: 30 * 60_000, // 30 min
+    intervalMs: 30 * 60_000,
     run: async () => {
       const { and, eq, sql } = await import("drizzle-orm");
-      // Detect: payments.status = completed AND seatClaimId IS NOT NULL
-      // AND no refund_retry exists for this payment.
+
       const { marketplaceService } = await import('../modules/marketplace/service');
       const claims = await db.select().from(schema.payments)
         .where(and(
@@ -346,47 +276,16 @@ export const CRON_JOBS: ReadonlyArray<{
     },
   },
   {
-    // FIX (OPS-010): 7-year retention archival for audit_logs, payments,
-    // subscriptions, seat_releases, seat_claims, support_tickets,
-    // ticket_messages, corporate_members, contractor_documents,
-    // telebirr_notify_events.
-    //
-    // The ROPA (infra/compliance/ropa.md rows 3-14) and incident-response.md
-    // (lines 18-25) all claim "7 years retention" for these tables. Under
-    // Proclamation 1321/2024 Art. 21 (and GDPR Art. 5(1)(e)), retention
-    // must be ENFORCED, not aspirational. Without this job, these tables
-    // grow without bound — slowing queries, increasing backup costs, and
-    // creating a larger breach blast radius. After 7 years, the platform
-    // is non-compliant: it holds data longer than the stated retention.
-    //
-    // Strategy:
-    //   - audit_logs: ARCHIVE to S3 (preserve the hash chain for forensic
-    //     integrity), then DELETE. The archive is a JSONL file per month.
-    //   - telebirr_notify_events: ARCHIVE to S3, then DELETE (tamper-evident
-    //     audit log of inbound payment notifications).
-    //   - payments / subscriptions / seat_releases / seat_claims / rides:
-    //     ANONYMIZE in place (we need the rows for financial reporting and
-    //     dispute resolution, but PII fields are scrubbed after 7 years).
-    //   - support_tickets / ticket_messages: DELETE (the retention period
-    //     for support communications is shorter — 2 years — but we apply
-    //     the 7-year cap here for consistency; tighten to 2 years in a
-    //     follow-up if legal confirms).
-    //   - contractor_documents: DELETE the S3 objects AND the DB rows
-    //     (government ID uploads should not persist beyond their review
-    //     purpose + 7-year dispute window).
+
     name: 'archive-old-records',
     route: 'archive-old-records',
-    intervalMs: 24 * 3600_000, // 1 day
+    intervalMs: 24 * 3600_000,
     run: async () => {
       const { and, lt, sql, inArray } = await import('drizzle-orm');
       const { s3 } = await import('../infra/s3');
       const SEVEN_YEARS_AGO = sql`now() - interval '7 years'`;
       const result: Record<string, number> = {};
 
-      // 1. audit_logs: archive to S3, then delete.
-      //    The archive is a JSONL file: one JSON object per line, preserving
-      //    the hash chain (prevHash + hash + payload). Forensic verification
-      //    can re-derive the chain from the archive.
       try {
         const oldAudit = await db.select().from(schema.auditLogs)
           .where(lt(schema.auditLogs.createdAt, SEVEN_YEARS_AGO))
@@ -395,23 +294,14 @@ export const CRON_JOBS: ReadonlyArray<{
           const jsonl = oldAudit.map(r => JSON.stringify(r)).join('\n');
           const archiveKey = `archive/audit_logs/${new Date().toISOString().slice(0, 10)}-${Date.now()}.jsonl`;
           await s3.putObject(archiveKey, Buffer.from(jsonl, 'utf-8'), 'application/x-jsonlines');
-          // Delete the archived rows. Use a transaction + writeAudit so the
-          // archival itself is audited (ironic but legally required — the
-          // retention job's actions must be traceable).
+
           await db.transaction(async (tx) => {
-            // FIX (INFRA-007 / SEC-003): the audit_logs append-only trigger
-            // (packages/db/migrations/0001_audit_append_only.sql) blocks all
-            // DELETEs unless the session flag `app.audit_retention_purge` is
-            // set to 'on' inside the transaction. SET LOCAL scopes the flag
-            // to this transaction only — once we commit, the flag clears and
-            // a normal connection can't accidentally delete audit rows.
+
             await tx.execute(sql`SET LOCAL app.audit_retention_purge = 'on'`);
             await tx.delete(schema.auditLogs).where(
               inArray(schema.auditLogs.id, oldAudit.map(r => r.id))
             );
-            // Note: we can't use writeAudit for this because writeAudit inserts
-            // into audit_logs, which would be self-referential. Log to the
-            // outbox instead.
+
             await tx.insert(schema.outboxEvents).values({
               channel: 'audit',
               payload: { action: 'retention.archived', entityType: 'audit_logs', count: oldAudit.length, archiveKey },
@@ -420,11 +310,10 @@ export const CRON_JOBS: ReadonlyArray<{
           result.auditLogsArchived = oldAudit.length;
         }
       } catch (err) {
-        // Don't let a single table's failure abort the whole job — log and continue.
+
         console.error('[archive-old-records] audit_logs failed:', (err as Error).message);
       }
 
-      // 2. telebirr_notify_events: archive + delete (same pattern).
       try {
         const oldNotify = await db.select().from(schema.telebirrNotifyEvents)
           .where(lt(schema.telebirrNotifyEvents.receivedAt, SEVEN_YEARS_AGO))
@@ -442,7 +331,6 @@ export const CRON_JOBS: ReadonlyArray<{
         console.error('[archive-old-records] telebirr_notify_events failed:', (err as Error).message);
       }
 
-      // 3. support_tickets + ticket_messages: delete (subject/body are PII).
       try {
         const oldTickets = await db.delete(schema.supportTickets)
           .where(lt(schema.supportTickets.createdAt, SEVEN_YEARS_AGO))
@@ -452,13 +340,12 @@ export const CRON_JOBS: ReadonlyArray<{
         console.error('[archive-old-records] support_tickets failed:', (err as Error).message);
       }
 
-      // 4. contractor_documents: delete S3 objects + DB rows.
       try {
         const oldDocs = await db.select().from(schema.contractorDocuments)
           .where(lt(schema.contractorDocuments.uploadedAt, SEVEN_YEARS_AGO))
           .limit(200);
         for (const doc of oldDocs) {
-          try { await s3.deleteObject(doc.storageKey); } catch { /* best-effort */ }
+          try { await s3.deleteObject(doc.storageKey); } catch {  }
         }
         if (oldDocs.length > 0) {
           await db.delete(schema.contractorDocuments).where(
@@ -470,12 +357,6 @@ export const CRON_JOBS: ReadonlyArray<{
         console.error('[archive-old-records] contractor_documents failed:', (err as Error).message);
       }
 
-      // 5. payments: ANONYMIZE in place (keep rows for financial reporting,
-      //    scrub PII). reference (Telebirr merchOrderId — a replay primitive)
-      //    and prepayId are scrubbed after 7 years.
-      //    FIX (META-008): The previous code used a JS template literal with
-      //    sql.raw() inside it, which coerced the SQL object to "[object Object]".
-      //    Now use a Drizzle sql tagged template for the whole value.
       try {
         const oldPayments = await db.update(schema.payments)
           .set({
@@ -493,10 +374,6 @@ export const CRON_JOBS: ReadonlyArray<{
         console.error('[archive-old-records] payments failed:', (err as Error).message);
       }
 
-      // 6. FIX (META-010): Anonymize subscriptions, seat_releases, seat_claims,
-      //    rides — scrub PII fields (morningSlot, eveningSlot, pickupStop) while
-      //    keeping the rows for reporting. riderId stays valid (FK to anonymized
-      //    rider profile).
       try {
         const oldSubs = await db.update(schema.subscriptions)
           .set({ morningSlot: null, eveningSlot: null, updatedAt: new Date() })
@@ -527,36 +404,28 @@ export const CRON_JOBS: ReadonlyArray<{
     },
   },
   {
-    // FOLLOW-UP 1 (DB-003): External audit-chain anchoring. Writes the current
-    // chain tip hash to S3 every hour. With S3 Object Lock (COMPLIANCE mode)
-    // on the bucket, the anchor files are immutable — a DB attacker who
-    // tampers the chain leaves the anchored tip hash stale.
+
     name: 'anchor-audit-chain',
     route: 'anchor-audit-chain',
-    intervalMs: 60 * 60_000, // 1 hour
+    intervalMs: 60 * 60_000,
     run: async () => {
       const { anchorAuditChain } = await import('../modules/admin/audit');
       return anchorAuditChain();
     },
   },
   {
-    // FOLLOW-UP 3 (INFRA-009 / INFRA-017): prune old outbox events (90 days)
-    // and old notification_log rows (90 days, matching the outbox retention).
-    // Without this, both tables grow unbounded — outbox payload contains SMS
-    // bodies and email subjects (PII), and notification_log grows linearly
-    // with sends. 90 days is long enough to investigate any delivery issue.
+
     name: 'cleanup-old-outbox-and-notifications',
     route: 'cleanup-old-outbox-and-notifications',
-    intervalMs: 24 * 60 * 60_000, // 1 day
+    intervalMs: 24 * 60 * 60_000,
     run: async () => {
       const { lt } = await import('drizzle-orm');
       const NINETY_DAYS_AGO = sql`now() - interval '90 days'`;
-      // Prune delivered/failed outbox events older than 90 days. Pending/processing
-      // rows are never pruned (they may still be retried).
+
       const outbox = await db.delete(schema.outboxEvents).where(
         sql`${schema.outboxEvents.status} in ('delivered', 'failed', 'permanent_failure') AND ${schema.outboxEvents.createdAt} < ${NINETY_DAYS_AGO}`,
       ).returning({ id: schema.outboxEvents.id });
-      // Prune notification_log rows older than 90 days.
+
       const notif = await db.delete(schema.notificationLog).where(
         lt(schema.notificationLog.sentAt, NINETY_DAYS_AGO as any),
       ).returning({ id: schema.notificationLog.id });
@@ -564,17 +433,15 @@ export const CRON_JOBS: ReadonlyArray<{
     },
   },
   {
-    // FOLLOW-UP 1 (DB-003): Daily verification of the audit chain against the
-    // external anchors. If the DB chain was tampered after an anchor was
-    // written, this surfaces it.
+
     name: 'verify-audit-chain-anchors',
     route: 'verify-audit-chain-anchors',
-    intervalMs: 24 * 60 * 60_000, // 1 day
+    intervalMs: 24 * 60 * 60_000,
     run: async () => {
       const { verifyAuditChainWithAnchors } = await import('../modules/admin/audit');
       const result = await verifyAuditChainWithAnchors();
       if (!result.valid) {
-        // High-severity alert — tampering detected.
+
         await db.insert(schema.outboxEvents).values({
           channel: 'audit',
           payload: { action: 'audit_chain_tamper_detected', result },
@@ -586,10 +453,6 @@ export const CRON_JOBS: ReadonlyArray<{
   },
 ];
 
-/**
- * Map from cron-job name → CRON_JOBS entry, for O(1) lookup by the HTTP routes
- * (which receive the job name as a path parameter).
- */
 export const CRON_JOBS_BY_NAME: ReadonlyMap<string, (typeof CRON_JOBS)[number]> = new Map(
   CRON_JOBS.map((j) => [j.name, j]),
 );

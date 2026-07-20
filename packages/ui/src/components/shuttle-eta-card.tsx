@@ -2,10 +2,6 @@ import { Card, CardContent } from '../primitives/card';
 import { Badge } from '../primitives/badge';
 import { Clock, MapPin } from 'lucide-react';
 
-/**
- * Shown to riders on the dashboard and live-trip screen — surfaces the next
- * estimated arrival for their assigned shuttle on a given route.
- */
 export function ShuttleEtaCard({
   routeName,
   plateNumber,

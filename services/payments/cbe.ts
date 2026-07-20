@@ -1,7 +1,6 @@
 import { loadEnv } from '@addis/shared';
 import type { PaymentProvider, PaymentIntent, CheckoutResult, PaymentStatusResult, RefundRequest, RefundResult, WebhookEvent } from './provider';
 
-/** Manual bank-transfer reconciliation — no live API. Admin verifies via UI. */
 export class CbeBirrProvider implements PaymentProvider {
   readonly name = 'cbe' as const;
   private env = loadEnv();

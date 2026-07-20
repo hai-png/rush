@@ -11,8 +11,7 @@ export default function AccountExportPage() {
     setLoading(true);
     try {
       const res = await fetch(`/api/v1/account/export?format=${format}`);
-      // FIX (UX-004): Use toast instead of alert() for error feedback —
-      // alert() blocks the main thread and isn't screen-reader-friendly.
+
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         push({ title: err?.error?.message ?? `Export failed (HTTP ${res.status})`, variant: 'error' });

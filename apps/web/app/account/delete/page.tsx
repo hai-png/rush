@@ -14,11 +14,7 @@ export default function DeleteAccountPage() {
   const [error, setError] = useState<string | null>(null);
 
   const submit = async () => {
-    // Require password re-authentication. The previous implementation
-    // triggered account deletion with a single click and no password
-    // confirmation — anyone with a stolen session cookie (XSS, session
-    // hijack, physical access to an unlocked device) could permanently
-    // delete the account.
+
     if (!password) {
       setError('Password is required to confirm deletion');
       return;
@@ -26,7 +22,7 @@ export default function DeleteAccountPage() {
     setLoading(true);
     setError(null);
     try {
-      // The API route accepts a password field for re-authentication.
+
       const { error: apiError } = await client.POST('/api/v1/account/delete', {
         body: { password },
       });

@@ -9,8 +9,6 @@ import { clientIp } from '../../src/ip';
 import { db, schema } from '@addis/db';
 import { eq, and } from 'drizzle-orm';
 
-// CRITICAL FIX (SEC-001): commit 0efae30 deleted the `identityRoutes`
-// declaration and the `RegisterInput` schema. Restored here in full.
 export const identityRoutes = new TypedOpenAPIHono();
 
 const RegisterInput = z.discriminatedUnion('kind', [
@@ -18,8 +16,6 @@ const RegisterInput = z.discriminatedUnion('kind', [
   z.object({ kind: z.literal('contractor'), name: z.string().min(2), phone: EthiopianPhone, password: z.string().min(10), licenseNumber: z.string(), experienceYears: z.number().int().min(0) }),
 ]);
 
-// auth endpoints. These now appear in the generated OpenAPI document with
-// request/response schemas, so the SDK types them end-to-end.
 const RegisterResponseSchema = z.object({
   user: z.object({ id: z.string(), phone: z.string(), role: z.string(), name: z.string() }),
   profile: z.object({ id: z.string() }).passthrough(),
@@ -72,10 +68,7 @@ identityRoutes.post('/refresh', async (c) => {
   const bearer = c.req.header('Authorization')?.replace(/^Bearer\s+/i, '');
   if (!bearer) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Missing token', requestId: c.get('requestId') } }, 401);
   const { user, jti } = await identityService.verifySession(bearer);
-  // Refresh reissues without re-checking password: mint a new short-lived token
-  // for a NEW session, deleting the old session row (rotation). The previous
-  // implementation left the old session row in place, so a stolen token
-  // remained valid for up to 30 minutes even after a legitimate refresh.
+
   const fresh = await identityService.reissueToken(user.id, jti);
   return c.json({ data: { accessToken: fresh, expiresIn: 2592000 } });
 });
@@ -133,14 +126,8 @@ identityRoutes.post('/password/reset/confirm', async (c) => {
   return c.body(null, 204);
 });
 
-// H9 fix: 2FA routes are now available to ALL authenticated users (was admin-only).
-// Riders and contractors handle payments and PII — they should be able to opt into
-// 2FA for their own accounts. The requireRole restriction was an unnecessary gate
-// that left rider/contractor accounts less secure than admin accounts.
 identityRoutes.post('/2fa/setup', requireAuth, async (c) => {
-  // currentCode is required ONLY when 2FA is already enabled (rotation flow).
-  // password is REQUIRED for every call (SEC-001: prevents stolen-session
-  // attackers from silently enabling 2FA on the victim's account).
+
   const { currentCode, password } = z.object({
     currentCode: z.string().length(6).optional(),
     password: z.string().min(1),

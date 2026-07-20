@@ -22,11 +22,6 @@ export const Label = React.forwardRef<HTMLLabelElement, React.LabelHTMLAttribute
 );
 Label.displayName = 'Label';
 
-// FIX (typecheck): under exactOptionalPropertyTypes, `children?: string` does
-// not accept an explicit `undefined` value (only omission). Callers like
-// `<FieldError>{error}</FieldError>` where `error: string | undefined` would
-// fail typecheck. Accepting `string | undefined` explicitly (rather than via
-// optionality) allows both `<FieldError />` and `<FieldError>{undefined}</FieldError>`.
 export function FieldError({ children }: { children: string | undefined }) {
   if (!children) return null;
   return <p role="alert" className="text-xs text-destructive mt-1">{children}</p>;

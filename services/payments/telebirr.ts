@@ -7,7 +7,6 @@ const BASE_URLS = {
   production: 'https://superapp.ethiomobilemoney.et',
 };
 
-/** Telebirr H5 C2B Web Payment. All magic constants live here — never hardcoded in call sites. */
 export class TelebirrProvider implements PaymentProvider {
   readonly name = 'telebirr' as const;
   private env = loadEnv();
@@ -21,8 +20,6 @@ export class TelebirrProvider implements PaymentProvider {
     version: '1.0',
   };
 
-  /** Shared by outgoing request signing and incoming webhook verification — both sides of a
-   *  signature MUST canonicalize the payload identically, or verification is meaningless. */
   private canonicalize(payload: Record<string, unknown>): string {
     return Object.keys(payload).filter(k => k !== 'sign').sort().map(k => `${k}=${JSON.stringify(payload[k])}`).join('&');
   }
@@ -79,9 +76,7 @@ export class TelebirrProvider implements PaymentProvider {
     if (!res.ok) return { status: 'pending' };
     const json = await res.json();
     const status = json.trade_status === 'Success' ? 'completed' : json.trade_status === 'Fail' ? 'failed' : 'pending';
-    // Return the provider-confirmed amount when available — settlePayment uses
-    // this to verify the paid amount matches the expected amount (H35 fix).
-    // The amount field name varies by Telebirr API version; try the common ones.
+
     const amountStr = json.total_amount ?? json.trade_amount ?? json.amount;
     const amount = typeof amountStr === 'string' ? Money.fromETBString(amountStr) : undefined;
     return { status, amount, raw: json };
@@ -104,7 +99,7 @@ export class TelebirrProvider implements PaymentProvider {
       });
       const json = await res.json().catch(() => ({}));
       if (res.ok && json.code === 'SUCCESS') return { status: 'succeeded' };
-      if (json.code === 'REFUND_DUPLICATED') return { status: 'succeeded' }; // idempotent retry
+      if (json.code === 'REFUND_DUPLICATED') return { status: 'succeeded' };
       if (json.code === 'REFUND_PROCESSING') return { status: 'processing', retryAfterMs: 15 * 60_000 };
       const permanent = json.code === 'INSUFFICIENT_BALANCE' || json.code === 'ACCOUNT_FROZEN';
       return { status: 'failed', error: json.message ?? `HTTP ${res.status}`, permanent };
@@ -119,12 +114,6 @@ export class TelebirrProvider implements PaymentProvider {
     try { payload = JSON.parse(raw); }
     catch { throw new Error('Invalid telebirr webhook JSON'); }
 
-    // Replay protection: refuse notifications whose timestamp is older than
-    // 5 minutes. Without this, an attacker who captures a single valid
-    // signed payload can replay it indefinitely (settle the same payment
-    // multiple times, re-trigger refunds, etc.). The previous parseWebhook
-    // verified the signature but had no freshness check.
-    // FIX (PAY-004): reject missing/non-numeric timestamp (replay-suspicion).
     const timestampMs = typeof payload.timestamp === 'number'
       ? payload.timestamp
       : typeof payload.timestamp === 'string' && payload.timestamp.trim() !== '' && !isNaN(Number(payload.timestamp))
@@ -147,10 +136,6 @@ export class TelebirrProvider implements PaymentProvider {
         signatureValid = false;
       }
     }
-    // Don't throw on invalid signature — return signatureValid=false so the
-    // route handler can return a clean 401 without the provider throwing
-    // a 500 (which would let an attacker scan for valid signatures via
-    // timing differences). The route asserts `event.signatureValid === true`.
 
     if (payload.refund_request_no) {
       return payload.trade_status === 'Success'

@@ -21,17 +21,12 @@ export default function TosAcceptPage() {
       push({ title: error.message ?? 'Could not accept terms — please try again', variant: 'error' });
       return;
     }
-    // Don't use router.back() — if the user navigated here directly (e.g.
-    // from a bookmark or email link), router.back() navigates to an
-    // external site or closes the tab. Redirect to a safe destination.
+
     router.push('/dashboard/rider');
   };
 
   const decline = async () => {
-    // Log the user out — they've declined the updated terms, so their
-    // session can't be used for any non-exempt endpoint. The previous
-    // implementation offered no decline path; the user's only recourse
-    // was closing the tab while the session remained active.
+
     await signOut({ callbackUrl: '/login?reason=tos_declined' });
   };
 

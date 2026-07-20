@@ -8,24 +8,9 @@ import { createId } from '@paralleldrive/cuid2';
 import * as schema from '@addis/db/schema';
 import { Money } from '@addis/shared';
 
-/**
- * Integration test wiring fix:
- *
- * The services under test (settlePayment, processRefundRetries, etc.) import
- * `db` from `@addis/db` — a singleton wired to `process.env.DATABASE_URL`.
- * Without mocking, the services would query the singleton DB (likely empty
- * or non-existent in CI) while the test seeds the testcontainer DB — two
- * different databases, so the assertions would fail.
- *
- * Fix: use vi.mock('@addis/db') to replace the singleton with the testcontainer
- * drizzle instance. The mock is set up in beforeAll() after the container
- * starts. vi.doMock allows us to set the mock dynamically (the container URI
- * isn't known until startup).
- */
-
 let container: StartedPostgreSqlContainer;
 let db: ReturnType<typeof drizzle>;
-// These are imported AFTER the mock is set up (via dynamic import inside tests).
+
 let settlePayment: typeof import('./service').settlePayment;
 let failPayment: typeof import('./service').failPayment;
 let scheduleRefund: typeof import('./service').scheduleRefund;
@@ -37,26 +22,11 @@ beforeAll(async () => {
   container = await new PostgreSqlContainer('postgres:16').start();
   const client = postgres(container.getConnectionUri());
   db = drizzle(client, { schema });
-  // Path is relative to this file's directory (packages/api/modules/payment/).
-  // packages/db/migrations is 3 levels up: payment → modules → api → packages
+
   await migrate(db, { migrationsFolder: '../../../packages/db/migrations' });
 
-  // Mock @addis/db so all service imports use the testcontainer db.
   vi.doMock('@addis/db', () => ({ db, schema, Db: undefined as any, DbOrTx: undefined as any }));
 
-  // FIX (TEST-006): Mock @addis/payments so processRefundRetries doesn't hit
-  // the real Telebirr sandbox endpoint. The previous implementation left
-  // @addis/payments unmocked, so the "refund succeeded" assertion only
-  // passed on developer machines with real TELEBIRR_FABRIC_APP_ID credentials
-  // set. In CI (no Telebirr creds), provider.refund() threw a network error,
-  // the service caught it and scheduled a retry, and the refund_retries row
-  // stayed 'processing' — the assertion `expect(retry.status).toBe('succeeded')`
-  // failed.
-  //
-  // The mock returns a successful refund for any input, so the test
-  // exercises the full DB state machine (claim rows → 'succeeded',
-  // payment.refundAmount accumulated, notification queued) without depending
-  // on an external service.
   vi.doMock('@addis/payments', () => ({
     getPaymentProvider: () => ({
       refund: vi.fn().mockResolvedValue({ status: 'succeeded' as const }),
@@ -74,7 +44,6 @@ beforeAll(async () => {
     }),
   }));
 
-  // Now import the services — they'll get the mocked @addis/db and @addis/payments.
   const serviceMod = await import('./service');
   settlePayment = serviceMod.settlePayment;
   failPayment = serviceMod.failPayment;
@@ -172,7 +141,7 @@ describe('processRefundRetries', () => {
     const [completed] = await db.select().from(schema.payments).where(eq(schema.payments.id, payment.id));
     const refundAmount = Money.fromDecimal('50.00');
     await scheduleRefund(payment.id, refundAmount, 'test refund');
-    // Bump next_attempt_at to past so it's picked up
+
     await db.update(schema.refundRetries).set({ nextAttemptAt: new Date(0) }).where(eq(schema.refundRetries.paymentId, payment.id));
     const result = await processRefundRetries(10);
     expect(result.processed).toBeGreaterThanOrEqual(1);
@@ -212,7 +181,7 @@ describe('processRefundRetries', () => {
 describe('marketplaceService.claim CAS guarantee', () => {
   async function seedClaimScenario() {
     const { user, riderProfile, sub, route } = await seedSubscription();
-    // Activate the subscription
+
     const [activeSub] = await db.update(schema.subscriptions).set({ status: 'active' }).where(eq(schema.subscriptions.id, sub.id)).returning();
     const releaseDate = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
     const [release] = await db.insert(schema.seatReleases).values({
@@ -220,7 +189,7 @@ describe('marketplaceService.claim CAS guarantee', () => {
       releaseDate, refundAmount: '50.00',
       expiresAt: addDays(new Date(), 1),
     }).returning();
-    // Second rider to claim
+
     const [claimerUser] = await db.insert(schema.users).values({
       phone: `+251911${Math.random().toString(10).slice(2, 8)}`,
       name: 'Claimer', passwordHash: 'hash', role: 'rider',
@@ -231,7 +200,7 @@ describe('marketplaceService.claim CAS guarantee', () => {
 
   it('only one concurrent claimer wins', async () => {
     const { release, claimerId } = await seedClaimScenario();
-    // Simulate two concurrent claims
+
     const results = await Promise.allSettled([
       marketplaceService.claim(claimerId, { seatReleaseId: release.id, paymentMethod: 'telebirr' }),
       marketplaceService.claim(claimerId, { seatReleaseId: release.id, paymentMethod: 'telebirr' }),
@@ -240,7 +209,7 @@ describe('marketplaceService.claim CAS guarantee', () => {
     const failures = results.filter(r => r.status === 'rejected');
     expect(successes.length).toBe(1);
     expect(failures.length).toBeGreaterThanOrEqual(1);
-    // Verify release is now claimed
+
     const [r] = await db.select().from(schema.seatReleases).where(eq(schema.seatReleases.id, release.id));
     expect(r!.status).toBe('claimed');
   });
@@ -257,9 +226,9 @@ describe('marketplaceService.claim CAS guarantee', () => {
     const { riderProfile } = await seedSubscription();
     const releaseDate = new Date(Date.now() + 86400000).toISOString().slice(0, 10);
     const { route } = await seedClaimScenario();
-    // Create a release by riderProfile
+
     const sub = await db.select().from(schema.subscriptions).where(eq(schema.subscriptions.riderId, riderProfile.id)).limit(1);
-    // Can't claim own release
+
     const [ownRelease] = await db.insert(schema.seatReleases).values({
       subscriptionId: sub[0]!.id, riderId: riderProfile.id, routeId: route.id, window: 'morning',
       releaseDate, refundAmount: '50.00', expiresAt: addDays(new Date(), 1),
@@ -282,7 +251,7 @@ describe('transitionSubscription CAS race', () => {
     expect(fulfilled.length).toBe(1);
     expect(rejected.length).toBeGreaterThanOrEqual(1);
     const [s] = await db.select().from(schema.subscriptions).where(eq(schema.subscriptions.id, sub.id));
-    // Should be either 'active' (settled) or 'cancelled' (failed), but only one
+
     expect(['active', 'cancelled']).toContain(s!.status);
   });
 

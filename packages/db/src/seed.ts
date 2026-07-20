@@ -2,13 +2,7 @@ import { db, schema } from './client';
 import { hashPassword } from '@addis/shared';
 
 async function main() {
-  // FIX (DATA-004): The previous implementation had no production guard.
-  // If an operator accidentally ran `bun run db:seed` in production (or a
-  // deploy script did), it would create 5 known-credential users with
-  // password `demo12345` and phoneVerified=true (bypassing OTP) — including
-  // 3 corporate_admin accounts with subsidy-management privileges. Anyone
-  // who knows the seed phone numbers has admin access. Refuse to run in
-  // production unless SEED_CONFIRM=1 is explicitly set.
+
   if (process.env.NODE_ENV === 'production' && process.env.SEED_CONFIRM !== '1') {
     console.error('Refusing to seed in production. Set SEED_CONFIRM=1 to override (not recommended).');
     process.exit(1);

@@ -1,25 +1,13 @@
 import { useEffect, useRef, useState } from 'react';
 import { View, Text, Pressable, Linking } from 'react-native';
 import MapViewBase, { Marker, Polyline } from 'react-native-maps';
-// FOLLOW-UP 4: cast to any to work around React 19 / RN 0.76 component type
-// mismatch (refs property). Runtime behavior is unchanged.
+
 const MapView = MapViewBase as any;
 import { useLocalSearchParams } from 'expo-router';
 import { useQuery } from '@tanstack/react-query';
 import { api } from '../../src/lib/api';
 import { useAuthStore } from '../../src/lib/auth-store';
 
-// FIX (FE-001): The previous implementation called
-//   `new EventSource(url, { headers })`
-// — but EventSource is a browser API that does NOT exist in React Native's
-// runtime, and even in browsers it does NOT accept a `headers` option. The
-// constructor threw on mount ("EventSource is not a constructor" under
-// Hermes/RN), so the entire live-trip screen crashed and riders could not
-// track their shuttle. We now poll the same SSE endpoint with plain
-// `fetch()` every 5s, sending the bearer Authorization header the API
-// requires. Visible error feedback is shown when the stream is unreachable
-// so the rider knows their driver's location is stale instead of staring at
-// an unmoving marker.
 const POLL_INTERVAL_MS = 5_000;
 
 type ShuttlePosition = { lat: number; lng: number };
@@ -36,9 +24,7 @@ async function fetchShuttlePosition(url: string, token: string, signal: AbortSig
   if (!res.ok) {
     throw new Error(`shuttle-positions stream returned ${res.status}`);
   }
-  // The endpoint serves SSE frames. A single short poll returns the most
-  // recent `data:` line. Parse defensively: if the body happens to be a
-  // bare JSON object (some server configs), accept that too.
+
   const text = await res.text();
   const dataLine = text
     .split('\n')
@@ -95,7 +81,7 @@ export default function LiveTripScreen() {
           setStreamError(
             'Live location is unavailable right now. Retrying every 5s…',
           );
-          // Visible error feedback — rider sees the marker may be stale.
+
         }
         await new Promise((r) => setTimeout(r, POLL_INTERVAL_MS));
       }

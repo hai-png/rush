@@ -15,10 +15,7 @@ export const subscriptionRepo = {
     return row ?? null;
   },
   async hasUsedTrial(riderId: string, trialPlanId: string) {
-    // Only count subscriptions that actually resulted in a payment — the
-    // previous implementation counted ANY subscription row, including ones
-    // that went to 'cancelled' via cancelStalePending (payment never
-    // settled). A rider whose trial payment failed could never trial again.
+
     const rows = await db.select({ id: schema.subscriptions.id }).from(schema.subscriptions)
       .where(and(
         eq(schema.subscriptions.riderId, riderId),
@@ -28,19 +25,6 @@ export const subscriptionRepo = {
     return rows.length > 0;
   },
 
-  /**
-   * Bulk-expire active subscriptions whose endDate has passed.
-   *
-   * H50 fix: the previous implementation did a raw UPDATE that bypassed the
-   * state machine. While the state machine's `transitionSubscription` helper
-   * uses CAS (good for single-row transitions), calling it per-row in a bulk
-   * cron would be N queries instead of 1. Instead, we do the bulk UPDATE
-   * (which is atomic — the WHERE clause includes status='active' so only
-   * genuinely-active rows are transitioned), then queue the side effects
-   * (notifications + audit rows) that the state machine declares for the
-   * `subscription.expired` transition. This gives us the performance of a
-   * bulk UPDATE with the side-effect coverage of the state machine.
-   */
   async expireDue(tx = db) {
     const expired = await tx.update(schema.subscriptions)
       .set({ status: 'expired', updatedAt: new Date() })
@@ -58,14 +42,6 @@ export const subscriptionRepo = {
     return expired;
   },
 
-  /**
-   * Cancel stale pending_payment subscriptions.
-   *
-   * Same fix as expireDue: queue per-subscription outbox events. Also
-   * parameterized the interval safely — the previous implementation used
-   * `sql.raw(String(olderThanHours))` which would be a SQL injection
-   * vector if a future caller passed user-controlled input.
-   */
   async cancelStalePending(tx = db, olderThanHours = 2) {
     const cancelled = await tx.update(schema.subscriptions)
       .set({ status: 'cancelled', cancelledAt: new Date(), updatedAt: new Date() })
@@ -76,8 +52,7 @@ export const subscriptionRepo = {
       .returning({ id: schema.subscriptions.id, riderId: schema.subscriptions.riderId });
 
     if (cancelled.length > 0) {
-      // FIX (PAY-003): also fail associated pending payments in the same tx.
-      // Without this, a late Telebirr webhook strands the user's money.
+
       const subIds = cancelled.map(s => s.id);
       await tx.update(schema.payments)
         .set({ status: 'failed', updatedAt: new Date() })
@@ -95,34 +70,14 @@ export const subscriptionRepo = {
     return cancelled;
   },
 
-  /**
-   * CAS decrement used by refund settlement — never goes below 0.
-   * Now also guards against decrementing on a cancelled/expired subscription.
-   */
   async decrementRidesUsed(tx = db, subscriptionId: string) {
     await tx.update(schema.subscriptions)
       .set({ ridesUsed: sql`greatest(${schema.subscriptions.ridesUsed} - 1, 0)`, updatedAt: new Date() })
       .where(and(eq(schema.subscriptions.id, subscriptionId), eq(schema.subscriptions.status, 'active')));
   },
 
-  /**
-   * Increment ridesUsed. The previous implementation had no guard — a
-   * cancelled or expired subscription could still be incremented, and
-   * ridesUsed could exceed the plan's ridesIncluded. The caller
-   * (operations/service.ts completeTrip) now checks both before calling,
-   * but we add a DB-level guard too for defense in depth: only increment
-   * if the subscription is active AND ridesUsed is still under the plan
-   * limit (or the plan is unlimited).
-   */
   async incrementRidesUsed(tx = db, subscriptionId: string) {
-    // CRITICAL FIX (DATA-001): The previous SQL had an operator-precedence bug.
-    // SQL `AND` binds tighter than `OR`, so the WHERE clause parsed as:
-    //   (id = $1 AND status = 'active' AND plan.rides_included = -1)
-    //   OR (plan.rides_included > rides_used)
-    // The second branch matched EVERY subscription in the table whose
-    // rides_used < rides_included — a single incrementRidesUsed(sub, ...) call
-    // bumped rides_used on every under-used finite-plan subscription in the DB.
-    // The fix is to parenthesize the OR so it stays scoped to the id+status row.
+
     await tx.execute(sql`
       UPDATE subscriptions SET rides_used = rides_used + 1, updated_at = now()
       WHERE id = ${subscriptionId}

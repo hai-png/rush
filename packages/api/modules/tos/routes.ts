@@ -9,20 +9,9 @@ import { CURRENT_TOS_VERSION } from '@addis/shared';
 
 export const tosRoutes = new TypedHono();
 
-/**
- * Accepts the current (or, defensively, any version the server knows about) Terms of Service.
- * Mounted at /api/v1/tos so the ToS-gate middleware's EXEMPT list (`/^\/api\/v1\/tos/`) allows
- * authenticated users with a stale tosVersion to call this endpoint — otherwise they'd be
- * locked out by 409 TOS_UPDATE_REQUIRED with no way to recover.
- *
- * Records a row in tos_acceptances for audit/legal retention (Proclamation 1321/2024 §17)
- * and bumps the user's tosVersion so subsequent requests pass the gate.
- */
 tosRoutes.post('/', requireAuth, async (c) => {
   const session = getSession(c);
-  // FIX (TEST-001): use safeParse instead of parse so a missing/invalid
-  // version field returns a clean 400 instead of throwing ZodError (which
-  // the error handler renders as 500).
+
   const parsed = z.object({ version: z.string() }).safeParse(await c.req.json());
   if (!parsed.success) {
     return c.json(
@@ -43,7 +32,7 @@ tosRoutes.post('/', requireAuth, async (c) => {
       .update(schema.users)
       .set({ tosVersion: version, updatedAt: new Date() })
       .where(eq(schema.users.id, session.userId));
-    // Unique index (userId, version) means a re-accept of the same version is a no-op upsert.
+
     await tx
       .insert(schema.tosAcceptances)
       .values({
@@ -62,7 +51,6 @@ tosRoutes.post('/', requireAuth, async (c) => {
   return c.json({ data: { accepted: true, version } });
 });
 
-/** Returns the caller's ToS acceptance history (newest first). Used by the account page. */
 tosRoutes.get('/', requireAuth, async (c) => {
   const session = getSession(c);
   const rows = await db

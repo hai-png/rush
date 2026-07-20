@@ -25,17 +25,6 @@ export const accountService = {
     return accountService.get(userId);
   },
 
-  /**
-   * 30-day soft delete per §18. Reversible until deletedAt passes;
-   * hard-deleted by retention-cleanup cron.
-   *
-   * Previously this only set deletedAt + isActive=false. The user's existing
-   * sessions table rows lingered, and although verifySession checks
-   * deletedAt (defense in depth), any code path reading the JWT payload
-   * without going through verifySession would honor a deleted user's token.
-   * Now we also bump tokenVersion (invalidating all outstanding JWTs) and
-   * delete the sessions table rows (so /sessions lists nothing for them).
-   */
   async requestDeletion(userId: string) {
     await db.transaction(async (tx) => {
       const [user] = await tx.select().from(schema.users).where(eq(schema.users.id, userId));
@@ -43,29 +32,18 @@ export const accountService = {
       await tx.update(schema.users).set({
         deletedAt: new Date(),
         isActive: false,
-        tokenVersion: user.tokenVersion + 1, // invalidate all outstanding JWTs
+        tokenVersion: user.tokenVersion + 1,
         updatedAt: new Date(),
       }).where(eq(schema.users.id, userId));
       await tx.delete(schema.sessions).where(eq(schema.sessions.userId, userId));
     });
   },
 
-  /** Full data export within the entities enumerated in §18 — streams a ZIP of per-entity JSON. */
   async exportZip(userId: string): Promise<NodeJS.ReadableStream> {
     const [profile] = await db.select().from(schema.riderProfiles).where(eq(schema.riderProfiles.userId, userId));
     const [contractorProfile] = await db.select().from(schema.contractorProfiles).where(eq(schema.contractorProfiles.userId, userId));
     const riderId = profile?.id;
 
-    // Also include contractor documents if the user is a contractor — the
-    // previous implementation omitted contractor data entirely, which is a
-    // GDPR/Proclamation 1321/2024 violation for contractor accounts.
-    //
-    // FA-008 (re-applies API-017): the export was also missing ticket_messages,
-    // corporate_members, devices, and notification_preferences. A GDPR Art. 15
-    // export that silently omits half the user's records is a compliance
-    // violation. Now: ticket_messages are fetched via the user's ticket IDs,
-    // corporate_members by userId, devices by userId, notification_preferences
-    // by userId.
     const [subs, payments, rides, releases, claims, tickets, notifs, tos, contractorDocs,
       ticketMessages, corporateMemberships, devices, notifPrefs,
     ] = await Promise.all([
@@ -80,21 +58,20 @@ export const accountService = {
       contractorProfile
         ? db.select().from(schema.contractorDocuments).where(eq(schema.contractorDocuments.contractorId, contractorProfile.id))
         : [],
-      // FA-008: ticket_messages authored by the user.
+
       db.select().from(schema.ticketMessages).where(eq(schema.ticketMessages.authorId, userId)),
-      // FA-008: corporate memberships.
+
       db.select().from(schema.corporateMembers).where(eq(schema.corporateMembers.userId, userId)),
-      // FA-008: registered push devices.
+
       db.select().from(schema.devices).where(eq(schema.devices.userId, userId)),
-      // FA-008: notification preferences.
+
       db.select().from(schema.notificationPreferences).where(eq(schema.notificationPreferences.userId, userId)),
     ]);
 
     const archive = archiver('zip', { zlib: { level: 9 } });
     const stream = new PassThrough();
     archive.pipe(stream);
-    // FA-008: include the rider profile row (homeArea, workArea) — the previous
-    // export fetched `profile` only to derive `riderId` but never wrote it to the ZIP.
+
     if (profile) {
       archive.append(JSON.stringify(profile, null, 2), { name: 'rider_profile.json' });
     }
@@ -105,7 +82,7 @@ export const accountService = {
     archive.append(JSON.stringify(claims, null, 2), { name: 'seat_claims.json' });
     archive.append(JSON.stringify(tickets, null, 2), { name: 'tickets.json' });
     archive.append(JSON.stringify(notifs, null, 2), { name: 'notifications.json' });
-    // FA-008: append the previously-missing entities.
+
     archive.append(JSON.stringify(ticketMessages, null, 2), { name: 'ticket_messages.json' });
     archive.append(JSON.stringify(corporateMemberships, null, 2), { name: 'corporate_memberships.json' });
     archive.append(JSON.stringify(devices, null, 2), { name: 'devices.json' });
@@ -113,8 +90,7 @@ export const accountService = {
     archive.append(JSON.stringify(tos, null, 2), { name: 'tos_acceptances.json' });
     if (contractorProfile) {
       archive.append(JSON.stringify(contractorProfile, null, 2), { name: 'contractor_profile.json' });
-      // Don't include the document bytes — just metadata + a signed URL
-      // the user can use to download each document (the URL expires in 1h).
+
       archive.append(JSON.stringify(contractorDocs, null, 2), { name: 'contractor_documents.json' });
     }
     archive.finalize();

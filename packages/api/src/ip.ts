@@ -1,12 +1,3 @@
-/**
- * Trustworthy client IP extraction.
- *
- * FIX (API-015 / META-013): All route handlers and auth callbacks must use
- * this helper instead of reading `x-forwarded-for` directly. The raw header
- * is the whole comma-separated list; the rightmost entry is the one set by
- * our trusted outermost proxy (Caddy).
- */
-
 export function clientIp(c: { req: { header: (name: string) => string | undefined }; env?: { remoteAddr?: { address?: string } } }): string {
   const xff = c.req.header('x-forwarded-for');
   if (xff) {

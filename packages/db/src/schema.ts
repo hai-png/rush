@@ -5,7 +5,6 @@ import {
   timestamp, date, index, uniqueIndex, check, primaryKey,
 } from 'drizzle-orm/pg-core';
 
-// ---------- enums ----------
 export const userRole = pgEnum('user_role', ['rider', 'contractor', 'corporate_admin', 'platform_admin']);
 export const verificationStatus = pgEnum('verification_status', ['unverified', 'pending', 'verified', 'rejected']);
 export const subscriptionStatus = pgEnum('subscription_status', ['pending_payment', 'active', 'expired', 'cancelled']);
@@ -40,7 +39,6 @@ export const outboxEventStatus = pgEnum('outbox_event_status', ['pending', 'proc
 const ts = (name: string) => timestamp(name, { withTimezone: true });
 const money = (name: string) => decimal(name, { precision: 12, scale: 2 });
 
-// ---------- tables ----------
 export const users = pgTable('users', {
   id: text('id').primaryKey().$defaultFn(createId),
   phone: text('phone').notNull().unique(),
@@ -81,9 +79,7 @@ export const contractorProfiles = pgTable('contractor_profiles', {
   createdAt: ts('created_at').notNull().defaultNow(),
   updatedAt: ts('updated_at').notNull().defaultNow(),
 }, (t) => ({
-  // §8.1 item 16: rating must be between 0 and 5. Without this check, a bug
-  // could set rating to -100 or 9999, which would render incorrectly in the
-  // rider dashboard and break analytics.
+
   ratingCheck: check('rating_range', sql`${t.rating} between 0 and 5`),
 }));
 
@@ -100,7 +96,7 @@ export const contractorDocuments = pgTable('contractor_documents', {
   uploadedAt: ts('uploaded_at').notNull().defaultNow(),
 }, (t) => ({
   contractorIdx: index().on(t.contractorId, t.type),
-  // FIX (DB-011): dedup duplicate document uploads by content hash.
+
   contractorChecksumUniq: uniqueIndex('contractor_documents_contractor_checksum_uniq').on(t.contractorId, t.checksumSha256),
 }));
 
@@ -122,10 +118,7 @@ export const corporates = pgTable('corporates', {
 export const corporateMembers = pgTable('corporate_members', {
   id: text('id').primaryKey().$defaultFn(createId),
   corporateId: text('corporate_id').notNull().references(() => corporates.id, { onDelete: 'cascade' }),
-  // Note: userId uniqueness is enforced via a PARTIAL unique index below
-  // (corpUserActiveUniq) so that soft-deleted members (deletedAt IS NOT NULL)
-  // can re-join a different corporate. A column-level .unique() would block
-  // re-joining because the old row still exists.
+
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
   employeeId: text('employee_id').notNull(),
   approvalStatus: approvalStatus('approval_status').notNull().default('pending'),
@@ -136,16 +129,13 @@ export const corporateMembers = pgTable('corporate_members', {
   createdAt: ts('created_at').notNull().defaultNow(),
   updatedAt: ts('updated_at').notNull().defaultNow(),
 }, (t) => ({
-  // Partial unique indexes: only enforce uniqueness for ACTIVE (non-deleted)
-  // members. A soft-deleted member can re-join a different corporate, and
-  // their old employeeId can be reused.
+
   corpUserActiveUniq: uniqueIndex('corp_member_user_active_uniq').on(t.userId).where(sql`${t.deletedAt} is null`),
   corpEmpActiveUniq: uniqueIndex('corp_member_corp_emp_active_uniq').on(t.corporateId, t.employeeId).where(sql`${t.deletedAt} is null`),
   corpIdx: index().on(t.corporateId),
-  // FIX (DATA-002): full (non-partial) index on userId for queries that
-  // don't filter deletedAt (e.g. admin lists, retention-cleanup).
+
   userIdIdx: index().on(t.userId),
-  // FIX (DB-010): corporate-reset-monthly cron's WHERE lastResetAt < date_trunc('month', now())
+
   lastResetIdx: index().on(t.lastResetAt),
 }));
 
@@ -182,11 +172,7 @@ export const shuttles = pgTable('shuttles', {
   createdAt: ts('created_at').notNull().defaultNow(),
   updatedAt: ts('updated_at').notNull().defaultNow(),
 }, (t) => ({
-  // FIX (DATA-010): Without these checks, a bug could insert capacity=0 (a
-  // shuttle with zero seats — every bookRide CAS check fails) or capacity=-5
-  // (negative — seatsBooked < -5 is always false, no one can book), or
-  // year=99999. Capacity is bounded to a sane vehicle range (1-100) and
-  // year is bounded to plausible model years.
+
   capacityCheck: check('capacity_positive', sql`${t.capacity} > 0 AND ${t.capacity} <= 100`),
   yearCheck: check('year_valid', sql`${t.year} BETWEEN 1990 AND EXTRACT(YEAR FROM now()) + 1`),
 }));
@@ -204,13 +190,9 @@ export const subscriptionPlans = pgTable('subscription_plans', {
   createdAt: ts('created_at').notNull().defaultNow(),
   updatedAt: ts('updated_at').notNull().defaultNow(),
 }, (t) => ({
-  // FIX (DATA-006): ridesIncluded uses -1 as a magic sentinel for "unlimited".
-  // Without a CHECK, a bug could insert 0 (then rides_used < 0 is always false
-  // — incrementRidesUsed's guard blocks all increments, freezing the sub) or
-  // -5 (semantically meaningless). Constrain to either -1 OR > 0.
+
   ridesIncludedCheck: check('rides_included_valid', sql`${t.ridesIncluded} = -1 OR ${t.ridesIncluded} > 0`),
-  // FIX (DATA-010 / DATA-013): durationDays must be positive (a 0-day plan
-  // expires immediately), and priceETB must be non-negative.
+
   durationDaysCheck: check('duration_days_positive', sql`${t.durationDays} > 0`),
   priceNonNeg: check('price_etb_nonneg', sql`${t.priceETB} >= 0`),
 }));
@@ -234,10 +216,9 @@ export const subscriptions = pgTable('subscriptions', {
   riderStatusIdx: index().on(t.riderId, t.status),
   statusEndIdx: index().on(t.status, t.endDate),
   corpMemberIdx: index().on(t.corporateMemberId),
-  // FIX (DATA-013): prevents endDate < startDate (a bug in subscriptionService.create
-  // could otherwise produce a subscription that immediately expires).
+
   endAfterStartCheck: check('sub_end_after_start', sql`${t.endDate} > ${t.startDate}`),
-  // FIX (DATA-010): ridesUsed can never be negative.
+
   ridesUsedNonNeg: check('sub_rides_used_nonneg', sql`${t.ridesUsed} >= 0`),
 }));
 
@@ -297,16 +278,11 @@ export const payments = pgTable('payments', {
 }, (t) => ({
   statusCreatedIdx: index().on(t.status, t.createdAt),
   riderIdx: index().on(t.riderId),
-  // FIX (DATA-005): Add non-negativity checks for money columns. A bug in
-  // service code (sign flip during refund allocation, Money.sub returning
-  // negative) could previously persist `amount = '-50.00'`. The Money class
-  // throws on negative sub(), but Money.fromDecimal('-50.00').toString()
-  // returns '-50.00' without throwing — so a malicious or buggy caller can
-  // persist negative money. The DB now catches it.
+
   amountNonNeg: check('amount_nonneg', sql`${t.amount} >= 0`),
   refundAmountNonNeg: check('refund_amount_nonneg', sql`${t.refundAmount} >= 0`),
   refundAmountCheck: check('refund_amount_lte_amount', sql`${t.refundAmount} <= ${t.amount}`),
-  // FIX (DATA-002): missing FK indexes used in hot paths.
+
   subscriptionIdx: index().on(t.subscriptionId),
   seatClaimIdx: index().on(t.seatClaimId),
 }));
@@ -325,7 +301,7 @@ export const seatClaims = pgTable('seat_claims', {
   updatedAt: ts('updated_at').notNull().defaultNow(),
 }, (t) => ({
   riderIdx: index().on(t.riderId),
-  // FIX (DATA-002): index on paymentId for the webhook refund-lookup path
+
   paymentIdx: index().on(t.paymentId),
 }));
 
@@ -342,7 +318,7 @@ export const rides = pgTable('rides', {
 }, (t) => ({
   tripRiderUniq: uniqueIndex().on(t.tripId, t.riderId),
   riderIdx: index().on(t.riderId),
-  // FIX (DATA-002): indexes for FK columns used in hot paths
+
   subscriptionIdx: index().on(t.subscriptionId),
   seatClaimIdx: index().on(t.seatClaimId),
 }));
@@ -383,7 +359,7 @@ export const supportTickets = pgTable('support_tickets', {
 }, (t) => ({
   userStatusIdx: index().on(t.userId, t.status),
   statusCreatedIdx: index().on(t.status, t.createdAt),
-  // FIX (DATA-002): indexes for FK columns used in ticket-lookup paths
+
   subscriptionIdx: index().on(t.subscriptionId),
   paymentIdx: index().on(t.paymentId),
 }));
@@ -447,7 +423,7 @@ export const outboxEvents = pgTable('outbox_events', {
 }, (t) => ({
   statusNextIdx: index().on(t.status, t.nextAttemptAt),
   channelIdx: index().on(t.channel, t.status),
-  // FIX (DB-009): GIN index for send-expiry-reminders cron's NOT EXISTS subquery on payload->>'type' / payload->>'subscriptionId'
+
   payloadGinIdx: index('outbox_events_payload_gin').using('gin', sql`${t.payload} jsonb_path_ops`),
 }));
 
@@ -498,16 +474,7 @@ export const otpCodes = pgTable('otp_codes', {
   verified: boolean('verified').notNull().default(false),
   createdAt: ts('created_at').notNull().defaultNow(),
 }, (t) => ({
-  // Partial unique index: only one UNVERIFIED OTP per (phone, purpose) at a time.
-  // We deliberately do NOT include `expires_at > now()` in the predicate —
-  // PostgreSQL requires partial-index predicates to be IMMUTABLE, and now()
-  // is STABLE (depends on transaction start time). Including it would cause
-  // `CREATE INDEX` to fail with "functions in index predicate must be marked
-  // IMMUTABLE". The otpService.send() path already invalidates prior
-  // unverified codes (sets verified=true) before inserting a new one, so
-  // the unique constraint on (phone, purpose) WHERE verified=false is
-  // sufficient to prevent duplicate active codes. Expired-but-unverified
-  // codes are cleaned up by the retention-cleanup cron.
+
   phonePurposeUniq: uniqueIndex('otp_phone_purpose_active_uniq').on(t.phone, t.purpose).where(sql`${t.verified} = false`),
   phonePurposeIdx: index().on(t.phone, t.purpose, t.verified, t.expiresAt),
 }));
@@ -556,26 +523,15 @@ export const shuttlePositions = pgTable('shuttle_positions', {
 });
 
 export const telebirrNotifyEvents = pgTable('telebirr_notify_events', {
-  // ON DELETE RESTRICT (not cascade) — telebirrNotifyEvents is a tamper-evident
-  // audit log of inbound payment notifications. Deleting a payment should NOT
-  // silently destroy the notification record. RESTRICT forces the caller to
-  // explicitly handle the dependency (e.g. by keeping the payment row and
-  // anonymizing its PII instead of deleting it).
-  //
-  // FOLLOW-UP 2 (PAY-002): composite PK on (merchOrderId, outRequestNo, receivedAt).
-  // Telebirr can send out-of-order/supplementary notifications for the same order
-  // (e.g. 'failed' on timeout then 'settled' when it actually completes). The old
-  // single-column PK on merchOrderId dropped the second notification, leaving the
-  // payment in the wrong state. The composite PK records every distinct notification
-  // and the webhook handler applies a state-machine override on conflict.
+
   merchOrderId: text('merch_order_id').notNull().references(() => payments.reference, { onDelete: 'restrict' }),
   tradeStatus: text('trade_status').notNull(),
   outRequestNo: text('out_request_no').notNull(),
   receivedAt: ts('received_at').notNull().defaultNow(),
 }, (t) => ({
-  // Composite PK: each distinct Telebirr notification is recorded.
+
   pk: primaryKey({ columns: [t.merchOrderId, t.outRequestNo, t.receivedAt] }),
-  // Index for "find latest notification for this order" queries.
+
   merchIdx: index('telebirr_notify_events_merch_order_id_index').on(t.merchOrderId, t.receivedAt),
 }));
 
@@ -595,9 +551,6 @@ export const sessions = pgTable('sessions', {
   userExpiresAtIdx: index().on(t.userId, t.expiresAt),
 }));
 
-// FOLLOW-UP 3 (INFRA-009): Durable notification_log for SMS/email/push idempotency.
-// Records every successfully-sent message, keyed by (outbox_event_id, channel),
-// so handlers can skip re-sends on outbox retry. 90-day retention (matches outbox).
 export const notificationLog = pgTable('notification_log', {
   id: text('id').primaryKey().$defaultFn(createId),
   outboxEventId: text('outbox_event_id').notNull(),
@@ -609,6 +562,6 @@ export const notificationLog = pgTable('notification_log', {
   outboxChannelUniq: uniqueIndex('notification_log_outbox_channel_uniq').on(t.outboxEventId, t.channel),
   recipientSentIdx: index('notification_log_recipient_sent_at_index').on(t.recipient, t.sentAt),
   sentIdx: index('notification_log_sent_at_index').on(t.sentAt),
-  // FA-001: match the CHECK constraint in migration 0005.
+
   channelCheck: check('notification_log_channel_check', sql`${t.channel} in ('sms', 'email', 'push')`),
 }));

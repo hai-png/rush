@@ -4,18 +4,6 @@ import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { api } from '../../src/lib/api';
 import { setActiveShuttleId } from './gps-tracker';
 
-/**
- * Mobile trip-start screen for contractors.
- *
- * FIX (MOB-007): The previous implementation had no mobile trip-start flow.
- * The gps-tracker.tsx background task reads `addisride.activeShuttleId` from
- * SecureStore, but no code ever wrote it — so GPS tracking was always a no-op.
- * This screen lets the contractor:
- *   1. Select their assigned shuttle + route + window
- *   2. POST /api/v1/trips (server stamps departTime)
- *   3. Call setActiveShuttleId(shuttleId) so the GPS background task runs
- *   4. Navigate to the GPS tracker screen
- */
 export default function ContractorStartTripScreen() {
   const qc = useQueryClient();
   const { data: profile } = useQuery({
@@ -27,8 +15,7 @@ export default function ContractorStartTripScreen() {
     mutationFn: async (input: { shuttleId: string; routeId: string; window: 'morning' | 'evening' }) =>
       api.POST('/api/v1/trips', { body: input } as any),
     onSuccess: async (_res, variables) => {
-      // FIX (MOB-007): Write the shuttleId to SecureStore so the background
-      // GPS task can report positions.
+
       await setActiveShuttleId(variables.shuttleId);
       qc.invalidateQueries({ queryKey: ['contractor-dashboard'] });
       router.push('/(contractor)/gps-tracker');

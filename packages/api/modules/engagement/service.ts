@@ -9,7 +9,7 @@ const DEFAULT_PREFS: Record<ChannelKey, boolean> = { inApp: true, push: true, sm
 function isQuietHours(start?: string | null, end?: string | null): boolean {
   if (!start || !end) return false;
   const now = new Date().toTimeString().slice(0, 5);
-  return start < end ? (now >= start && now < end) : (now >= start || now < end); // handles overnight window
+  return start < end ? (now >= start && now < end) : (now >= start || now < end);
 }
 
 export const engagementService = {
@@ -24,15 +24,9 @@ export const engagementService = {
     return row;
   },
 
-  /** Fan out one notification envelope to enabled channels, respecting prefs + quiet hours.
-   *  Writes in-app row only if the inApp preference is enabled (or the type is critical). */
   async dispatch(envelope: NotificationEnvelope) {
     const locale = envelope.locale ?? 'en';
-    // Fix the rendered.title/body logic: the previous check
-    // `envelope.title && envelope.body` was wrong — an empty-string body
-    // falsy-coerced to "no body provided" and called renderTemplate,
-    // overwriting the explicitly-provided title. Now we check for nullish
-    // (not falsy), so empty strings are preserved.
+
     const rendered = (envelope.title != null && envelope.body != null)
       ? { title: envelope.title, body: envelope.body }
       : renderTemplate(envelope.type, locale, envelope.data);
@@ -42,10 +36,6 @@ export const engagementService = {
     const critical = CRITICAL_TYPES.includes(envelope.type);
     const quiet = !critical && isQuietHours(prefsRow.quietHoursStart, prefsRow.quietHoursEnd);
 
-    // Honor the inApp preference — the previous implementation always
-    // wrote the in-app row, ignoring the user's `inApp: false` setting.
-    // Critical notifications bypass the inApp preference (they're things
-    // the user must see, like payment failures).
     let row = null;
     if (critical || typePrefs.inApp) {
       [row] = await db.insert(schema.notifications).values({
@@ -53,9 +43,6 @@ export const engagementService = {
       }).returning();
     }
 
-    // Insert all outbox events in a single multi-row insert — the previous
-    // implementation issued 1-3 separate inserts, partially dispatching if
-    // any failed mid-way.
     const events: Array<{ channel: 'push' | 'sms' | 'email'; payload: any }> = [];
     if (typePrefs.push && !quiet) {
       events.push({ channel: 'push', payload: { userId: envelope.userId, title: rendered.title, body: rendered.body, link: envelope.link } });

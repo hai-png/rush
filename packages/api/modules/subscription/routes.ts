@@ -8,8 +8,6 @@ import { db, schema } from '@addis/db';
 import { eq } from 'drizzle-orm';
 import { NotFoundError } from '@addis/shared';
 
-// FIX (META-020): Migrated from bare OpenAPIHono to TypedOpenAPIHono so
-// c.get('session') is typed consistently with the rest of the codebase.
 export const subscriptionRoutes = new TypedOpenAPIHono();
 
 const SubscriptionSchema = z.object({
@@ -17,18 +15,6 @@ const SubscriptionSchema = z.object({
   status: z.string(), ridesUsed: z.number(), startDate: z.string(), endDate: z.string(),
 });
 
-/**
- * Resolve the caller's riderProfile.id from their session.userId.
- *
- * The schema FKs `subscriptions.riderId` -> `riderProfiles.id`, but the
- * previous routes passed `session.userId` (which is `users.id`) directly.
- * This caused one of two failure modes depending on FK enforcement:
- *   - FK enforced: every subscription create threw a FK violation.
- *   - FK not enforced: the row was stored with `users.id`, but
- *     `dashboard/service.ts` queries with `riderProfiles.id` — the rider's
- *     dashboard never showed their active subscription.
- * The fix is to look up the riderProfile by userId and use its id.
- */
 async function riderProfileIdFor(userId: string): Promise<string> {
   const [profile] = await db.select().from(schema.riderProfiles).where(eq(schema.riderProfiles.userId, userId));
   if (!profile) throw new NotFoundError('Rider profile not found');

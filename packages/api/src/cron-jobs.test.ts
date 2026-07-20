@@ -1,23 +1,12 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 
-/**
- * Cron registry tests. Verifies the consolidated CRON_JOBS array (the single source
- * of truth shared by the HTTP cron routes and the worker setInterval loops):
- *   - Every job has a unique name
- *   - Every job has a route segment matching its name
- *   - Every job has a positive intervalMs
- *   - CRON_JOBS_BY_NAME lookup is consistent with the array
- *   - The set of job names matches what the HTTP routes expect
- */
-
 describe('CRON_JOBS registry', () => {
   beforeEach(() => vi.clearAllMocks());
 
   it('exposes the full set of cron jobs the system expects', async () => {
     const { CRON_JOBS } = await import('./cron-jobs');
     const names = CRON_JOBS.map((j) => j.name).sort();
-    // FA: added 'anchor-audit-chain', 'verify-audit-chain-anchors' (Follow-up 1),
-    // and 'cleanup-old-outbox-and-notifications' (Follow-up 3).
+
     expect(names).toEqual([
       'anchor-audit-chain',
       'archive-old-records',
@@ -93,8 +82,7 @@ describe('withLock', () => {
       db: {
         transaction: vi.fn(async (fn: (tx: any) => Promise<any>) => {
           const tx = {
-            // withLock now casts the execute() result directly to an array;
-            // return the array shape (not { rows: [...] }).
+
             execute: vi.fn(async () => [{ locked: true }]),
           };
           return fn(tx);

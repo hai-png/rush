@@ -16,12 +16,7 @@ const NAV = [
 ];
 
 export default async function AdminLayout({ children }: { children: React.ReactNode }) {
-  // CRITICAL FIX: the previous layout rendered unconditionally — no auth
-  // check, no role check, no redirect. Any authenticated user could
-  // navigate to /admin and see the entire admin nav structure (and the
-  // page components would attempt API calls that 403'd, but the layout
-  // shell rendered regardless). Now we check the session and role here;
-  // non-admins are redirected to their own dashboard.
+
   const session = await auth();
   if (!session) {
     redirect('/login?next=/admin');

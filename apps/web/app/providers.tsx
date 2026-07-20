@@ -14,9 +14,6 @@ export function Providers({ children, initialLocale, initialTheme }: {
     defaultOptions: { queries: { staleTime: 30_000, retry: 1 }, mutations: { retry: 0 } },
   }));
 
-  // FE-008: expose the active QueryClient to the SDK's onUnauthorized
-  // callback (apps/web/lib/sdk.ts) so a 401 can clear cached
-  // authenticated data after signOut. Cleared on unmount.
   useEffect(() => {
     setQueryClientForSdk(queryClient);
     return () => setQueryClientForSdk(null);

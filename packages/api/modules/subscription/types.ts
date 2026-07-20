@@ -9,7 +9,6 @@ export const CreateSubscriptionInput = z.object({
 });
 export type CreateSubscriptionInput = z.infer<typeof CreateSubscriptionInput> & { riderId: string };
 
-/** What other modules are allowed to know about a subscription (not the raw row/service). */
 export interface SubscriptionSummary {
   id: string; riderId: string; status: string; routeId: string | null;
   ridesUsed: number; ridesIncluded: number; endDate: Date;

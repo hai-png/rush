@@ -9,22 +9,6 @@ const env = loadEnv();
 
 export const healthRoutes = new TypedOpenAPIHono();
 
-/**
- * Lightweight liveness probe — for Docker/k8s healthchecks, load balancers,
- * and uptime monitors. Returns 200 OK if the process is alive and can reach
- * the DB; 503 otherwise. No auth required, but exposes NO internal state
- * (no DB latency, no Redis state, no Telebirr status, no migration version,
- * no commit SHA).
- *
- * FIX (OPS-007): The previous /health endpoint exposed DB latency, Redis
- * latency, Telebirr reachability + HTTP status, migration hash, app version,
- * and commit SHA — all unauthenticated. An attacker could fingerprint the
- * deployment, detect when Telebirr was down (and time payment-fraud
- * attempts), check migration versions to correlate with known CVEs, and
- * use the 503 status as a cheap DoS canary. Now /healthz is the public
- * liveness probe (returns only OK/down), and /health (below) is the
- * admin-gated detailed probe for operators.
- */
 healthRoutes.get('/healthz', async (c) => {
   try {
     await db.execute(sql`select 1`);
@@ -34,15 +18,8 @@ healthRoutes.get('/healthz', async (c) => {
   }
 });
 
-/**
- * Detailed health check — for operators / admin UI.
- *
- * FIX (OPS-007): Now requires platform_admin auth. The previous
- * implementation was unauthenticated and exposed DB/Redis/Telebirr/migration
- * state to anyone.
- */
 healthRoutes.get('/health', async (c) => {
-  // Auth gate — refuse to expose internal state to unauthenticated callers.
+
   const session = c.get('session');
   if (!session || session.role !== 'platform_admin') {
     return c.json({ error: { code: 'UNAUTHORIZED', message: 'Admin auth required for detailed health', requestId: c.get('requestId') } }, 401);
@@ -63,10 +40,6 @@ healthRoutes.get('/health', async (c) => {
     checks.redis = { status: 'ok', latencyMs: Date.now() - t0 };
   } catch { checks.redis = { status: 'down' }; overall = overall === 'down' ? 'down' : 'degraded'; }
 
-  // Telebirr: actually probe reachability rather than just checking the env
-  // var. A simple GET to the base URL (or a token request) tells us if the
-  // service is up and our credentials are valid. Use a short timeout so a
-  // hanging telebirr doesn't drag the whole health check down.
   if (env.TELEBIRR_FABRIC_APP_ID) {
     try {
       const controller = new AbortController();
@@ -95,9 +68,6 @@ healthRoutes.get('/health', async (c) => {
     checks.disk = { status: 'ok', freeBytes: stats.bfree * stats.bsize };
   } catch { checks.disk = { status: 'degraded' }; }
 
-  // Migrations: query the DB's schema_migrations table (Drizzle's default)
-  // for the latest applied hash. If the table doesn't exist or is empty,
-  // migrations haven't run.
   try {
     const result = await db.execute(sql`select hash from __drizzle_migrations order by created_at desc limit 1`).catch(() => null);
     if (result && (result as any).rows?.length) {

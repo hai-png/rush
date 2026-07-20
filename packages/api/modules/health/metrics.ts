@@ -2,10 +2,6 @@ import { Hono } from 'hono';
 import { Registry, Counter, Histogram, Gauge, collectDefaultMetrics } from 'prom-client';
 import { timingSafeEqual } from 'node:crypto';
 
-// FIX (COMPLEX-002): Read METRICS_PASSWORD from process.env directly (not
-// loadEnv) so tests can mutate it between requests without module reset.
-// The previous comment referenced a loadEnv() fallback that doesn't exist.
-
 export const registry = new Registry();
 collectDefaultMetrics({ register: registry });
 
@@ -18,23 +14,14 @@ export const activeSubscriptionsGauge = new Gauge({ name: 'active_subscriptions'
 
 export const metricsRoutes = new Hono();
 metricsRoutes.get('/metrics', async (c) => {
-  // Guard explicitly against an unset/empty METRICS_PASSWORD. The previous
-  // implementation computed `expected = Basic base64('metrics:')` when the
-  // env var was unset — an attacker sending `Authorization: Basic base64('metrics:')`
-  // would authenticate successfully. With an empty password, timingSafeEqual
-  // on two equal-length zero-length buffers returns true.
-  //
-  // Read from process.env directly (not the cached `env` object) so tests
-  // that mutate process.env.METRICS_PASSWORD between imports see the new
-  // value without needing a full module reset.
+
   const password = process.env.METRICS_PASSWORD ?? '';
   if (!password || password.length < 16) {
     return c.text('Metrics endpoint not configured (METRICS_PASSWORD missing or too short)', 503);
   }
   const auth = c.req.header('Authorization') ?? '';
   const expected = `Basic ${Buffer.from(`metrics:${password}`).toString('base64')}`;
-  // Length check before timingSafeEqual — otherwise Node throws on unequal
-  // buffer lengths, leaking timing info via the error path.
+
   const ok = auth.length === expected.length && timingSafeEqual(Buffer.from(auth), Buffer.from(expected));
   if (!ok) return c.text('Unauthorized', 401);
   return c.text(await registry.metrics(), 200, { 'Content-Type': registry.contentType });

@@ -15,10 +15,7 @@ export const operationsService = {
   async startTrip(contractorId: string, input: { shuttleId: string; routeId: string; window: 'morning' | 'evening'; departTime: Date }) {
     const [shuttle] = await db.select().from(schema.shuttles).where(eq(schema.shuttles.id, input.shuttleId));
     if (!shuttle || shuttle.contractorId !== contractorId) throw new NotFoundError('Shuttle not found');
-    // New safety checks the previous implementation skipped:
-    //   1. Shuttle must be active (a deactivated shuttle shouldn't run trips).
-    //   2. departTime must be in the future (no back-dating trips).
-    //   3. No existing in_transit trip for the same shuttle (no double-driving).
+
     if (!shuttle.isActive) throw new BadRequestError('Shuttle is not active');
     if (input.departTime.getTime() < Date.now() - 60_000) throw new BadRequestError('departTime must be in the future');
     const [existing] = await db.select().from(schema.trips)
@@ -31,10 +28,7 @@ export const operationsService = {
 
   async completeTrip(contractorId: string, tripId: string) {
     return db.transaction(async (tx) => {
-      // CAS update: only complete a trip that is currently in_transit.
-      // The previous implementation had this guard, but only for the
-      // contractorId match — it didn't enforce ridesUsed increment only
-      // on active subscriptions.
+
       const [trip] = await tx.update(schema.trips)
         .set({ status: 'completed', arriveTime: new Date(), updatedAt: new Date() })
         .where(and(eq(schema.trips.id, tripId), eq(schema.trips.contractorId, contractorId), eq(schema.trips.status, 'in_transit')))
@@ -50,7 +44,6 @@ export const operationsService = {
         .set({ status: 'no_show', updatedAt: new Date() })
         .where(and(eq(schema.rides.tripId, tripId), eq(schema.rides.status, 'booked')));
 
-      // FIX (DB-005): bulk UPDATE seat_claims + bulk SELECT subs+plans.
       const seatClaimIds = boarded.map(r => r.seatClaimId).filter((id): id is string => id != null);
       if (seatClaimIds.length > 0) {
         await tx.update(schema.seatClaims)
@@ -78,28 +71,12 @@ export const operationsService = {
     });
   },
 
-  /**
-   * Book a ride on a scheduled trip.
-   *
-   * The previous implementation had multiple IDOR / race-condition bugs:
-   *   1. No ownership check on subscriptionId/seatClaimId — a rider could
-   *      pass another rider's IDs and exhaust their subscription or
-   *      consume their seat claim.
-   *   2. No capacity check — `seatsBooked = trip.seatsBooked + 1` was a
-   *      non-atomic read-then-write (race) AND had no comparison to
-   *      shuttle.capacity (overbooking silently allowed).
-   *   3. Allowed booking with NEITHER subscriptionId NOR seatClaimId —
-   *      a free ride.
-   *   4. `riderId` was passed through raw — same FK mismatch as elsewhere.
-   * Now: ownership is verified, capacity is enforced atomically, and at
-   * least one entitlement is required.
-   */
   async bookRide(riderId: string, input: { tripId: string; subscriptionId?: string; seatClaimId?: string; pickupStop?: string }) {
     if (!input.subscriptionId && !input.seatClaimId) {
       throw new BadRequestError('A subscriptionId or seatClaimId is required to book a ride');
     }
     const [trip] = await db.select().from(schema.trips).where(eq(schema.trips.id, input.tripId));
-    // FIX (API-001): accept 'scheduled' OR 'in_transit' (startTrip creates as 'in_transit').
+
     if (!trip || (trip.status !== 'scheduled' && trip.status !== 'in_transit')) {
       throw new BadRequestError('Trip not open for booking');
     }
@@ -120,7 +97,6 @@ export const operationsService = {
       if (claim.status !== 'confirmed') throw new BadRequestError('Seat claim is not confirmed');
     }
 
-    // FIX (API-003): wrap CAS + INSERT in one transaction.
     try {
       return await db.transaction(async (tx) => {
         const capacity = shuttle?.capacity ?? 0;
@@ -142,22 +118,6 @@ export const operationsService = {
     }
   },
 
-  /**
-   * Board a ride.
-   *
-   * FA-007 (re-applies API-006): The previous implementation had a TOCTOU race
-   * with `completeTrip`. It first UPDATEd the ride to 'boarded' (CAS on
-   * ride.status='booked'), then separately SELECTed the trip to verify it was
-   * 'in_transit', and on mismatch UPDATEd the ride back to 'booked' to revert.
-   * Under concurrent board + completeTrip, the ride could end up 'booked' on a
-   * 'completed' trip AND have ridesUsed incremented (then not decremented on revert).
-   *
-   * The fix collapses the check-then-update into a single atomic CAS UPDATE that
-   * uses a subquery on `trips` to assert the trip is still 'in_transit' at the
-   * moment the UPDATE applies. If 0 rows are updated, the trip was no longer
-   * 'in_transit' (concurrently completed or cancelled) and we surface a
-   * ConflictError. There's no revert step — the UPDATE never applied.
-   */
   async board(riderId: string, rideId: string) {
     const [ride] = await db.update(schema.rides)
       .set({ status: 'boarded', updatedAt: new Date() })
@@ -165,8 +125,7 @@ export const operationsService = {
         eq(schema.rides.id, rideId),
         eq(schema.rides.riderId, riderId),
         eq(schema.rides.status, 'booked'),
-        // FA-007: subquery — the ride's trip must still be in_transit at the
-        // moment the UPDATE applies. Atomic with the row write under MVCC.
+
         sql`EXISTS (SELECT 1 FROM ${schema.trips} WHERE ${schema.trips.id} = ${schema.rides.tripId} AND ${schema.trips.status} = 'in_transit')`,
       ))
       .returning();
@@ -174,16 +133,14 @@ export const operationsService = {
     return ride;
   },
 
-  /** Atomic GPS upsert w/ dedup + min-distance guard. Redis cache managed by caller. */
   async reportPosition(shuttleId: string, pos: { lat: number; lng: number; heading?: number; speed?: number }) {
-    // Validate lat/lng ranges — the previous implementation accepted
-    // `lat: 999, lng: 999` and stored NaN in the haversine computation.
+
     if (!Number.isFinite(pos.lat) || pos.lat < -90 || pos.lat > 90) throw new BadRequestError('lat must be in [-90, 90]');
     if (!Number.isFinite(pos.lng) || pos.lng < -180 || pos.lng > 180) throw new BadRequestError('lng must be in [-180, 180]');
 
     const [existing] = await db.select().from(schema.shuttlePositions).where(eq(schema.shuttlePositions.shuttleId, shuttleId));
     if (existing && haversineMeters([existing.lat, existing.lng], [pos.lat, pos.lng]) < MIN_GPS_MOVE_METERS) {
-      return existing; // dedup: no meaningful movement
+      return existing;
     }
     const [row] = await db.insert(schema.shuttlePositions)
       .values({ shuttleId, ...pos, updatedAt: new Date() })

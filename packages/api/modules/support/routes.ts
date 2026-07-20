@@ -32,10 +32,7 @@ supportRoutes.post('/tickets/:id/messages', async (c) => {
   return c.body(null, 201);
 });
 supportRoutes.patch('/tickets/:id', async (c) => {
-  // Users can trigger `user.reopened`; only platform_admin can trigger
-  // `staff.resolved`. The previous implementation required platform_admin
-  // for BOTH events, so users couldn't reopen their own resolved tickets —
-  // contradicting the state machine's `user.reopened` event name.
+
   const session = c.get('session');
   const { event } = z.object({ event: z.enum(['staff.resolved', 'user.reopened']) }).parse(await c.req.json());
   if (event === 'staff.resolved' && session.role !== 'platform_admin') {

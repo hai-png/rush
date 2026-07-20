@@ -18,14 +18,6 @@ const Schema = z.object({
 type FormValues = z.infer<typeof Schema>;
 const STEPS = ['Account', 'Commute', 'Review'];
 
-// FIX (FE-007): The previous onSubmit handler did
-//   `if (error) return;`
-// — silently swallowing every API error. A rider who hit a 409 (duplicate
-// phone), a breach-listed password rejection, or a 5xx saw the form just
-// sit there with no feedback. Now we surface a code-specific message via
-// both a toast (visible feedback) and an aria-live `<p role="alert">` so
-// screen readers announce it. The alert message is also returned for
-// unit-testing.
 function describeSignupError(err: any): string {
   const code = err?.error?.code ?? err?.code;
   const message: string | undefined = err?.error?.message ?? err?.message;
@@ -50,9 +42,7 @@ export default function RiderSignupPage() {
   const router = useRouter();
   const client = useApiClient();
   const { push: pushToast } = useToast();
-  // FE-007: serverError is rendered in a <p role="alert"> so screen
-  // readers announce it. Cleared on every new submit attempt and on
-  // successful navigation between steps.
+
   const [serverError, setServerError] = useState<string | null>(null);
   const { register, handleSubmit, trigger, setValue, watch, formState: { errors, isSubmitting } } =
     useForm<FormValues>({ resolver: zodResolver(Schema), defaultValues: { phone: '+251' } });
@@ -68,7 +58,7 @@ export default function RiderSignupPage() {
       body: { kind: 'rider', name: data.name, phone: data.phone, password: data.password, homeArea: data.homeArea, workArea: data.workArea },
     });
     if (error) {
-      // FE-007: surface API errors via toast + aria-live alert.
+
       const msg = describeSignupError(error);
       setServerError(msg);
       pushToast({ title: msg, variant: 'error' });
@@ -108,8 +98,7 @@ export default function RiderSignupPage() {
           </>
         )}
 
-        {/* FE-007: aria-live alert for server-side errors. role="alert"
-            makes screen readers announce it immediately when it appears. */}
+        {}
         {serverError && (
           <p role="alert" aria-live="assertive" className="text-sm text-destructive">
             {serverError}

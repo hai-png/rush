@@ -1,9 +1,5 @@
 import { CURRENT_TOS_VERSION } from '@addis/shared';
 
-// Fixed effective date — the previous implementation used
-// `new Date().toLocaleDateString()`, which changed on every page load and
-// was legally meaningless (the terms appeared to have been effective "today"
-// whenever viewed). Now a constant set at deploy time.
 const TOS_EFFECTIVE_DATE = '2025-01-15';
 
 export default function TermsPage() {

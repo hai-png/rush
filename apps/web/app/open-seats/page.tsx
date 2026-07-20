@@ -6,7 +6,6 @@ import { useFormatMoney } from '@addis/i18n';
 import { useApiClient } from '@/lib/sdk';
 import { useToast } from '@addis/ui';
 
-// Allow-list — same as checkout page.
 const ALLOWED_CHECKOUT_HOSTS = new Set([
   'superapp.ethiomobilemoney.et',
   'developerportal.ethiotelebirr.et',
@@ -30,14 +29,9 @@ export default function OpenSeatsPage() {
     queryFn: async () => (await client.GET('/api/v1/seat-releases', { params: { query: { limit: 20 } } })).data,
   });
 
-  // Track which seat is being claimed so only that button shows loading —
-  // the previous implementation used `claim.isPending` for ALL buttons,
-  // making every seat look like it was being claimed.
   const claimingId = useMutation({
     mutationFn: async (seatReleaseId: string) => {
-      // Stable idempotency key per seat release — the previous
-      // implementation regenerated `crypto.randomUUID()` on every click,
-      // defeating idempotency on retry.
+
       return client.POST('/api/v1/seat-claims', {
         headers: { 'Idempotency-Key': `claim:${seatReleaseId}` },
         body: { seatReleaseId, paymentMethod: 'telebirr' },
@@ -57,8 +51,7 @@ export default function OpenSeatsPage() {
       qc.invalidateQueries({ queryKey: ['seat-releases'] });
     },
     onError: (err: any) => {
-      // Don't assume the error is "seat already claimed" — the previous
-      // message was misleading for network errors, auth failures, etc.
+
       const msg = err?.message ?? 'Could not claim this seat';
       push({ title: msg, variant: 'error' });
     },

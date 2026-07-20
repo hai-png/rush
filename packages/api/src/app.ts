@@ -8,12 +8,6 @@ import { tosGateMiddleware } from './middleware/tos-gate';
 
 import { csrfProtection } from './middleware/csrf';
 
-// FIX (OPS-006): Wire the Prometheus metrics so /metrics actually reports
-// business signal. The metrics were defined in modules/health/metrics.ts
-// but never observed — the endpoint returned only prom-client's default
-// process metrics (CPU, heap, GC). The timing middleware below observes
-// http_request_duration_seconds on every request, with route labels
-// normalized so cuid2/uuid path segments don't explode cardinality.
 import { httpRequestDuration } from '../modules/health/metrics';
 
 import { catalogRoutes } from '../modules/catalog/routes';
@@ -36,17 +30,12 @@ import { tosRoutes } from '../modules/tos/routes';
 export const app = new OpenAPIHono();
 
 app.use('*', requestContext);
-app.use('*', authMiddleware);       // populates c.get('session') if present; does not 401 by default
-app.use('*', csrfProtection);       // CSRF double-submit cookie for cookie-auth'd state-changing requests
-app.use('*', rateLimitMiddleware);  // must run after authMiddleware — several rules rate-limit per-user via c.get('session')
-app.use('*', tosGateMiddleware);    // 409 if authenticated + stale ToS
-app.use('/api/v1/*', idempotencyMiddleware); // POST only, internally
+app.use('*', authMiddleware);
+app.use('*', csrfProtection);
+app.use('*', rateLimitMiddleware);
+app.use('*', tosGateMiddleware);
+app.use('/api/v1/*', idempotencyMiddleware);
 
-// FIX (META-005): Timing middleware MUST be registered BEFORE app.route()
-// calls. In Hono v4, middleware registered after a matched route does not
-// execute — the route handler returns a Response without calling next(),
-// stopping the chain. The previous placement (after routes) meant the
-// histogram was never observed for any matched route.
 app.use('*', async (c, next) => {
   const start = Date.now();
   await next();
@@ -56,24 +45,22 @@ app.use('*', async (c, next) => {
     .replace(/\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '/:id');
   try {
     httpRequestDuration.labels(c.req.method, route, String(c.res.status)).observe(durationSec);
-  } catch {
-    // Don't let metrics observation break the response.
-  }
+  } catch {}
 });
 
 app.route('/api/v1', catalogRoutes);
 app.route('/api/v1/auth', identityRoutes);
 app.route('/api/v1/subscriptions', subscriptionRoutes);
-app.route('/api/v1', marketplaceRoutes); // seat-releases, seat-claims
-app.route('/api/v1', operationsRoutes);  // trips, rides, shuttle-positions
-app.route('/api/v1', supportRoutes);     // tickets, faq
-app.route('/api/v1', engagementRoutes);   // notifications, announcements
+app.route('/api/v1', marketplaceRoutes);
+app.route('/api/v1', operationsRoutes);
+app.route('/api/v1', supportRoutes);
+app.route('/api/v1', engagementRoutes);
 app.route('/api/v1/corporate', corporateRoutes);
 app.route('/api/v1/admin', adminRoutes);
 app.route('/api/v1/cron', cronRoutes);
 app.route('/api/v1/webhooks', webhookRoutes);
-app.route('/api/v1', healthRoutes);       // /api/v1/health
-app.route('/api/v1', metricsRoutes);      // /api/v1/metrics
+app.route('/api/v1', healthRoutes);
+app.route('/api/v1', metricsRoutes);
 app.route('/api/v1/account', accountRoutes);
 app.route('/api/v1/dashboard', dashboardRoutes);
 app.route('/api/v1/tos', tosRoutes);

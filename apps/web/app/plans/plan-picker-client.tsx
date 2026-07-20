@@ -6,15 +6,6 @@ import { useToast } from '@addis/ui';
 import { useFormatMoney } from '@addis/i18n';
 import { Check } from 'lucide-react';
 
-/**
- * Client component for the plan-picker page. Renders the grid of subscription
- * plans + the list of routes, tracks the user's selections in local state,
- * and (when both are chosen) navigates to /checkout.
- *
- * Extracted from `page.tsx` (TEST-001) so the presentational layer can be
- * unit-tested in isolation — `page.tsx` keeps the data-fetching + loading +
- * error states and forwards the loaded data here as props.
- */
 export type PlanPickerPlan = {
   id: string;
   name: string;

@@ -44,13 +44,13 @@ export const dashboardService = {
       .orderBy(desc(schema.trips.departTime)).limit(1);
 
     if (!trip) return null;
-    return { ...trip, pickupStop: sub.morningSlot ?? 'Nearest stop', destinationStop: trip.destination, etaMinutes: 8 }; // ETA refined client-side from live position per §12
+    return { ...trip, pickupStop: sub.morningSlot ?? 'Nearest stop', destinationStop: trip.destination, etaMinutes: 8 };
   },
 
   async contractor(userId: string) {
     const [profile] = await db.select().from(schema.contractorProfiles).where(eq(schema.contractorProfiles.userId, userId));
     if (!profile) return null;
-    // TODO: real earnings ledger is a future module extension. For now, return 0.00.
+
     return { verificationStatus: profile.verificationStatus, rating: profile.rating, earningsThisMonth: '0.00' };
   },
 

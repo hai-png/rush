@@ -1,11 +1,6 @@
 import { redirect } from 'next/navigation';
 import { auth } from '@/auth';
 
-/**
- * Contractor dashboard layout. Guards /dashboard/contractor/* — only
- * authenticated users with role='contractor' can access. Unauthenticated
- * visitors redirect to /login; wrong-role users get a 403.
- */
 export default async function ContractorDashboardLayout({ children }: { children: React.ReactNode }) {
   const session = await auth();
   if (!session) redirect('/login?next=/dashboard/contractor');

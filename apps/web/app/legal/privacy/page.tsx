@@ -1,14 +1,5 @@
 import { DPO_CONTACT } from '@addis/shared';
 
-/**
- * Privacy Policy — substantively compliant with Ethiopia's Data Protection
- * Proclamation 1321/2024 (and aligned with GDPR principles for any users
- * in the EU/EEA). The previous version was 2 sentences and explicitly
- * claimed compliance with no substantive policy — worse than not claiming
- * it. This page now enumerates: data categories, purposes, legal bases,
- * retention, third-party recipients, cross-border transfers, user rights,
- * and complaint mechanisms.
- */
 export default function PrivacyPage() {
   return (
     <article className="prose dark:prose-invert max-w-2xl mx-auto px-6 py-16">

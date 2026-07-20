@@ -1,26 +1,14 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 
-/**
- * In-memory Redis fallback tests. Covers the C4 fix:
- *   - incr() preserves the existing expiresAt (was dropping it, locking out users
- *     forever after the first rate-limit hit)
- *   - ttl() returns -2 for missing keys, -1 for keys without expiry, and the
- *     remaining seconds for keys with expiry (matches real Redis semantics)
- *   - sweep() proactively removes expired entries
- *   - set({nx:true}) refuses to overwrite an existing key
- *
- * We force the fallback path by clearing REDIS_URL before importing the module.
- */
-
 describe('In-memory Redis fallback', () => {
   let redis: any;
 
   beforeEach(async () => {
     vi.resetModules();
-    // Force the fallback by setting REDIS_URL to empty before import
+
     vi.doMock('@addis/shared', () => ({
       loadEnv: () => ({
-        REDIS_URL: undefined, // forces the InMemoryFallback branch
+        REDIS_URL: undefined,
         NODE_ENV: 'test',
         LOG_LEVEL: 'error',
       }),
@@ -32,7 +20,6 @@ describe('In-memory Redis fallback', () => {
     await redis.set('rl:foo', '1', { ex: 600 });
     expect(await redis.ttl('rl:foo')).toBeGreaterThan(0);
 
-    // Three more INCRs — none should reset the TTL
     const before = await redis.ttl('rl:foo');
     await redis.incr('rl:foo');
     await redis.incr('rl:foo');
@@ -40,7 +27,7 @@ describe('In-memory Redis fallback', () => {
     const after = await redis.ttl('rl:foo');
 
     expect(after).toBeGreaterThan(0);
-    // TTL should be approximately unchanged (within 2 seconds of slack)
+
     expect(Math.abs(before - after)).toBeLessThanOrEqual(2);
   });
 
@@ -57,9 +44,7 @@ describe('In-memory Redis fallback', () => {
     await redis.set('nx-key', 'first');
     const result = await redis.set('nx-key', 'second', { nx: true });
     expect(result).toBeNull();
-    // The original value should still be there — we can read it back via hgetall-style
-    // by setting it as a hash and reading back, but for plain strings we just check
-    // that the second set didn't take effect by re-issuing the original set.
+
     await redis.set('nx-key', 'first-confirmed');
     expect(await redis.ttl('nx-key')).toBe(-1);
   });

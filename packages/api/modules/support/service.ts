@@ -5,16 +5,7 @@ import { z } from 'zod';
 import { ticketState } from './state';
 
 export const supportService = {
-  /**
-   * Create a support ticket.
-   *
-   * The previous implementation accepted `subscriptionId` and `paymentId`
-   * from the request body without verifying that those entities belong to
-   * the caller. A rider could attach another rider's subscription/payment
-   * ID — when support staff later viewed the ticket, they'd see the foreign
-   * IDs and might disclose details about them to the ticket creator.
-   * Now we verify ownership of both before inserting the ticket.
-   */
+
   async createTicket(userId: string, input: { subject: string; body: string; category: string; subscriptionId?: string; paymentId?: string }) {
     if (input.subscriptionId) {
       const [profile] = await db.select().from(schema.riderProfiles).where(eq(schema.riderProfiles.userId, userId));
@@ -36,7 +27,7 @@ export const supportService = {
   },
 
   async listForUser(userId: string, isStaff: boolean, opts?: { limit?: number }) {
-    // FIX (DB-014): apply limit clamp to both paths.
+
     const rawLimit = opts?.limit ?? 50;
     const limit = Math.min(Math.max(1, Math.trunc(rawLimit)), 500);
     if (isStaff) return db.select().from(schema.supportTickets).orderBy(schema.supportTickets.createdAt).limit(limit);
@@ -53,14 +44,6 @@ export const supportService = {
     return t;
   },
 
-  /**
-   * Reply to a ticket.
-   *
-   * The previous implementation allowed ANY authenticated user to reply to
-   * ANY ticket by ID — no ownership check for non-staff. A rider could spam
-   * messages on other riders' tickets. Now: non-staff callers can only
-   * reply to their own tickets.
-   */
   async reply(authorId: string, isStaff: boolean, ticketId: string, body: string) {
     return db.transaction(async (tx) => {
       const [ticket] = await tx.select().from(schema.supportTickets).where(eq(schema.supportTickets.id, ticketId));
@@ -76,13 +59,7 @@ export const supportService = {
         }).where(eq(schema.supportTickets.id, ticketId));
         await tx.insert(schema.outboxEvents).values({ channel: 'notification', payload: { type: 'support_reply', userId: ticket.userId } });
       } else if (!isStaff && (ticket.status === 'resolved' || ticket.status === 'closed')) {
-        // FIX (ARCH-008): The previous implementation only handled the
-        // `resolved -> open` transition. A user replying to a `closed`
-        // ticket added a ticket_messages row but left the ticket status
-        // unchanged — the reply was effectively buried, invisible to staff
-        // monitoring the open queue. The state machine declares
-        // `closed -> open (user.reopened)` as a legal transition, so this
-        // branch now matches the state machine's contract.
+
         const t = ticketState.resolve(ticket.status, 'user.reopened');
         await tx.update(schema.supportTickets).set({
           status: t.to, resolvedAt: null, closedAt: null, updatedAt: new Date(),
@@ -94,15 +71,12 @@ export const supportService = {
   async setStatus(adminId: string, ticketId: string, event: 'staff.resolved' | 'user.reopened') {
     const [ticket] = await db.select().from(schema.supportTickets).where(eq(schema.supportTickets.id, ticketId));
     if (!ticket) throw new NotFoundError('Ticket not found');
-    // FIX (SEC-002): ownership check for user.reopened (IDOR fix).
+
     if (event === 'user.reopened' && ticket.userId !== adminId) {
       throw new ForbiddenError('Not your ticket');
     }
     const t = ticketState.resolve(ticket.status, event);
-    // Populate resolvedById when transitioning to 'resolved' — the column
-    // was added to the schema but never written by the previous implementation,
-    // leaving the resolver unrecorded. Clear it on reopen so a stale resolver
-    // isn't displayed for a re-opened ticket.
+
     await db.update(schema.supportTickets).set({
       status: t.to,
       resolvedAt: t.to === 'resolved' ? new Date() : ticket.resolvedAt,
@@ -113,7 +87,6 @@ export const supportService = {
     return t;
   },
 
-  /** Cron: auto-close resolved tickets after 7 days of no reopen. */
   async autoCloseStale() {
     return db.update(schema.supportTickets).set({ status: 'closed', closedAt: new Date(), updatedAt: new Date() })
       .where(and(eq(schema.supportTickets.status, 'resolved'), lt(schema.supportTickets.resolvedAt, new Date(Date.now() - 7 * 86400_000))))
@@ -121,9 +94,6 @@ export const supportService = {
   },
 };
 
-// Strict zod schemas for FAQ CRUD — the previous faqService accepted
-// `input: any` and spread it into the DB update, a mass-assignment
-// vulnerability (callers could overwrite helpfulYes/helpfulNo/sortOrder).
 const FaqInput = z.object({
   question: z.string().min(3).max(500),
   answer: z.string().min(1).max(5000),

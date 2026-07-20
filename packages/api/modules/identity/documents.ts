@@ -14,14 +14,12 @@ export const documentService = {
   async upload(contractorId: string, input: { type: (typeof DOC_TYPES)[number]; filename: string; buffer: Buffer }) {
     if (input.buffer.byteLength > MAX_SIZE_BYTES) throw new BadRequestError('File exceeds 10MB limit');
 
-    // Never trust client-declared MIME — sniff magic bytes
     const sniffed = await fileTypeFromBuffer(input.buffer);
     const mimeType = sniffed?.mime ?? 'application/octet-stream';
     if (!ALLOWED_MIME.has(mimeType)) throw new BadRequestError('Only PDF, JPEG, PNG allowed');
 
     const checksum = createHash('sha256').update(input.buffer).digest('hex');
 
-    // Dedupe by checksum within this contractor's docs of the same type
     const [dup] = await db.select().from(schema.contractorDocuments)
       .where(and(eq(schema.contractorDocuments.contractorId, contractorId), eq(schema.contractorDocuments.checksumSha256, checksum)));
     if (dup) return dup;
@@ -29,7 +27,6 @@ export const documentService = {
     const storageKey = `contractors/${contractorId}/${input.type}/${checksum}`;
     await s3.putObject(storageKey, input.buffer, mimeType);
 
-    // Async malware scan via outbox — does not block upload response
     const [doc] = await db.transaction(async (tx) => {
       const inserted = await tx.insert(schema.contractorDocuments).values({
         contractorId, type: input.type, originalFilename: input.filename,
@@ -37,7 +34,6 @@ export const documentService = {
       }).returning();
       await tx.insert(schema.outboxEvents).values({ channel: 'webhook', payload: { kind: 'clamav_scan', storageKey } });
 
-      // First document submission moves unverified -> pending
       const [profile] = await tx.select().from(schema.contractorProfiles).where(eq(schema.contractorProfiles.id, contractorId));
       if (profile?.verificationStatus === 'unverified') {
         const t = contractorVerificationState.resolve('unverified', 'documents.submitted');
@@ -63,17 +59,11 @@ export const documentService = {
     await s3.deleteObject(doc.storageKey);
   },
 
-  /**
-   * `requesterContractorId` is the caller's own contractor profile id, or `null` for a
-   * platform_admin who is allowed to view any contractor's documents. A non-admin caller
-   * must own the document — otherwise this is an IDOR (any contractor could otherwise read
-   * any other contractor's license/insurance/inspection files by guessing/enumerating ids).
-   */
   async signedDownloadUrl(documentId: string, requesterContractorId: string | null) {
     const [doc] = await db.select().from(schema.contractorDocuments).where(eq(schema.contractorDocuments.id, documentId));
     if (!doc) throw new NotFoundError('Document not found');
     if (requesterContractorId !== null && doc.contractorId !== requesterContractorId) {
-      throw new NotFoundError('Document not found'); // 404, not 403 — avoid confirming existence to non-owners
+      throw new NotFoundError('Document not found');
     }
     return s3.presignGet(doc.storageKey, 15 * 60);
   },
@@ -84,15 +74,6 @@ export const documentService = {
       if (!profile) throw new NotFoundError('Contractor not found');
       if (profile.verificationStatus !== 'pending') throw new ConflictError('Only pending contractors can be verified');
 
-      // Safety checks the previous implementation skipped entirely:
-      //   1. All required document types must be present (registration,
-      //      insurance, inspection). A contractor with only one of the
-      //      three could be approved — driving without insurance.
-      //   2. No document may be pending a clamav scan. The scan is async
-      //      via outbox, so a freshly-uploaded doc could be approved
-      //      before the scan completed. The previous code allowed this,
-      //      letting an admin approve a contractor whose documents were
-      //      infected or unscanned.
       const docs = await tx.select().from(schema.contractorDocuments)
         .where(eq(schema.contractorDocuments.contractorId, contractorId));
       const presentTypes = new Set(docs.map(d => d.type));
@@ -100,9 +81,7 @@ export const documentService = {
       if (missing.length > 0) {
         throw new ConflictError(`Cannot verify: missing document types: ${missing.join(', ')}`);
       }
-      // scanStatus is the column tracking clamav result. Values are typically
-      // 'pending' | 'clean' | 'infected' | 'error'. Refuse if any doc is
-      // not explicitly 'clean'.
+
       const uncleared = docs.filter(d => d.scanStatus !== 'clean');
       if (uncleared.length > 0) {
         throw new ConflictError('Cannot verify: one or more documents are pending or failed malware scan');
