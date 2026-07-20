@@ -115,6 +115,20 @@ identityRoutes.post('/otp/verify', async (c) => {
   return c.body(null, 204);
 });
 
+// SEC-009: privileged roles (corporate_admin, platform_admin) must verify
+// their phone before using session-gated routes. This endpoint lets an
+// authenticated user mark their phone as verified after completing an OTP
+// challenge. The OTP must have been issued with purpose='signup_verification'
+// for the user's own phone.
+identityRoutes.post('/phone/verify', requireAuth, async (c) => {
+  const session = c.get('session')!;
+  const { code } = z.object({ code: z.string().length(6) }).parse(await c.req.json());
+  await otpService.verify(session.phone, 'signup_verification', code);
+  await db.update(schema.users).set({ phoneVerified: true, updatedAt: new Date() })
+    .where(eq(schema.users.id, session.userId));
+  return c.json({ data: { phoneVerified: true } });
+});
+
 identityRoutes.post('/password/reset', async (c) => {
   const { phone } = z.object({ phone: EthiopianPhone }).parse(await c.req.json());
   return c.json({ data: await otpService.send(phone, 'password_reset') });

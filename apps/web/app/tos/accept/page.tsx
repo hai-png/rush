@@ -15,10 +15,13 @@ export default function TosAcceptPage() {
 
   const accept = async () => {
     setLoading(true);
-    const { error } = await client.POST('/api/v1/tos', { body: { version: CURRENT_TOS_VERSION } });
+    // API-001: /api/v1/tos is not yet in the generated OpenAPI schema (the
+    // route uses .post() instead of .openapi()). Cast to bypass the typed
+    // client until the route is migrated. The server validates the body.
+    const { error } = await (client.POST as any)('/api/v1/tos', { body: { version: CURRENT_TOS_VERSION } });
     setLoading(false);
     if (error) {
-      push({ title: error.message ?? 'Could not accept terms — please try again', variant: 'error' });
+      push({ title: error?.message ?? 'Could not accept terms — please try again', variant: 'error' });
       return;
     }
 

@@ -21,8 +21,8 @@ export default function ForgotPasswordPage() {
   const router = useRouter();
   const { push } = useToast();
 
-  const phoneForm = useForm({ resolver: zodResolver(PhoneSchema), defaultValues: { phone: '+251' } });
-  const resetForm = useForm({ resolver: zodResolver(ResetSchema) });
+  const phoneForm = useForm<z.infer<typeof PhoneSchema>>({ resolver: zodResolver(PhoneSchema), defaultValues: { phone: '+251' } });
+  const resetForm = useForm<z.infer<typeof ResetSchema>>({ resolver: zodResolver(ResetSchema), defaultValues: { code: '', newPassword: '' } });
 
   const sendOtp = async (data: z.infer<typeof PhoneSchema>) => {
     setServerError(null);
@@ -61,12 +61,12 @@ export default function ForgotPasswordPage() {
           <div>
             <Label htmlFor="code">6-digit code</Label>
             <Input id="code" maxLength={6} inputMode="numeric" pattern="\d{6}" {...resetForm.register('code')} />
-            <FieldError>{resetForm.formState.errors.code?.message}</FieldError>
+            <FieldError>{resetForm.formState.errors.code?.message as string | undefined}</FieldError>
           </div>
           <div>
             <Label htmlFor="newPassword">New password</Label>
             <Input id="newPassword" type="password" autoComplete="new-password" {...resetForm.register('newPassword')} />
-            <FieldError>{resetForm.formState.errors.newPassword?.message}</FieldError>
+            <FieldError>{resetForm.formState.errors.newPassword?.message as string | undefined}</FieldError>
           </div>
           {serverError && <p role="alert" className="text-sm text-destructive text-center">{serverError}</p>}
           <Button type="submit" className="w-full" loading={resetForm.formState.isSubmitting}>Reset password</Button>

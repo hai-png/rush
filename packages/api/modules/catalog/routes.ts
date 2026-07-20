@@ -1,5 +1,4 @@
 import { TypedOpenAPIHono } from '../../src/typed-hono';
-import { requireRole } from '../../src/middleware/auth';
 import { catalogService } from './service';
 import { CreateRouteInput, UpdateRouteInput, CreateShuttleInput, UpdateShuttleInput } from './types';
 
@@ -16,7 +15,10 @@ catalogRoutes.get('/routes/:id', async (c) => c.json({ data: await catalogServic
 catalogRoutes.get('/plans', async (c) => c.json({ data: await catalogService.listPlans() }));
 
 export const adminCatalogRoutes = new TypedOpenAPIHono();
-adminCatalogRoutes.use('*', requireRole('platform_admin'));
+// SEC-008: the parent router (adminRoutes) already applies
+// `requireRole('platform_admin')` via `adminRoutes.use('*', requireRole(...))`
+// before mounting this sub-router. The duplicate `requireRole` here was dead
+// code (it ran twice on every request) and has been removed.
 
 adminCatalogRoutes.post('/routes', async (c) => {
   const body = CreateRouteInput.parse(await c.req.json());

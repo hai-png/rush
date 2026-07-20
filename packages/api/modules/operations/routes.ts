@@ -1,20 +1,36 @@
 import { TypedOpenAPIHono } from '../../src/typed-hono';
 import { z } from 'zod';
+import { eq, and } from 'drizzle-orm';
 import { requireRole } from '../../src/middleware/auth';
 import { operationsService } from './service';
 import { db, schema } from '@addis/db';
-import { eq } from 'drizzle-orm';
+import { riderProfileIdFor, contractorProfileIdFor } from '../../src/profile-cache';
 import { redis } from '../../infra/redis';
 
 export const operationsRoutes = new TypedOpenAPIHono();
 
 operationsRoutes.get('/trips', requireRole('contractor'), async (c) => {
-  const [profile] = await db.select().from(schema.contractorProfiles).where(eq(schema.contractorProfiles.userId, c.get('session')!.userId));
-  const rows = await db.select().from(schema.trips).where(eq(schema.trips.contractorId, profile!.id));
+  const profileId = await contractorProfileIdFor(c.get('session')!.userId);
+  // API-004: paginate /trips — was returning ALL trips ever for the contractor.
+  // Default to 50, max 200. Cursor pagination would be better but the table
+  // lacks a monotonic cursor; limit + offset is acceptable for this admin-
+  // ish endpoint. Status filter added.
+  const limit = Math.min(Math.max(1, Number(c.req.query('limit') ?? 50) || 50), 200);
+  const status = c.req.query('status');
+  const VALID_STATUSES = ['scheduled', 'in_transit', 'completed', 'cancelled'] as const;
+  const statusFilter = status && (VALID_STATUSES as readonly string[]).includes(status)
+    ? (status as typeof VALID_STATUSES[number]) : undefined;
+  const rows = await db.select().from(schema.trips)
+    .where(and(
+      eq(schema.trips.contractorId, profileId),
+      statusFilter ? eq(schema.trips.status, statusFilter) : undefined,
+    ))
+    .orderBy(schema.trips.departTime)
+    .limit(limit);
   return c.json({ data: rows });
 });
 operationsRoutes.post('/trips', requireRole('contractor'), async (c) => {
-  const [profile] = await db.select().from(schema.contractorProfiles).where(eq(schema.contractorProfiles.userId, c.get('session')!.userId));
+  const profileId = await contractorProfileIdFor(c.get('session')!.userId);
 
   const body = z.object({
     shuttleId: z.string(),
@@ -23,7 +39,7 @@ operationsRoutes.post('/trips', requireRole('contractor'), async (c) => {
 
     departTime: z.never().optional(),
   }).parse(await c.req.json());
-  const trip = await operationsService.startTrip(profile!.id, {
+  const trip = await operationsService.startTrip(profileId, {
     shuttleId: body.shuttleId,
     routeId: body.routeId,
     window: body.window,
@@ -32,27 +48,39 @@ operationsRoutes.post('/trips', requireRole('contractor'), async (c) => {
   return c.json({ data: trip }, 201);
 });
 operationsRoutes.patch('/trips/:id', requireRole('contractor'), async (c) => {
-  const [profile] = await db.select().from(schema.contractorProfiles).where(eq(schema.contractorProfiles.userId, c.get('session')!.userId));
+  const profileId = await contractorProfileIdFor(c.get('session')!.userId);
   const { event } = z.object({ event: z.literal('complete') }).parse(await c.req.json());
-  const trip = event === 'complete' ? await operationsService.completeTrip(profile!.id, c.req.param('id')) : null;
+  const trip = event === 'complete' ? await operationsService.completeTrip(profileId, c.req.param('id')) : null;
   return c.json({ data: trip });
 });
 
 operationsRoutes.get('/rides', requireRole('rider'), async (c) => {
-  const [profile] = await db.select().from(schema.riderProfiles).where(eq(schema.riderProfiles.userId, c.get('session')!.userId));
-  const rows = await db.select().from(schema.rides).where(eq(schema.rides.riderId, profile!.id));
+  const profileId = await riderProfileIdFor(c.get('session')!.userId);
+  // API-004: paginate /rides — was returning ALL rides ever for the rider.
+  const limit = Math.min(Math.max(1, Number(c.req.query('limit') ?? 50) || 50), 200);
+  const status = c.req.query('status');
+  const VALID_STATUSES = ['booked', 'boarded', 'completed', 'no_show', 'cancelled'] as const;
+  const statusFilter = status && (VALID_STATUSES as readonly string[]).includes(status)
+    ? (status as typeof VALID_STATUSES[number]) : undefined;
+  const rows = await db.select().from(schema.rides)
+    .where(and(
+      eq(schema.rides.riderId, profileId),
+      statusFilter ? eq(schema.rides.status, statusFilter) : undefined,
+    ))
+    .orderBy(schema.rides.createdAt)
+    .limit(limit);
   return c.json({ data: rows });
 });
 operationsRoutes.post('/rides', requireRole('rider'), async (c) => {
-  const [profile] = await db.select().from(schema.riderProfiles).where(eq(schema.riderProfiles.userId, c.get('session')!.userId));
+  const profileId = await riderProfileIdFor(c.get('session')!.userId);
   const body = z.object({ tripId: z.string(), subscriptionId: z.string().optional(), seatClaimId: z.string().optional(), pickupStop: z.string().optional() }).parse(await c.req.json());
-  const ride = await operationsService.bookRide(profile!.id, body);
+  const ride = await operationsService.bookRide(profileId, body);
   return c.json({ data: ride }, 201);
 });
 operationsRoutes.patch('/rides/:id', requireRole('rider'), async (c) => {
-  const [profile] = await db.select().from(schema.riderProfiles).where(eq(schema.riderProfiles.userId, c.get('session')!.userId));
+  const profileId = await riderProfileIdFor(c.get('session')!.userId);
   const { event } = z.object({ event: z.literal('board') }).parse(await c.req.json());
-  const ride = event === 'board' ? await operationsService.board(profile!.id, c.req.param('id')) : null;
+  const ride = event === 'board' ? await operationsService.board(profileId, c.req.param('id')) : null;
   return c.json({ data: ride });
 });
 
@@ -69,10 +97,10 @@ operationsRoutes.get('/shuttle-positions', async (c) => {
 operationsRoutes.post('/shuttle-positions', requireRole('contractor'), async (c) => {
   const body = z.object({ shuttleId: z.string(), lat: z.number(), lng: z.number(), heading: z.number().optional(), speed: z.number().optional() }).parse(await c.req.json());
 
-  const [profile] = await db.select().from(schema.contractorProfiles).where(eq(schema.contractorProfiles.userId, c.get('session')!.userId));
+  const profileId = await contractorProfileIdFor(c.get('session')!.userId);
   const [shuttle] = await db.select().from(schema.shuttles).where(eq(schema.shuttles.id, body.shuttleId));
 
-  if (!shuttle || shuttle.contractorId !== profile?.id) {
+  if (!shuttle || shuttle.contractorId !== profileId) {
     return c.json({ error: { code: 'FORBIDDEN', message: 'Not assigned to this shuttle', requestId: c.get('requestId') } }, 403);
   }
 

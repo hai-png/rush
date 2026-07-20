@@ -13,7 +13,7 @@ export default function CorporateOnboardPage() {
   const router = useRouter();
   const client = useApiClient();
   const { register, handleSubmit, formState: { errors, isSubmitting } } =
-    useForm({ resolver: zodResolver(Schema), defaultValues: { corporateCode: params.get('corp') ?? '' } });
+    useForm<z.infer<typeof Schema>>({ resolver: zodResolver(Schema), defaultValues: { corporateCode: params.get('corp') ?? '', employeeId: '' } });
 
   const onSubmit = async (data: z.infer<typeof Schema>) => {
     const { error } = await client.POST('/api/v1/corporate/onboard', { body: data });

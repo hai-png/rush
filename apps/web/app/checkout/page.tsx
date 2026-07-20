@@ -5,21 +5,7 @@ import { CreditCard, Landmark } from 'lucide-react';
 import { Button, Card, CardContent } from '@addis/ui';
 import { useApiClient } from '@/lib/sdk';
 import { useToast } from '@addis/ui';
-
-const ALLOWED_CHECKOUT_HOSTS = new Set([
-  'superapp.ethiomobilemoney.et',
-  'developerportal.ethiotelecom.et',
-  'localhost',
-]);
-
-function isAllowedCheckoutUrl(url: string): boolean {
-  try {
-    const u = new URL(url);
-    return (u.protocol === 'https:' || u.protocol === 'http:') && ALLOWED_CHECKOUT_HOSTS.has(u.hostname);
-  } catch {
-    return false;
-  }
-}
+import { isAllowedCheckoutUrl } from '@/lib/checkout-allowlist';
 
 const NONCE_STORAGE_KEY = 'addisride.checkout.nonce';
 
@@ -77,7 +63,7 @@ export default function CheckoutPage() {
       body: { planId, routeId, paymentMethod: method },
     });
     setLoading(false);
-    if (error) { push({ title: error.message ?? 'Could not start checkout', variant: 'error' }); return; }
+    if (error) { push({ title: (error as any)?.error?.message ?? (error as any)?.message ?? 'Could not start checkout', variant: 'error' }); return; }
 
     clearNonce();
 

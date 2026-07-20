@@ -71,53 +71,78 @@ export async function failPayment(reference: string, reasonRaw: unknown): Promis
   });
 }
 
+// PAY-003: scheduleRefund now opens its own transaction with a row lock on the
+// payment when called without a tx, preventing concurrent refund requests from
+// both passing the "would exceed" check and over-refunding the customer. The
+// lock is acquired with `for('update')` inside the transaction; the existing
+// `tx` parameter is preserved for callers that already hold a transaction
+// (e.g. subscription.cancel) — in that case the caller is responsible for
+// having acquired the lock.
 export async function scheduleRefund(paymentId: string, amount: Money, reason: string, tx: import('@addis/db').DbOrTx = db) {
-  const [payment] = await tx.select().from(schema.payments).where(eq(schema.payments.id, paymentId));
-  if (!payment) throw new NotFoundError(`Payment ${paymentId} not found`);
-  if (payment.status !== 'completed') throw new BadRequestError('Only completed payments can be refunded');
-  if (!amount.isPositive()) throw new BadRequestError('Refund amount must be positive');
+  // If the caller passed the default `db`, wrap in a transaction + row lock.
+  // If they passed a real tx, assume they've already acquired the lock.
+  const run = async (txOrDb: import('@addis/db').DbOrTx) => {
+    const [payment] = await (txOrDb as any).select().from(schema.payments).where(eq(schema.payments.id, paymentId)).for('update');
+    if (!payment) throw new NotFoundError(`Payment ${paymentId} not found`);
+    if (payment.status !== 'completed') throw new BadRequestError('Only completed payments can be refunded');
+    if (!amount.isPositive()) throw new BadRequestError('Refund amount must be positive');
 
-  const originalAmount = Money.fromDecimal(payment.amount);
-  const alreadyRefunded = payment.refundAmount ? Money.fromDecimal(payment.refundAmount) : Money.ZERO;
-  const totalAfterRefund = alreadyRefunded.add(amount);
-  if (totalAfterRefund.gt(originalAmount)) {
-    throw new BadRequestError(
-      `Refund of ${amount.toString()} would exceed payment amount. ` +
-      `Original: ${originalAmount.toString()}, already refunded: ${alreadyRefunded.toString()}.`
-    );
+    const originalAmount = Money.fromDecimal(payment.amount);
+    const alreadyRefunded = payment.refundAmount ? Money.fromDecimal(payment.refundAmount) : Money.ZERO;
+    const totalAfterRefund = alreadyRefunded.add(amount);
+    if (totalAfterRefund.gt(originalAmount)) {
+      throw new BadRequestError(
+        `Refund of ${amount.toString()} would exceed payment amount. ` +
+        `Original: ${originalAmount.toString()}, already refunded: ${alreadyRefunded.toString()}.`
+      );
+    }
+
+    const refundRequestNo = `RF${createId()}`;
+    await (txOrDb as any).insert(schema.refundRetries).values({
+      paymentId, merchOrderId: payment.reference, refundRequestNo, amount: amount.toString(), reason,
+    });
+  };
+
+  // Detect whether `tx` is a transaction (has `rollback`) or the top-level db.
+  if (tx === db || typeof (tx as any).rollback !== 'function') {
+    return db.transaction(async (innerTx) => run(innerTx));
   }
-
-  const refundRequestNo = `RF${createId()}`;
-  await tx.insert(schema.refundRetries).values({
-    paymentId, merchOrderId: payment.reference, refundRequestNo, amount: amount.toString(), reason,
-  });
+  return run(tx);
 }
 
 const BACKOFF_MIN = [15, 30, 60, 120, 240];
 
+// PAY-002: rewrite processRefundRetries to use the typed drizzle query builder
+// instead of raw SQL. The previous raw-SQL `RETURNING *` returned rows with
+// snake_case column names (`payment_id`, `attempts`, etc.) — but the loop
+// accessed `retry.paymentId`, `retry.attempts`, etc. (camelCase), which were
+// all `undefined`. Every refund silently failed with a TypeError, ending up
+// in permanent_failure. The integration test missed this because it mocks
+// @addis/db entirely.
 export async function processRefundRetries(limit = 50) {
+  // Reset stale 'processing' rows back to 'pending' (worker crashed mid-flight).
+  await db.update(schema.refundRetries)
+    .set({ status: 'pending', updatedAt: new Date() })
+    .where(and(eq(schema.refundRetries.status, 'processing'), sql`${schema.refundRetries.updatedAt} < now() - interval '15 minutes'`));
 
-  await db.execute(sql`
-    UPDATE refund_retries SET status = 'pending', updated_at = now()
-    WHERE status = 'processing' AND updated_at < now() - interval '15 minutes'
-  `);
+  // Claim a batch using FOR UPDATE SKIP LOCKED. Use the query builder so we
+  // get typed camelCase rows.
+  const claimed = await db.transaction(async (tx) => {
+    const rows = await tx.select().from(schema.refundRetries)
+      .where(and(eq(schema.refundRetries.status, 'pending'), sql`${schema.refundRetries.nextAttemptAt} <= now()`))
+      .orderBy(schema.refundRetries.nextAttemptAt)
+      .limit(limit)
+      .for('update', { skipLocked: true });
+    if (rows.length === 0) return [];
+    await tx.update(schema.refundRetries)
+      .set({ status: 'processing', updatedAt: new Date() })
+      .where(inArray(schema.refundRetries.id, rows.map(r => r.id)));
+    return rows;
+  });
 
-  const claimed = await db.execute(sql`
-    UPDATE refund_retries SET status = 'processing', updated_at = now()
-    WHERE id IN (
-      SELECT id FROM refund_retries
-      WHERE status = 'pending' AND next_attempt_at <= now()
-      ORDER BY next_attempt_at
-      LIMIT ${limit}
-      FOR UPDATE SKIP LOCKED
-    )
-    RETURNING *
-  `);
-
-  const rows = (claimed as any).rows ?? (claimed as any);
   let processed = 0;
 
-  for (const retry of rows) {
+  for (const retry of claimed) {
     const [payment] = await db.select().from(schema.payments).where(eq(schema.payments.id, retry.paymentId));
     if (!payment) continue;
     const provider = getPaymentProvider(payment.method);

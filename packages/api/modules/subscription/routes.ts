@@ -5,7 +5,7 @@ import { requireRole } from '../../src/middleware/auth';
 import { CreateSubscriptionInput } from './types';
 import { subscriptionService } from './service';
 import { db, schema } from '@addis/db';
-import { eq } from 'drizzle-orm';
+import { eq, and, desc } from 'drizzle-orm';
 import { NotFoundError } from '@addis/shared';
 
 export const subscriptionRoutes = new TypedOpenAPIHono();
@@ -20,6 +20,27 @@ async function riderProfileIdFor(userId: string): Promise<string> {
   if (!profile) throw new NotFoundError('Rider profile not found');
   return profile.id;
 }
+
+// API-002: GET /subscriptions — list the rider's own subscriptions (active +
+// history). Previously missing — riders could only see their most recent
+// active sub via /dashboard/rider, with no history.
+subscriptionRoutes.get('/', requireRole('rider'), async (c) => {
+  const session = c.get('session')!;
+  const riderId = await riderProfileIdFor(session.userId);
+  const status = c.req.query('status');
+  const VALID_STATUSES = ['pending_payment', 'active', 'expired', 'cancelled'] as const;
+  const statusFilter = status && (VALID_STATUSES as readonly string[]).includes(status)
+    ? (status as typeof VALID_STATUSES[number]) : undefined;
+  const limit = Math.min(Math.max(1, Number(c.req.query('limit') ?? 50) || 50), 200);
+  const rows = await db.select().from(schema.subscriptions)
+    .where(and(
+      eq(schema.subscriptions.riderId, riderId),
+      statusFilter ? eq(schema.subscriptions.status, statusFilter) : undefined,
+    ))
+    .orderBy(desc(schema.subscriptions.createdAt))
+    .limit(limit);
+  return c.json({ data: rows });
+});
 
 const createRoute1 = createRoute({
   method: 'post', path: '/', security: [{ bearerAuth: [] }, { cookieAuth: [] }],

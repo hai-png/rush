@@ -5,18 +5,7 @@ import { Button, Card, CardContent, Badge, EmptyState } from '@addis/ui';
 import { useFormatMoney } from '@addis/i18n';
 import { useApiClient } from '@/lib/sdk';
 import { useToast } from '@addis/ui';
-
-const ALLOWED_CHECKOUT_HOSTS = new Set([
-  'superapp.ethiomobilemoney.et',
-  'developerportal.ethiotelebirr.et',
-  'localhost',
-]);
-function isAllowedCheckoutUrl(url: string): boolean {
-  try {
-    const u = new URL(url);
-    return (u.protocol === 'https:' || u.protocol === 'http:') && ALLOWED_CHECKOUT_HOSTS.has(u.hostname);
-  } catch { return false; }
-}
+import { isAllowedCheckoutUrl } from '@/lib/checkout-allowlist';
 
 export default function OpenSeatsPage() {
   const client = useApiClient();

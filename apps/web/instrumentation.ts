@@ -2,19 +2,21 @@ export async function register() {
   const { loadEnv } = await import('@addis/shared');
   loadEnv();
 
-  if (process.env.NEXT_RUNTIME === 'nodejs') {
+  if (process.env.NEXT_RUNTIME === 'nodejs' && process.env.SENTRY_DSN) {
     const Sentry = await import('@sentry/nextjs');
-    Sentry.init({
-      dsn: process.env.SENTRY_DSN,
-      environment: process.env.NODE_ENV,
+    // Build options conditionally to satisfy exactOptionalPropertyTypes —
+    // `dsn` and `environment` must be `string`, not `string | undefined`.
+    const sentryOpts: Parameters<typeof Sentry.init>[0] = {
       tracesSampleRate: 0.1,
       release: process.env.VERCEL_GIT_COMMIT_SHA ?? 'dev',
-
       sendDefaultPii: false,
-      beforeSend(event) {
-        return scrubEvent(event);
+      beforeSend(event: Parameters<NonNullable<Parameters<typeof Sentry.init>[0]['beforeSend']>>[0]) {
+        return scrubEvent(event as unknown as Record<string, unknown>) as unknown as typeof event;
       },
-    });
+    };
+    sentryOpts.dsn = process.env.SENTRY_DSN;
+    if (process.env.NODE_ENV) sentryOpts.environment = process.env.NODE_ENV;
+    Sentry.init(sentryOpts);
   }
 }
 

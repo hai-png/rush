@@ -2,7 +2,7 @@ import * as React from 'react';
 import { Input, Label } from '../primitives/input';
 
 export const PhoneInput = React.forwardRef<HTMLInputElement, {
-  label?: string; error?: string; value: string; onChange: (v: string) => void;
+  label?: string; error?: string | undefined; value: string; onChange: (v: string) => void;
 }>(({ label = 'Phone number', error, value, onChange }, ref) => {
   const reactId = React.useId();
   const inputId = `phone-input-${reactId}`;

@@ -1,6 +1,5 @@
 import { and, eq } from 'drizzle-orm';
 import { db, schema } from '@addis/db';
-import { createId } from '@paralleldrive/cuid2';
 
 export const notificationLogHelper = {
 
@@ -18,7 +17,9 @@ export const notificationLogHelper = {
   async recordSent(outboxEventId: string, channel: 'sms' | 'email' | 'push', recipient: string, providerMessageId?: string): Promise<boolean> {
     try {
       await db.insert(schema.notificationLog).values({
-        id: createId(),
+        // Use crypto.randomUUID instead of @paralleldrive/cuid2 (the worker
+        // package doesn't depend on cuid2). Both produce unique strings.
+        id: crypto.randomUUID(),
         outboxEventId,
         channel,
         recipient,

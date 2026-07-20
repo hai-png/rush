@@ -1,12 +1,13 @@
 'use client';
 import { useState } from 'react';
 import { AlertTriangle } from 'lucide-react';
-import { Button, Input, Label, FieldError, toast } from '@addis/ui';
+import { Button, Input, Label, FieldError, useToast } from '@addis/ui';
 import { useApiClient } from '@/lib/sdk';
 import { ACCOUNT_DELETION_GRACE_DAYS } from '@addis/shared';
 
 export default function DeleteAccountPage() {
   const client = useApiClient();
+  const { push } = useToast();
   const [confirmed, setConfirmed] = useState(false);
   const [password, setPassword] = useState('');
   const [requested, setRequested] = useState(false);
@@ -27,8 +28,9 @@ export default function DeleteAccountPage() {
         body: { password },
       });
       if (apiError) {
-        setError(apiError.message ?? 'Password incorrect');
-        toast({ title: 'Deletion failed', variant: 'destructive' });
+        const msg = (apiError as any)?.error?.message ?? (apiError as any)?.message ?? 'Password incorrect';
+        setError(msg);
+        push({ title: 'Deletion failed', variant: 'error' });
         return;
       }
       setRequested(true);
@@ -44,7 +46,8 @@ export default function DeleteAccountPage() {
       <div className="px-6 py-16 text-center max-w-md mx-auto">
         <p className="font-semibold">Deletion requested</p>
         <p className="text-sm text-muted-foreground mt-2">
-          Your account will be permanently deleted in {ACCOUNT_DELETION_GRACE_DAYS} days. Log in again before then to cancel.
+          Your account is scheduled for permanent anonymization in {ACCOUNT_DELETION_GRACE_DAYS} days. To cancel,
+          contact support within that window — you will not be able to log in to self-cancel.
         </p>
       </div>
     );
@@ -55,7 +58,9 @@ export default function DeleteAccountPage() {
       <AlertTriangle className="h-8 w-8 text-destructive mx-auto mb-3" />
       <h1 className="font-semibold text-lg text-center">Delete your account?</h1>
       <p className="text-sm text-muted-foreground mt-2 text-center">
-        This starts a {ACCOUNT_DELETION_GRACE_DAYS}-day grace period. Payment records are retained 7 years per Ethiopian tax law, anonymized.
+        This starts a {ACCOUNT_DELETION_GRACE_DAYS}-day grace period during which your account is deactivated.
+        You cannot log in during this time. To cancel, contact support. Payment records are
+        retained 7 years per Ethiopian tax law, anonymized.
       </p>
       <div className="mt-6 space-y-3">
         <div>

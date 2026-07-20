@@ -25,7 +25,9 @@
       "@addis/db": ["packages/db/src/index.ts"],
       "@addis/db/*": ["packages/db/src/*"],
       "@addis/api": ["packages/api/src/index.ts"],
-      "@addis/api/*": ["packages/api/src/*"],
+      "@addis/api/src/*": ["packages/api/src/*"],
+      "@addis/api/infra/*": ["packages/api/infra/*"],
+      "@addis/api/modules/*": ["packages/api/modules/*"],
       "@addis/sdk": ["packages/sdk/src/index.ts"],
       "@addis/ui": ["packages/ui/src/index.ts"],
       "@addis/i18n": ["packages/i18n/src/index.ts"]

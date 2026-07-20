@@ -1,6 +1,6 @@
 'use client';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { Card, CardContent, Button, Badge, StatTile, useToast } from '@addis/ui';
+import { Card, CardContent, Button, StatTile, useToast } from '@addis/ui';
 import { useApiClient } from '@/lib/sdk';
 import { useFormatMoney } from '@addis/i18n';
 

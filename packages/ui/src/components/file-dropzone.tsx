@@ -3,6 +3,11 @@ import { useCallback, useState } from 'react';
 import { UploadCloud, FileText, X } from 'lucide-react';
 import { cn } from '../lib/cn';
 
+// FE-009: validate MIME type client-side in addition to the extension. The
+// server already sniffs via fileTypeFromBuffer, but giving early feedback
+// saves a round-trip and makes the error clearer to the user.
+const ALLOWED_MIME = new Set(['application/pdf', 'image/jpeg', 'image/png']);
+
 export function FileDropzone({ onFile, accept = '.pdf,.jpg,.jpeg,.png', maxSizeMb = 10, label }: {
   onFile: (file: File) => void; accept?: string; maxSizeMb?: number; label: string;
 }) {
@@ -12,6 +17,10 @@ export function FileDropzone({ onFile, accept = '.pdf,.jpg,.jpeg,.png', maxSizeM
 
   const handle = useCallback((f: File) => {
     if (f.size > maxSizeMb * 1024 * 1024) { setError(`File exceeds ${maxSizeMb}MB`); return; }
+    if (f.type && !ALLOWED_MIME.has(f.type)) {
+      setError(`Only PDF, JPEG, PNG allowed (detected ${f.type || 'unknown'})`);
+      return;
+    }
     setError(null); setFile(f); onFile(f);
   }, [maxSizeMb, onFile]);
 

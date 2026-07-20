@@ -2,8 +2,9 @@ import { TypedOpenAPIHono } from '../../src/typed-hono';
 import { eq, and, inArray } from 'drizzle-orm';
 import { db, schema } from '@addis/db';
 import { getPaymentProvider } from '@addis/payments';
-import { settlePayment, failPayment } from '../payment/service';
+import { settlePayment, failPayment, scheduleRefund } from '../payment/service';
 import { marketplaceService } from '../marketplace/service';
+import { Money } from '@addis/shared';
 
 export const webhookRoutes = new TypedOpenAPIHono();
 
@@ -34,10 +35,31 @@ webhookRoutes.post('/telebirr/notify', async (c) => {
     }
 
     const [payment] = await db.select().from(schema.payments).where(eq(schema.payments.reference, event.merchOrderId));
+    // PAY-005: For unknown payment references, return 404 (not SUCCESS) so
+    // Telebirr retries. Log to Sentry + audit-log so ops can detect the
+    // mismatch (e.g. payment row not yet committed, or misrouted webhook).
+    // After 24h of retries (Telebirr's max), the webhook is dead-lettered
+    // by Telebirr — at that point the only recovery is manual reconciliation.
     if (!payment) {
-
-      c.get('logger')?.warn({ merchOrderId: event.merchOrderId }, 'webhook: notification for unknown payment reference');
-      return c.text('SUCCESS');
+      c.get('logger')?.error(
+        { merchOrderId: event.merchOrderId, outRequestNo },
+        'webhook: notification for unknown payment reference — returning 404 so Telebirr retries',
+      );
+      try {
+        await db.insert(schema.outboxEvents).values({
+          channel: 'audit',
+          payload: {
+            action: 'webhook.unknown_payment_reference',
+            entityId: event.merchOrderId,
+            after: { outRequestNo, type: event.type },
+          },
+        });
+      } catch { /* audit failure must not change the response */ }
+      // Sentry is only configured in the worker; the worker's audit-handler
+      // will pick up the audit event above and forward critical ones to
+      // Sentry. We also log at error level so the API's logger (pino)
+      // surfaces it in structured logs.
+      return c.text('NOT_FOUND', 404);
     }
 
     if (event.type === 'payment.settled') {
@@ -62,6 +84,56 @@ webhookRoutes.post('/telebirr/notify', async (c) => {
           }
         }
       } else if (payment.status === 'failed') {
+        // PAY-001: A late settlement for a payment we already marked failed.
+        // The failPayment flow released the seat claim back to 'open' and
+        // re-opened the seat release. If a different rider has since claimed
+        // that seat release, reopening this payment would double-spend the
+        // seat (original rider gets active subscription, new rider also has
+        // a valid claim). Check the seat release state before reopening.
+        let canReopen = true;
+        let reopenBlocker: string | null = null;
+        if (payment.seatClaimId) {
+          const [claim] = await db.select().from(schema.seatClaims)
+            .where(eq(schema.seatClaims.id, payment.seatClaimId));
+          if (claim) {
+            const [release] = await db.select().from(schema.seatReleases)
+              .where(eq(schema.seatReleases.id, claim.seatReleaseId));
+            if (release && release.status !== 'claimed') {
+              // The seat release was re-opened and may have been re-claimed
+              // by another rider. Reopening this payment would create a
+              // double-spend on the seat. Refuse to reopen; refund the
+              // original rider instead.
+              canReopen = false;
+              reopenBlocker = `seat_release ${release.id} is in status '${release.status}' (expected 'claimed')`;
+            }
+          }
+        }
+        if (!canReopen) {
+          c.get('logger')?.warn(
+            { paymentId: payment.id, merchOrderId: event.merchOrderId, reopenBlocker },
+            'webhook: late settlement refused — seat was re-claimed; refunding original rider instead',
+          );
+          await db.insert(schema.outboxEvents).values({
+            channel: 'audit',
+            payload: {
+              action: 'payment.late_settlement_refused_seat_reclaimed',
+              entityId: payment.id,
+              after: { merchOrderId: event.merchOrderId, reopenBlocker },
+            },
+          });
+          // The payment is still 'failed' — issue a full refund for the
+          // original rider's seat-claim payment (if not already refunded).
+          try {
+            const refundAmount = Money.fromDecimal(payment.amount);
+            const alreadyRefunded = payment.refundAmount ? Money.fromDecimal(payment.refundAmount) : Money.ZERO;
+            if (alreadyRefunded.lt(refundAmount)) {
+              await scheduleRefund(payment.id, refundAmount.sub(alreadyRefunded), 'late_settlement_refused_seat_reclaimed');
+            }
+          } catch (err) {
+            c.get('logger')?.error({ paymentId: payment.id, err }, 'late-settlement refund scheduling failed');
+          }
+          return c.text('SUCCESS');
+        }
 
         const reopened = await db.update(schema.payments)
           .set({ status: 'pending', updatedAt: new Date() })

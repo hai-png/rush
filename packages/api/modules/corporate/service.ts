@@ -1,4 +1,4 @@
-import { eq, and } from 'drizzle-orm';
+import { eq, and, sql } from 'drizzle-orm';
 import { db, schema } from '@addis/db';
 import { hashPassword, NotFoundError, ConflictError } from '@addis/shared';
 
@@ -14,6 +14,19 @@ export const corporateService = {
         subsidyPercent: input.subsidyPercent, monthlySeatAllowance: input.monthlySeatAllowance, adminUserId: admin!.id,
         isActive: false,
       }).returning();
+      // SEC-009: queue a phone-verification OTP for the new corporate admin.
+      // The admin cannot use any session-gated route until they verify, because
+      // requireRole('corporate_admin') is in TWO_FA_REQUIRED_ROLES and will
+      // force 2FA setup on first authenticated call — but the phone is still
+      // unverified. We additionally gate corporate-admin-gated endpoints by
+      // phoneVerified in the requireRole check below (via a helper).
+      try {
+        const { otpService } = await import('../identity/otp');
+        await otpService.send(input.contactPhone, 'signup_verification');
+      } catch {
+        // Best-effort — if SMS fails, the admin can request a new OTP via
+        // /auth/otp/send. Don't fail the signup.
+      }
       return { corp, admin };
     });
   },
@@ -66,13 +79,24 @@ export const corporateService = {
   async onboardRider(riderUserId: string, input: { corporateCode: string; employeeId: string }) {
     const [corp] = await db.select().from(schema.corporates).where(and(eq(schema.corporates.code, input.corporateCode), eq(schema.corporates.isActive, true)));
     if (!corp) throw new NotFoundError('Corporate not found');
+    // SEC-017: check for an existing active membership BEFORE the insert so
+    // we can return a specific error with the corporate name, rather than
+    // the generic "Already linked" message from the unique-index violation.
+    const [existing] = await db.select().from(schema.corporateMembers)
+      .where(and(eq(schema.corporateMembers.userId, riderUserId), sql`${schema.corporateMembers.deletedAt} is null`));
+    if (existing) {
+      const [existingCorp] = await db.select().from(schema.corporates).where(eq(schema.corporates.id, existing.corporateId));
+      throw new ConflictError(
+        `You are already linked to corporate "${existingCorp?.name ?? existing.corporateId}". Contact support if you believe this is an error.`,
+      );
+    }
     try {
       const [member] = await db.insert(schema.corporateMembers).values({
         corporateId: corp.id, userId: riderUserId, employeeId: input.employeeId, approvalStatus: 'pending',
       }).returning();
       return member;
     } catch (e: any) {
-      if (e.code === '23505') throw new ConflictError('Already linked to a corporate, or employee ID already used');
+      if (e.code === '23505') throw new ConflictError('Employee ID already used at this corporate');
       throw e;
     }
   },

@@ -2,7 +2,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 vi.mock('@addis/db', () => ({
   db: {
-
+    // SEC-003: otpService.send now calls db.select to check if the user is
+    // soft-deleted. Mock select to return an empty array (user not found),
+    // which means the OTP is sent normally.
+    select: vi.fn(() => ({ from: vi.fn(() => ({ where: vi.fn(async () => []) })) })),
     update: vi.fn(() => ({ set: vi.fn(() => ({ where: vi.fn() })) })),
     insert: vi.fn(() => ({ values: vi.fn() })),
   },

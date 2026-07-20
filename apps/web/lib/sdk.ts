@@ -1,8 +1,7 @@
 'use client';
 import { createAddisRideClient } from '@addis/sdk';
-import { useSession } from 'next-auth/data';
+import { useSession, signOut } from 'next-auth/react';
 import { useMemo } from 'react';
-import { signOut } from 'next-auth/react';
 import type { QueryClient } from '@tanstack/react-query';
 
 let queryClientRef: QueryClient | null = null;
@@ -26,15 +25,19 @@ export function useApiClient() {
   const { data: session } = useSession();
 
   const token = (session as any)?.accessToken;
+  // FE-002: use empty baseUrl (same-origin) in the browser — the previous
+  // code referenced NEXT_PUBLIC_APP_URL which is never set, making the env
+  // var name misleading. Empty baseUrl makes openapi-fetch use relative
+  // paths, which is correct for browser-to-same-origin API calls.
   return useMemo(() => createAddisRideClient({
-    baseUrl: process.env.NEXT_PUBLIC_APP_URL ?? '',
+    baseUrl: '',
     getToken: () => token,
     onUnauthorized: () => handleUnauthorized(),
   }), [token]);
 }
 
 export async function getServerApiClient() {
-  const { auth } = await import('../../auth');
+  const { auth } = await import('../auth');
   const session = await auth();
   if (!session) {
     throw new Error('Not authenticated — server component called getServerApiClient without a session');

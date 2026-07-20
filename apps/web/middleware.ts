@@ -9,6 +9,32 @@ export function middleware(req: NextRequest) {
 
   const nonce = Buffer.from(crypto.randomUUID()).toString('base64');
 
+  // FE-001: build CSP connect-src from env vars instead of hardcoding Telebirr
+  // prod URL (which broke testbed checkout) and Sentry root URL (which is
+  // wrong — Sentry ingest uses <org>.ingest.sentry.io).
+  const telebirrHost = process.env.NEXT_PUBLIC_TELEBIRR_ENV === 'production'
+    ? 'https://superapp.ethiomobilemoney.et'
+    : 'https://developerportal.ethiotelebirr.et';
+  // Parse the Sentry DSN to extract the ingest host (e.g. https://<key>@o<org>.ingest.sentry.io/<project>).
+  let sentryHost = '';
+  if (process.env.NEXT_PUBLIC_SENTRY_DSN) {
+    try {
+      const u = new URL(process.env.NEXT_PUBLIC_SENTRY_DSN);
+      sentryHost = `${u.protocol}//${u.host}`;
+    } catch { /* invalid DSN — skip */ }
+  } else if (process.env.SENTRY_DSN) {
+    try {
+      const u = new URL(process.env.SENTRY_DSN);
+      sentryHost = `${u.protocol}//${u.host}`;
+    } catch { /* invalid DSN — skip */ }
+  }
+  const tileServer = process.env.NEXT_PUBLIC_TILE_SERVER_URL ?? '';
+  const carto = process.env.NEXT_PUBLIC_CARTO_API_KEY ? 'https://*.cartocdn.com https://gcp.carto.com' : '';
+  const mapbox = process.env.NEXT_PUBLIC_MAPBOX_ACCESS_TOKEN ? 'https://*.mapbox.com' : '';
+
+  const connectSrc = ['\'self\'', telebirrHost, sentryHost, tileServer, carto, mapbox]
+    .filter(Boolean).join(' ');
+
   const csp = [
     `default-src 'self'`,
     `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`,
@@ -16,7 +42,7 @@ export function middleware(req: NextRequest) {
     `style-src 'self' 'unsafe-inline'`,
     `img-src 'self' data: https:`,
     `font-src 'self' data:`,
-    `connect-src 'self' https://superapp.ethiomobilemoney.et https://sentry.io ${process.env.NEXT_PUBLIC_TILE_SERVER_URL ?? ''}`,
+    `connect-src ${connectSrc}`,
     `frame-ancestors 'none'`,
     `base-uri 'self'`,
     `form-action 'self'`,

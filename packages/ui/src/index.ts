@@ -14,4 +14,6 @@ export * from './components/phone-input';
 export * from './components/money-input';
 export * from './components/file-dropzone';
 export * from './components/map-view';
+export * from './components/stat-tile';
+export * from './components/locale-switcher';
 export * from './lib/cn';

@@ -28,7 +28,18 @@ export const idempotencyMiddleware: MiddlewareHandler = async (c, next) => {
 
   const session = c.get('session');
 
-  const scope = session?.userId ?? `anon:${c.get('requestId')}`;
+  // SEC-011: ignore Idempotency-Key for unauthenticated requests. The previous
+  // code scoped anon keys to `anon:<requestId>:<key>` — since requestId is
+  // per-request, this never deduplicated anything (each retry got a fresh
+  // scope). Worse, it allowed an attacker to mint arbitrary idempotency
+  // records by sending many requests with the same key. Now we just skip
+  // idempotency for anon requests entirely — every non-exempt POST endpoint
+  // requires auth, so this branch should rarely hit in practice.
+  if (!session) {
+    return next();
+  }
+
+  const scope = session.userId;
   const scopedKey = `${scope}:${key}`;
 
   const bodyText = await c.req.raw.clone().text();
@@ -38,7 +49,7 @@ export const idempotencyMiddleware: MiddlewareHandler = async (c, next) => {
   const bodyHash = createHash('sha256').update(bodyText).digest('hex');
 
   const claimed = await db.insert(schema.idempotencyRecords).values({
-    key: scopedKey, userId: session?.userId ?? null, method: c.req.method, path: c.req.path,
+    key: scopedKey, userId: session.userId, method: c.req.method, path: c.req.path,
     requestBodyHash: bodyHash, responseStatus: PROCESSING_STATUS, responseBody: {},
     expiresAt: new Date(Date.now() + 24 * 3600_000),
   }).onConflictDoNothing().returning();

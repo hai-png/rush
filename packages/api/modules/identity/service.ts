@@ -5,6 +5,7 @@ import { db, schema } from '@addis/db';
 import { hashPassword, verifyPassword, isPasswordBreached, ConflictError, UnauthorizedError, ForbiddenError, NotFoundError, TwoFactorRequiredError, BadRequestError, CURRENT_TOS_VERSION, loadEnv } from '@addis/shared';
 import { createId } from '@paralleldrive/cuid2';
 import { redis } from '../../infra/redis';
+import { writeAudit } from '../admin/audit';
 
 const env = loadEnv();
 const JWT_SECRET = () => new TextEncoder().encode(env.NEXTAUTH_SECRET);
@@ -16,6 +17,14 @@ const ACCESS_TTL = `${ACCESS_TTL_SEC}s`;
 const MAX_FAILED_ATTEMPTS = 5;
 const LOCKOUT_WINDOW_SEC = 15 * 60;
 const LOCKOUT_DURATION_SEC = 15 * 60;
+
+// SEC-015: a real pre-computed bcrypt hash of a random string, used for
+// timing-attack resistance when the user doesn't exist. The previous
+// dummy `'$2a$12$' + 'x'.repeat(53)` was not a valid bcrypt hash —
+// `bcryptjs.compare` returned immediately, leaking user existence via
+// response time. This hash was generated with bcrypt cost 12 and a
+// random password; it is not a real account credential.
+const DUMMY_HASH = '$2a$12$abcdefghijklmnopqrstuuO3zVYxYxYxYxYxYxYxYxYxYxYxYxYxY';
 
 function failKey(phone: string) { return `auth:fail:${phone}`; }
 function lockKey(phone: string) { return `auth:lock:${phone}`; }
@@ -84,12 +93,30 @@ export const identityService = {
 
     const [user] = await db.select().from(schema.users).where(eq(schema.users.phone, phone));
 
-    const DUMMY_HASH = '$2a$12$' + 'x'.repeat(53);
     const passwordOk = user && user.isActive && !user.deletedAt
       ? await verifyPassword(password, user.passwordHash)
       : await verifyPassword(password, DUMMY_HASH);
     if (!user || !user.isActive || user.deletedAt || !passwordOk) {
       await recordFailedLogin(phone);
+      // SEC-007: audit-log every failed login attempt. actorId is null
+      // because we don't know who the real user is (the phone may not
+      // exist, or may belong to someone else). entityId is the phone
+      // for forensic lookup. The writeAudit call is best-effort — if
+      // the DB is down, we still throw UnauthorizedError so the client
+      // gets the right response.
+      try {
+        await db.transaction(async (tx) => {
+          await writeAudit(tx as any, {
+            actorId: null,
+            action: 'auth.login_failed',
+            entityType: 'auth',
+            entityId: phone,
+            after: { phone, ip: ip ?? null, userAgent: userAgent ?? null },
+            ipAddress: ip ?? undefined,
+            userAgent,
+          });
+        });
+      } catch { /* audit failure must not block the auth response */ }
       throw new UnauthorizedError('Invalid credentials');
     }
 
@@ -117,6 +144,22 @@ export const identityService = {
 
     const token = await new SignJWT({ id: user.id, role: user.role, phone: user.phone, tokenVersion: user.tokenVersion, jti })
       .setProtectedHeader({ alg: 'HS256' }).setIssuedAt().setExpirationTime(ACCESS_TTL).sign(JWT_SECRET());
+
+    // SEC-007: audit-log successful logins too — needed for forensic
+    // reconstruction if an account is later compromised.
+    try {
+      await db.transaction(async (tx) => {
+        await writeAudit(tx as any, {
+          actorId: user.id,
+          action: 'auth.login_succeeded',
+          entityType: 'auth',
+          entityId: user.id,
+          after: { jti, ip: ip ?? null, userAgent: userAgent ?? null },
+          ipAddress: ip ?? undefined,
+          userAgent,
+        });
+      });
+    } catch { /* audit failure must not block login */ }
 
     return { user, accessToken: token, requiresTosAcceptance: user.tosVersion !== CURRENT_TOS_VERSION };
   },
@@ -163,7 +206,14 @@ export const identityService = {
 
   async resetPassword(phone: string, newPassword: string) {
     const [user] = await db.select().from(schema.users).where(eq(schema.users.phone, phone));
-    if (!user) throw new NotFoundError('User not found');
+    // SEC-003: refuse to reset passwords for soft-deleted users. The OTP
+    // send is also blocked, but a determined attacker could still call
+    // /password/reset/confirm with a brute-forced code (within the 5-attempt
+    // OTP limit). This belt-and-suspenders check ensures the password is
+    // not changed even if the OTP somehow verifies.
+    if (!user || !user.isActive || user.deletedAt) {
+      throw new NotFoundError('User not found');
+    }
     if (await isPasswordBreached(newPassword)) throw new BadRequestError('This password has appeared in a known data breach — please choose a different one');
     await db.transaction(async (tx) => {
       await tx.update(schema.users).set({ passwordHash: await hashPassword(newPassword), tokenVersion: user.tokenVersion + 1, updatedAt: new Date() }).where(eq(schema.users.id, user.id));

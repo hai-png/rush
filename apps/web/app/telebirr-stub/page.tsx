@@ -1,8 +1,13 @@
 'use client';
+import { Suspense } from 'react';
 import { useSearchParams } from 'next/navigation';
 
-export default function TelebirrStubPage() {
+// FE-004: Next.js 15+ requires client components using useSearchParams to be
+// wrapped in <Suspense> — otherwise the page deopts to client-side rendering
+// and may fail with DynamicServerError in static generation. Wrap the inner
+// component in Suspense.
 
+function TelebirrStubInner() {
   if (process.env.NEXT_PUBLIC_TELEBIRR_ENV === 'production' || process.env.NODE_ENV === 'production') {
     return (
       <div className="min-h-screen flex items-center justify-center px-6">
@@ -46,5 +51,13 @@ export default function TelebirrStubPage() {
         </p>
       </div>
     </div>
+  );
+}
+
+export default function TelebirrStubPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen flex items-center justify-center"><p className="text-muted-foreground">Loading…</p></div>}>
+      <TelebirrStubInner />
+    </Suspense>
   );
 }

@@ -2,6 +2,7 @@ import { TypedOpenAPIHono } from '../../src/typed-hono';
 import { z } from 'zod';
 import { requireRole } from '../../src/middleware/auth';
 import { corporateService } from './service';
+import { db, schema } from '@addis/db';
 
 export const corporateRoutes = new TypedOpenAPIHono();
 
@@ -61,7 +62,20 @@ corporateRoutes.post('/onboard', requireRole('rider'), async (c) => {
   const payload = decoded.slice(0, lastDot);
   const sig = decoded.slice(lastDot + 1);
   const expected = createHmac('sha256', env.NEXTAUTH_SECRET).update(payload).digest('hex');
+  // SEC-012: audit-log invite-signature mismatches so ops can detect
+  // NEXTAUTH_SECRET rotation (which invalidates all outstanding invites)
+  // or an attacker brute-forcing invite tokens.
   if (sig.length !== expected.length || !timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) {
+    try {
+      await db.insert(schema.outboxEvents).values({
+        channel: 'audit',
+        payload: {
+          action: 'corporate.invite_signature_mismatch',
+          entityId: c.get('session')!.userId,
+          after: { payloadPrefix: payload.slice(0, 50) },
+        },
+      });
+    } catch { /* audit failure must not change the response */ }
     return c.json({ error: { code: 'BAD_REQUEST', message: 'Invalid invite signature', requestId: c.get('requestId') } }, 400);
   }
   let parsed: { code?: string; expiresAt?: number };

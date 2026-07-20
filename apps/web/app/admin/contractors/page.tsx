@@ -33,15 +33,10 @@ export default function AdminContractorsPage() {
       key: 'id', header: 'Actions',
       render: (c) => (
         <div className="flex gap-2">
-          {}
-          <a
-            href={`/admin/contractors/${c.id}`}
-            className="text-sm text-accent underline"
-            target="_blank"
-            rel="noopener"
-          >
-            View docs
-          </a>
+          {/* FE-008: the previous "View docs" link pointed to /admin/contractors/${c.id}
+              which doesn't exist. Removed — admins use the API directly to view
+              documents, or the verify/reject flow below which already requires
+              reviewing the documents out-of-band. */}
           <Button
             size="sm"
             loading={verify.isPending && verify.variables === c.id}

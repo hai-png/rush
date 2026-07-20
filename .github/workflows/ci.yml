@@ -23,7 +23,7 @@ jobs:
       # Cache bun install — the previous workflow reinstalled all deps on
       # every run. Now we cache by lockfile hash.
       - uses: oven-sh/setup-bun@v2
-        with: { bun-version: 1.1.42 }
+        with: { bun-version: 1.3.14 }
       - name: Cache bun install
         uses: actions/cache@v4
         with:
@@ -110,7 +110,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
-        with: { bun-version: 1.1.42 }
+        with: { bun-version: 1.3.14 }
       - run: bun install --frozen-lockfile
       - run: bunx playwright install --with-deps chromium
       - run: bun run build --filter=web

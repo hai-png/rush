@@ -49,7 +49,9 @@ async function drainOutbox() {
   for (const evt of rows) {
     try {
 
-      await HANDLERS[evt.channel](evt.payload, evt);
+      const handler = HANDLERS[evt.channel];
+      if (!handler) throw new Error(`No handler registered for outbox channel '${evt.channel}'`);
+      await handler(evt.payload, evt);
       await db.update(schema.outboxEvents).set({ status: 'delivered' as any, updatedAt: new Date() }).where(eq(schema.outboxEvents.id, evt.id));
     } catch (err) {
       const attempts = evt.attempts + 1;
@@ -64,7 +66,7 @@ async function drainOutbox() {
         Sentry.captureException(err, { extra: { outboxEventId: evt.id } });
         workerLogger.error({ outboxEventId: evt.id, channel: evt.channel, attempts, err }, 'outbox event dead-lettered');
       } else {
-        const backoff = BACKOFF_SEC[Math.min(attempts - 1, BACKOFF_SEC.length - 1)];
+        const backoff = BACKOFF_SEC[Math.min(attempts - 1, BACKOFF_SEC.length - 1)] ?? 3600;
         await db.update(schema.outboxEvents).set({
           status: 'pending' as any, attempts, lastError: String(err),
           nextAttemptAt: new Date(Date.now() + backoff * 1000), updatedAt: new Date(),

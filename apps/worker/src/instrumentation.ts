@@ -3,15 +3,21 @@ import { loadEnv } from '@addis/shared';
 
 loadEnv();
 
-Sentry.init({
-  dsn: process.env.SENTRY_DSN,
-  environment: process.env.NODE_ENV,
-  tracesSampleRate: 0.1,
-  sendDefaultPii: false,
-  beforeSend(event) {
-    return scrubEvent(event as unknown as Record<string, unknown>) as unknown as typeof event;
-  },
-});
+// Only init Sentry if DSN is present — typecheck with exactOptionalPropertyTypes
+// requires `dsn: string` (not `string | undefined`), so we branch. The same
+// applies to `environment`.
+if (process.env.SENTRY_DSN) {
+  const sentryOpts: Sentry.NodeOptions = {
+    dsn: process.env.SENTRY_DSN,
+    tracesSampleRate: 0.1,
+    sendDefaultPii: false,
+    beforeSend(event) {
+      return scrubEvent(event as unknown as Record<string, unknown>) as unknown as typeof event;
+    },
+  };
+  if (process.env.NODE_ENV) sentryOpts.environment = process.env.NODE_ENV;
+  Sentry.init(sentryOpts);
+}
 
 const PII_KEY_RE = /phone|email|password|token/i;
 

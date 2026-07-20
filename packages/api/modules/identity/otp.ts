@@ -17,6 +17,19 @@ function generateCode(): string {
 
 export const otpService = {
   async send(phone: string, purpose: import('@addis/shared').OtpPurpose) {
+    // SEC-003: refuse to send OTPs to soft-deleted users. The check is silent
+    // (returns 200) to avoid user-enumeration of deleted accounts, but no SMS
+    // is sent and no OTP row is written — saving SMS budget and preventing
+    // notification leaks to recycled phone numbers.
+    const [existing] = await db.select({ id: schema.users.id, isActive: schema.users.isActive, deletedAt: schema.users.deletedAt })
+      .from(schema.users).where(eq(schema.users.phone, phone));
+    if (existing && (!existing.isActive || existing.deletedAt)) {
+      // For signup_verification, the user shouldn't exist at all — proceed.
+      // For password_reset / phone_change, refuse silently.
+      if (purpose !== 'signup_verification') {
+        return { sent: true, devCode: undefined };
+      }
+    }
 
     const lockKey = `otp:send:lock:${phone}`;
     const acquired = await redis.set(lockKey, '1', { nx: true, ex: 2 });

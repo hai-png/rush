@@ -201,7 +201,8 @@ export const CRON_JOBS: ReadonlyArray<{
     run: async () => {
       const { and, eq, lt, sql } = await import('drizzle-orm');
       const otps = await db.delete(schema.otpCodes).where(lt(schema.otpCodes.createdAt, sql`now() - interval '7 days'`)).returning({ id: schema.otpCodes.id });
-      const resets = await db.delete(schema.passwordResetTokens).where(lt(schema.passwordResetTokens.createdAt, sql`now() - interval '7 days'`)).returning({ id: schema.passwordResetTokens.id });
+      // DB-007: password_reset_tokens table dropped — password reset uses
+      // otp_codes with purpose='password_reset', pruned by the line above.
       const notifs = await db.delete(schema.notifications).where(and(sql`${schema.notifications.readAt} is not null`, lt(schema.notifications.createdAt, sql`now() - interval '90 days'`))).returning({ id: schema.notifications.id });
 
       const sessions = await db.delete(schema.sessions).where(lt(schema.sessions.expiresAt, sql`now()`)).returning({ id: schema.sessions.id });
@@ -232,7 +233,7 @@ export const CRON_JOBS: ReadonlyArray<{
         }).where(eq(schema.users.id, u.id));
       }
       return {
-        otpsDeleted: otps.length, resetsDeleted: resets.length,
+        otpsDeleted: otps.length,
         notificationsDeleted: notifs.length, sessionsDeleted: sessions.length,
         idempotencyDeleted: idempotency.length, usersAnonymized: deletedUsers.length,
       };

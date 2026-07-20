@@ -1,5 +1,7 @@
 import { TypedOpenAPIHono } from '../../src/typed-hono';
 import { z } from 'zod';
+import { eq } from 'drizzle-orm';
+import { db, schema } from '@addis/db';
 import { requireAuth } from '../../src/middleware/auth';
 import { supportService, faqService } from './service';
 
@@ -24,6 +26,19 @@ supportRoutes.post('/tickets', async (c) => {
 supportRoutes.get('/tickets/:id', async (c) => {
   const session = c.get('session')!;
   return c.json({ data: await supportService.getTicket(session.userId, session.role === 'platform_admin', c.req.param('id')) });
+});
+// API-003: GET /tickets/:id/messages — list messages for a ticket. The web
+// ticket-detail page calls this but the route was missing — messages were
+// never displayed. Gated to the ticket owner or platform_admin staff.
+supportRoutes.get('/tickets/:id/messages', async (c) => {
+  const session = c.get('session')!;
+  const isStaff = session.role === 'platform_admin';
+  // Reuse getTicket to enforce ownership / staff access.
+  await supportService.getTicket(session.userId, isStaff, c.req.param('id'));
+  const rows = await db.select().from(schema.ticketMessages)
+    .where(eq(schema.ticketMessages.ticketId, c.req.param('id')))
+    .orderBy(schema.ticketMessages.createdAt);
+  return c.json({ data: rows });
 });
 supportRoutes.post('/tickets/:id/messages', async (c) => {
   const session = c.get('session')!;

@@ -35,16 +35,19 @@ export async function handle(payload: AuditPayload, evt?: OutboxEvent) {
   }
 
   await db.transaction(async (tx) => {
-    await writeAudit(tx as unknown as typeof db, {
+    // exactOptionalPropertyTypes: build the entry conditionally so undefined
+    // fields are omitted rather than passed as `undefined`.
+    const entry: Parameters<typeof writeAudit>[1] = {
       actorId: payload.actorId ?? null,
       action: payload.action,
       entityType: payload.entityType ?? 'outbox',
-      entityId: payload.entityId ?? null,
       before: payload.before,
       after: { ...(payload.after as Record<string, unknown> | undefined), outboxEventId },
-      ipAddress: payload.ipAddress ?? null,
-      userAgent: payload.userAgent ?? null,
-    });
+    };
+    if (payload.entityId) entry.entityId = payload.entityId;
+    if (payload.ipAddress) entry.ipAddress = payload.ipAddress;
+    if (payload.userAgent) entry.userAgent = payload.userAgent;
+    await writeAudit(tx as unknown as typeof db, entry);
   });
 
   if (process.env.NODE_ENV !== 'test') {

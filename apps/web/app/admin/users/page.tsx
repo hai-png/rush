@@ -34,7 +34,7 @@ export default function AdminUsersPage() {
   });
 
   const updateUser = useMutation({
-    mutationFn: ({ id, action, role }: { id: string; action: 'suspend' | 'change_role'; role?: string }) =>
+    mutationFn: ({ id, action, role }: { id: string; action: 'suspend' | 'change_role' | 'reactivate'; role?: string }) =>
       client.PATCH('/api/v1/admin/users/{id}', { params: { path: { id } }, body: { action, role } as any }),
     onSuccess: () => { qc.invalidateQueries({ queryKey: ['admin-users'] }); push({ title: 'User updated', variant: 'success' }); },
     onError: () => push({ title: 'Update failed', variant: 'error' }),

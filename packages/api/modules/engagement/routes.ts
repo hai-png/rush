@@ -43,8 +43,15 @@ engagementRoutes.patch('/notifications/preferences', async (c) => {
 
 engagementRoutes.post('/devices', async (c) => {
   const body = z.object({ pushToken: z.string(), platform: z.enum(['ios', 'android', 'web']) }).parse(await c.req.json());
+  // SEC-018: include `platform` in the conflict target so a token that
+  // somehow gets registered from two different platforms (shouldn't happen
+  // with Expo, but defense in depth) updates the platform field rather
+  // than leaving it stale.
   const [row] = await db.insert(schema.devices).values({ userId: c.get('session')!.userId, ...body })
-    .onConflictDoUpdate({ target: [schema.devices.userId, schema.devices.pushToken], set: { lastSeenAt: new Date() } }).returning();
+    .onConflictDoUpdate({
+      target: [schema.devices.userId, schema.devices.pushToken],
+      set: { lastSeenAt: new Date(), platform: body.platform },
+    }).returning();
   return c.json({ data: row }, 201);
 });
 engagementRoutes.delete('/devices', async (c) => {

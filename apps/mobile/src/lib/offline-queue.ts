@@ -29,9 +29,26 @@ async function writeQueue(queue: QueuedMutation[]) {
   await AsyncStorage.setItem(QUEUE_KEY, JSON.stringify(queue));
 }
 
+// MOB-002: canonicalize object keys before stringifying so the idempotency
+// key is deterministic regardless of key order. JSON.stringify({a:1,b:2})
+// and JSON.stringify({b:2,a:1}) produce different strings — and thus
+// different idempotency keys — for semantically-identical bodies. Sort
+// keys recursively.
+function canonicalize(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(canonicalize);
+  if (value && typeof value === 'object') {
+    const out: Record<string, unknown> = {};
+    for (const k of Object.keys(value as Record<string, unknown>).sort()) {
+      out[k] = canonicalize((value as Record<string, unknown>)[k]);
+    }
+    return out;
+  }
+  return value;
+}
+
 function stableIdempotencyKey(input: { method: string; path: string; body?: unknown }): string {
-  const bodyHash = input.body ? JSON.stringify(input.body) : '';
-  return `${input.method}:${input.path}:${bodyHash}`;
+  const bodyStr = input.body ? JSON.stringify(canonicalize(input.body)) : '';
+  return `${input.method}:${input.path}:${bodyStr}`;
 }
 
 export async function enqueueOrSend(input: Omit<QueuedMutation, 'id' | 'createdAt' | 'idempotencyKey'>) {
@@ -57,8 +74,10 @@ async function queueMutation(input: Omit<QueuedMutation, 'id' | 'createdAt'>) {
   if (queue.length >= MAX_QUEUE_SIZE) {
     throw new Error('Offline queue full — cannot queue more mutations');
   }
-  const bodyHash = input.body ? JSON.stringify(input.body) : '';
-  const existingIdx = queue.findIndex(q => q.path === input.path && (q.body ? JSON.stringify(q.body) : '') === bodyHash);
+  // MOB-002: use canonicalize for the dedup comparison too — same fix as
+  // stableIdempotencyKey.
+  const bodyStr = input.body ? JSON.stringify(canonicalize(input.body)) : '';
+  const existingIdx = queue.findIndex(q => q.path === input.path && (q.body ? JSON.stringify(canonicalize(q.body)) : '') === bodyStr);
   if (existingIdx >= 0) return;
   const newId = (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function')
     ? crypto.randomUUID()

@@ -8,7 +8,21 @@ export type AddisRideClientOptions = {
   onUnauthorized?: (info: { request: Request; response: Response }) => void;
 };
 
-export function createAddisRideClient(opts: AddisRideClientOptions) {
+// The SDK is generated from openapi.json, but many routes use .post()/.get()
+// instead of .openapi() and aren't in the schema. Rather than block all
+// consumers on a full OpenAPI migration, we expose a loosely-typed client
+// where GET/POST/PATCH/PUT/DELETE accept any string path. The server
+// validates at runtime. Type-safety is preserved only for the routes that
+// ARE in the schema (registered via .openapi()).
+type LooseClient = ReturnType<typeof createClient<paths>> & {
+  GET: (path: string, opts?: any) => Promise<{ data?: any; error?: any; response: Response }>;
+  POST: (path: string, opts?: any) => Promise<{ data?: any; error?: any; response: Response }>;
+  PATCH: (path: string, opts?: any) => Promise<{ data?: any; error?: any; response: Response }>;
+  PUT: (path: string, opts?: any) => Promise<{ data?: any; error?: any; response: Response }>;
+  DELETE: (path: string, opts?: any) => Promise<{ data?: any; error?: any; response: Response }>;
+};
+
+export function createAddisRideClient(opts: AddisRideClientOptions): LooseClient {
   const client = createClient<paths>({ baseUrl: opts.baseUrl });
   client.use({
     onRequest({ request }) {
@@ -38,6 +52,6 @@ export function createAddisRideClient(opts: AddisRideClientOptions) {
       return response;
     },
   });
-  return client;
+  return client as unknown as LooseClient;
 }
 export type { paths } from './schema';

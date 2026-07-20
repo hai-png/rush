@@ -34,6 +34,13 @@ class InMemoryRedis {
     this.store.set(k, { value: String(cur), ...(e?.expiresAt ? { expiresAt: e.expiresAt } : {}) });
     return cur;
   }
+  // FE-006: add get() for the profile-ID cache. The Upstash Redis client
+  // has get(); the in-memory shim was missing it.
+  async get(k: string): Promise<string | null> {
+    const e = this.cleanup(k);
+    if (!e) return null;
+    return e.value;
+  }
   async expire(k: string, sec: number) {
     const e = this.cleanup(k);
     if (e) e.expiresAt = Date.now() + sec * 1000;
