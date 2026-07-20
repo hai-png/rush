@@ -1,8 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-// Edge Runtime: no Node globals (Buffer/node:crypto); use Web APIs only.
 export function proxy(req: NextRequest) {
-
   if (req.nextUrl.pathname === '/telebirr-stub' &&
       (process.env.NODE_ENV === 'production' || process.env.NEXT_PUBLIC_TELEBIRR_ENV === 'production')) {
     return new NextResponse(null, { status: 404 });
@@ -10,22 +8,20 @@ export function proxy(req: NextRequest) {
 
   const nonce = btoa(crypto.randomUUID());
 
-  // FE-001: CSP connect-src built from env vars, not hardcoded hosts.
   const telebirrHost = process.env.NEXT_PUBLIC_TELEBIRR_ENV === 'production'
     ? 'https://superapp.ethiomobilemoney.et'
     : 'https://developerportal.ethiotelebirr.et';
-  // Parse the Sentry DSN to extract the ingest host (e.g. https://<key>@o<org>.ingest.sentry.io/<project>).
   let sentryHost = '';
   if (process.env.NEXT_PUBLIC_SENTRY_DSN) {
     try {
       const u = new URL(process.env.NEXT_PUBLIC_SENTRY_DSN);
       sentryHost = `${u.protocol}//${u.host}`;
-    } catch { /* invalid DSN — skip */ }
+    } catch {  }
   } else if (process.env.SENTRY_DSN) {
     try {
       const u = new URL(process.env.SENTRY_DSN);
       sentryHost = `${u.protocol}//${u.host}`;
-    } catch { /* invalid DSN — skip */ }
+    } catch {  }
   }
   const tileServer = process.env.NEXT_PUBLIC_TILE_SERVER_URL ?? '';
   const carto = process.env.NEXT_PUBLIC_CARTO_API_KEY ? 'https://*.cartocdn.com https://gcp.carto.com' : '';
@@ -37,7 +33,6 @@ export function proxy(req: NextRequest) {
   const csp = [
     `default-src 'self'`,
     `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'`,
-
     `style-src 'self' 'unsafe-inline'`,
     `img-src 'self' data: https:`,
     `font-src 'self' data:`,

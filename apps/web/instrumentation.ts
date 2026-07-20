@@ -4,8 +4,6 @@ export async function register() {
 
   if (process.env.NEXT_RUNTIME === 'nodejs' && process.env.SENTRY_DSN) {
     const Sentry = await import('@sentry/nextjs');
-    // Build options conditionally to satisfy exactOptionalPropertyTypes —
-    // `dsn` and `environment` must be `string`, not `string | undefined`.
     const sentryOpts: Parameters<typeof Sentry.init>[0] = {
       tracesSampleRate: 0.1,
       release: process.env.VERCEL_GIT_COMMIT_SHA ?? 'dev',

@@ -47,7 +47,6 @@ export async function verifyPassword(pw: string, hash: string): Promise<boolean>
   }
 }
 
-// Web Crypto SHA-1 (works on Node and Edge).
 async function sha1HexUpper(input: string): Promise<string> {
   const data = new TextEncoder().encode(input);
   const digest = await crypto.subtle.digest('SHA-1', data);
