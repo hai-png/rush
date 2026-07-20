@@ -89,20 +89,33 @@ webhookRoutes.post('/telebirr/notify', async (c) => {
         // settlePayment's CAS `WHERE status='pending'` won't match (status is 'failed'),
         // so we need to explicitly re-open the payment to 'pending' first, then settle.
         // This is the recovery path for the PAY-002 race.
-        await db.transaction(async (tx) => {
-          await tx.update(schema.payments)
-            .set({ status: 'pending', updatedAt: new Date() })
-            .where(and(eq(schema.payments.id, payment.id), eq(schema.payments.status, 'failed')));
-          await tx.insert(schema.outboxEvents).values({
+        // FA-002: check the CAS UPDATE actually matched; if 0 rows updated, a concurrent
+        // webhook already moved the payment (e.g. to 'pending' or 'completed'), so skip
+        // the settlePayment call — it would either no-op (pending -> completed via CAS)
+        // or fail (completed -> can't re-settle).
+        const reopened = await db.update(schema.payments)
+          .set({ status: 'pending', updatedAt: new Date() })
+          .where(and(eq(schema.payments.id, payment.id), eq(schema.payments.status, 'failed')))
+          .returning({ id: schema.payments.id });
+        if (reopened.length === 0) {
+          // Concurrent webhook already transitioned the payment — log and ack.
+          await db.insert(schema.outboxEvents).values({
             channel: 'audit',
-            payload: { action: 'payment.reopened_from_failed', entityId: payment.id, reason: 'late_settlement_notification' },
+            payload: { action: 'payment.reopen_skipped_concurrent', entityId: payment.id, currentStatus: payment.status },
           });
-        });
-        await settlePayment(event.merchOrderId, event.amount);
+          return c.text('SUCCESS');
+        }
         await db.insert(schema.outboxEvents).values({
           channel: 'audit',
-          payload: { action: 'payment.recovered_late_settlement', entityId: payment.id },
+          payload: { action: 'payment.reopened_from_failed', entityId: payment.id, reason: 'late_settlement_notification' },
         });
+        const settled = await settlePayment(event.merchOrderId, event.amount);
+        if (settled) {
+          await db.insert(schema.outboxEvents).values({
+            channel: 'audit',
+            payload: { action: 'payment.recovered_late_settlement', entityId: payment.id },
+          });
+        }
       }
       // If payment.status is 'completed' / 'refunded' / 'partially_refunded', this
       // is a duplicate settlement notification — no-op.

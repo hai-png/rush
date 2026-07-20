@@ -29,5 +29,9 @@ export async function handle(
 
   const ok = await emailProvider.send({ to, subject: payload.subject, body: payload.body, html: payload.html });
   if (!ok) throw new Error(`Email delivery failed for ${to}`);
-  if (evt?.id) await notificationLogHelper.recordSent(evt.id, 'email', to);
+  // FA-004: log but don't throw on recordSent failure (see sms.ts for rationale).
+  if (evt?.id) {
+    try { await notificationLogHelper.recordSent(evt.id, 'email', to); }
+    catch (err) { console.error('[email-outbox] recordSent failed (duplicate risk):', (err as Error).message); }
+  }
 }

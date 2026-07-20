@@ -143,24 +143,34 @@ export const operationsService = {
   },
 
   /**
-   * Board a ride. The previous CAS update only checked the RIDE's status
-   * ('booked'); it didn't check the TRIP's status. A rider could board a
-   * ride for a trip that was 'scheduled' (not started) or 'completed'/
-   * 'cancelled'. Now we also require the trip to be 'in_transit'.
+   * Board a ride.
+   *
+   * FA-007 (re-applies API-006): The previous implementation had a TOCTOU race
+   * with `completeTrip`. It first UPDATEd the ride to 'boarded' (CAS on
+   * ride.status='booked'), then separately SELECTed the trip to verify it was
+   * 'in_transit', and on mismatch UPDATEd the ride back to 'booked' to revert.
+   * Under concurrent board + completeTrip, the ride could end up 'booked' on a
+   * 'completed' trip AND have ridesUsed incremented (then not decremented on revert).
+   *
+   * The fix collapses the check-then-update into a single atomic CAS UPDATE that
+   * uses a subquery on `trips` to assert the trip is still 'in_transit' at the
+   * moment the UPDATE applies. If 0 rows are updated, the trip was no longer
+   * 'in_transit' (concurrently completed or cancelled) and we surface a
+   * ConflictError. There's no revert step — the UPDATE never applied.
    */
   async board(riderId: string, rideId: string) {
     const [ride] = await db.update(schema.rides)
       .set({ status: 'boarded', updatedAt: new Date() })
-      .where(and(eq(schema.rides.id, rideId), eq(schema.rides.riderId, riderId), eq(schema.rides.status, 'booked')))
+      .where(and(
+        eq(schema.rides.id, rideId),
+        eq(schema.rides.riderId, riderId),
+        eq(schema.rides.status, 'booked'),
+        // FA-007: subquery — the ride's trip must still be in_transit at the
+        // moment the UPDATE applies. Atomic with the row write under MVCC.
+        sql`EXISTS (SELECT 1 FROM ${schema.trips} WHERE ${schema.trips.id} = ${schema.rides.tripId} AND ${schema.trips.status} = 'in_transit')`,
+      ))
       .returning();
     if (!ride) throw new ConflictError('Ride cannot be boarded in its current state');
-    // Verify the trip is in_transit.
-    const [trip] = await db.select().from(schema.trips).where(eq(schema.trips.id, ride.tripId));
-    if (!trip || trip.status !== 'in_transit') {
-      // Revert the boarding — the trip isn't active.
-      await db.update(schema.rides).set({ status: 'booked', updatedAt: new Date() }).where(eq(schema.rides.id, rideId));
-      throw new ConflictError('Trip is not in transit; cannot board');
-    }
     return ride;
   },
 

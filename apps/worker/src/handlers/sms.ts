@@ -26,6 +26,15 @@ export async function handle(
   }
   if (phone) {
     await smsProvider.send(phone, payload.body);
-    if (evt?.id) await notificationLogHelper.recordSent(evt.id, 'sms', phone);
+    // FA-004: if recordSent fails (DB blip), log but don't throw — the SMS was
+    // already sent. The outbox will retry on the next tick, and alreadySent()
+    // will return false (the record wasn't written), so a duplicate SMS may be
+    // sent. This is the known at-most-once-vs-at-least-once tradeoff: we chose
+    // at-least-once (duplicate SMS is better than lost SMS). A future refinement
+    // could use a transactional outbox + provider-message-id correlation.
+    if (evt?.id) {
+      try { await notificationLogHelper.recordSent(evt.id, 'sms', phone); }
+      catch (err) { console.error('[sms-outbox] recordSent failed (duplicate risk):', (err as Error).message); }
+    }
   }
 }

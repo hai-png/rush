@@ -16,10 +16,13 @@ describe('CRON_JOBS registry', () => {
   it('exposes the full set of cron jobs the system expects', async () => {
     const { CRON_JOBS } = await import('./cron-jobs');
     const names = CRON_JOBS.map((j) => j.name).sort();
-    // FIX (OPS-010): added 'archive-old-records' for 7-year retention enforcement.
+    // FA: added 'anchor-audit-chain', 'verify-audit-chain-anchors' (Follow-up 1),
+    // and 'cleanup-old-outbox-and-notifications' (Follow-up 3).
     expect(names).toEqual([
+      'anchor-audit-chain',
       'archive-old-records',
       'auto-close-tickets',
+      'cleanup-old-outbox-and-notifications',
       'cleanup-pending-subscriptions',
       'cleanup-stale-payments',
       'corporate-reset-monthly',
@@ -30,6 +33,7 @@ describe('CRON_JOBS registry', () => {
       'reconcile-payments',
       'retention-cleanup',
       'send-expiry-reminders',
+      'verify-audit-chain-anchors',
     ]);
   });
 

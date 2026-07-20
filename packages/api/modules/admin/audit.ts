@@ -219,10 +219,27 @@ export async function anchorAuditChain() {
 /**
  * Verify the audit chain against the external anchors.
  *
- * Reads the most-recent anchor from S3, runs `verifyAuditChain` up to the
- * anchored row, and checks the tip hash matches. If the DB chain was tampered
- * with AFTER the anchor was written, the tip hash diverges and this returns
- * `{ valid: false, reason: 'tip_divergence' }`.
+ * FA-006: defense-in-depth role clarification. `verifyAuditChain()` already
+ * detects tampering IF the append-only trigger is in place (an attacker who
+ * UPDATEs a row and recomputes the chain forward still leaves the trigger
+ * firing — the UPDATE is blocked). The anchor's value is for the case where
+ * an attacker with DB superuser privileges DROPs the trigger first, then
+ * tampers rows and recomputes the chain. In that scenario:
+ *   - `verifyAuditChain()` passes (the chain is internally consistent).
+ *   - BUT the anchored tip hash (written to S3 with Object Lock before the
+ *     tampering) no longer matches the current tip — `tip_divergence`.
+ *
+ * The anchor is written hourly. Tampering within the same hour as the last
+ * anchor is detected on the NEXT anchor write (the new anchor's tipHash
+ * won't match what a clean chain would produce). Tampering that happens
+ * AFTER an anchor and BEFORE the next anchor write is detected by this
+ * verification function on the daily cron.
+ *
+ * Limitation: if the attacker tampers AND immediately writes a new anchor
+ * with the tampered tip, the Object Lock on the CURRENT hour's anchor key
+ * prevents overwrite (in COMPLIANCE mode) — so the pre-tamper anchor is
+ * preserved and the divergence is detectable. This is why Object Lock
+ * COMPLIANCE mode is required (documented in infra/deploy/README.md).
  */
 export async function verifyAuditChainWithAnchors() {
   const { s3 } = await import('../../infra/s3');

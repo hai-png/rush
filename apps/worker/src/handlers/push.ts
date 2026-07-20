@@ -111,11 +111,10 @@ export async function handle(
     throw new Error(`Expo push partial failure (${failures.length}/${tickets.length}): ${details}`);
   }
   // FOLLOW-UP 3 (INFRA-009): record the successful send for idempotency.
-  // Use the first token as the recipient (the row records "we sent to this
-  // user's device set for this outbox event"; the unique (outbox_event_id,
-  // channel) index means a retry is a no-op).
+  // FA-004: log but don't throw on recordSent failure (see sms.ts for rationale).
   if (evt?.id && expoTokens.length > 0) {
-    await notificationLogHelper.recordSent(evt.id, 'push', expoTokens.join(','));
+    try { await notificationLogHelper.recordSent(evt.id, 'push', expoTokens.join(',')); }
+    catch (err) { console.error('[push-outbox] recordSent failed (duplicate risk):', (err as Error).message); }
   }
   // web push (VAPID) devices handled similarly via `web-push` library — omitted for brevity
 }

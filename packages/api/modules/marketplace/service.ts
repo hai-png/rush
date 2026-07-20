@@ -58,15 +58,21 @@ export const marketplaceService = {
     }
 
     try {
-      const [release] = await db.insert(schema.seatReleases).values({
-        subscriptionId: sub.id, riderId, routeId: sub.routeId, window: input.window,
-        releaseDate: input.releaseDate, refundAmount: refundAmount.toString(),
-        expiresAt: addHours(new Date(`${input.releaseDate}T00:00:00Z`), 24 + SEAT_RELEASE_TTL_HOURS),
-      }).returning();
-      // FIX (API-002): consume the released ride's quota.
-      await subscriptionRepo.incrementRidesUsed(db, sub.id);
-      await db.insert(schema.outboxEvents).values({ channel: 'notification', payload: { type: 'seat_released', userId: riderId } });
-      return release;
+      // FA-003: wrap release insert + incrementRidesUsed + outbox in one transaction.
+      // Without this, if incrementRidesUsed fails after the release insert commits,
+      // the rider gets the refund (via the claim flow) without losing the ride quota —
+      // reopening the API-002 free-ride exploit.
+      return await db.transaction(async (tx) => {
+        const [release] = await tx.insert(schema.seatReleases).values({
+          subscriptionId: sub.id, riderId, routeId: sub.routeId, window: input.window,
+          releaseDate: input.releaseDate, refundAmount: refundAmount.toString(),
+          expiresAt: addHours(new Date(`${input.releaseDate}T00:00:00Z`), 24 + SEAT_RELEASE_TTL_HOURS),
+        }).returning();
+        // FIX (API-002): consume the released ride's quota.
+        await subscriptionRepo.incrementRidesUsed(tx, sub.id);
+        await tx.insert(schema.outboxEvents).values({ channel: 'notification', payload: { type: 'seat_released', userId: riderId } });
+        return release;
+      });
     } catch (e: any) {
       if (e.code === '23505') throw new ConflictError('Seat already released for this date/window'); // unique index violation
       throw e;

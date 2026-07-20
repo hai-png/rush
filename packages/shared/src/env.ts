@@ -64,6 +64,9 @@ const envSchema = z.object({
 
   S3_ENDPOINT: z.string().url(),
   S3_BUCKET: z.string().min(1),
+  // FA-005: S3_REGION is used by s3.ts (hardcoded to us-east-1) and documented
+  // in infra/.env.example. Add to the schema so it's validated + typed.
+  S3_REGION: z.string().min(1).default('us-east-1'),
   // H31: enforce a real minimum length. AWS S3 access keys are 20 chars;
   // secret keys are 40 chars. MinIO uses similar lengths. A 1-char key
   // would pass the previous min(1) and only fail at runtime.

@@ -59,7 +59,16 @@ export const accountService = {
     // Also include contractor documents if the user is a contractor — the
     // previous implementation omitted contractor data entirely, which is a
     // GDPR/Proclamation 1321/2024 violation for contractor accounts.
-    const [subs, payments, rides, releases, claims, tickets, notifs, tos, contractorDocs] = await Promise.all([
+    //
+    // FA-008 (re-applies API-017): the export was also missing ticket_messages,
+    // corporate_members, devices, and notification_preferences. A GDPR Art. 15
+    // export that silently omits half the user's records is a compliance
+    // violation. Now: ticket_messages are fetched via the user's ticket IDs,
+    // corporate_members by userId, devices by userId, notification_preferences
+    // by userId.
+    const [subs, payments, rides, releases, claims, tickets, notifs, tos, contractorDocs,
+      ticketMessages, corporateMemberships, devices, notifPrefs,
+    ] = await Promise.all([
       riderId ? db.select().from(schema.subscriptions).where(eq(schema.subscriptions.riderId, riderId)) : [],
       riderId ? db.select().from(schema.payments).where(eq(schema.payments.riderId, riderId)) : [],
       riderId ? db.select().from(schema.rides).where(eq(schema.rides.riderId, riderId)) : [],
@@ -71,11 +80,24 @@ export const accountService = {
       contractorProfile
         ? db.select().from(schema.contractorDocuments).where(eq(schema.contractorDocuments.contractorId, contractorProfile.id))
         : [],
+      // FA-008: ticket_messages authored by the user.
+      db.select().from(schema.ticketMessages).where(eq(schema.ticketMessages.authorId, userId)),
+      // FA-008: corporate memberships.
+      db.select().from(schema.corporateMembers).where(eq(schema.corporateMembers.userId, userId)),
+      // FA-008: registered push devices.
+      db.select().from(schema.devices).where(eq(schema.devices.userId, userId)),
+      // FA-008: notification preferences.
+      db.select().from(schema.notificationPreferences).where(eq(schema.notificationPreferences.userId, userId)),
     ]);
 
     const archive = archiver('zip', { zlib: { level: 9 } });
     const stream = new PassThrough();
     archive.pipe(stream);
+    // FA-008: include the rider profile row (homeArea, workArea) — the previous
+    // export fetched `profile` only to derive `riderId` but never wrote it to the ZIP.
+    if (profile) {
+      archive.append(JSON.stringify(profile, null, 2), { name: 'rider_profile.json' });
+    }
     archive.append(JSON.stringify(subs, null, 2), { name: 'subscriptions.json' });
     archive.append(JSON.stringify(payments, null, 2), { name: 'payments.json' });
     archive.append(JSON.stringify(rides, null, 2), { name: 'rides.json' });
@@ -83,6 +105,11 @@ export const accountService = {
     archive.append(JSON.stringify(claims, null, 2), { name: 'seat_claims.json' });
     archive.append(JSON.stringify(tickets, null, 2), { name: 'tickets.json' });
     archive.append(JSON.stringify(notifs, null, 2), { name: 'notifications.json' });
+    // FA-008: append the previously-missing entities.
+    archive.append(JSON.stringify(ticketMessages, null, 2), { name: 'ticket_messages.json' });
+    archive.append(JSON.stringify(corporateMemberships, null, 2), { name: 'corporate_memberships.json' });
+    archive.append(JSON.stringify(devices, null, 2), { name: 'devices.json' });
+    archive.append(JSON.stringify(notifPrefs, null, 2), { name: 'notification_preferences.json' });
     archive.append(JSON.stringify(tos, null, 2), { name: 'tos_acceptances.json' });
     if (contractorProfile) {
       archive.append(JSON.stringify(contractorProfile, null, 2), { name: 'contractor_profile.json' });

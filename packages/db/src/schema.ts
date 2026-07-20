@@ -609,4 +609,6 @@ export const notificationLog = pgTable('notification_log', {
   outboxChannelUniq: uniqueIndex('notification_log_outbox_channel_uniq').on(t.outboxEventId, t.channel),
   recipientSentIdx: index('notification_log_recipient_sent_at_index').on(t.recipient, t.sentAt),
   sentIdx: index('notification_log_sent_at_index').on(t.sentAt),
+  // FA-001: match the CHECK constraint in migration 0005.
+  channelCheck: check('notification_log_channel_check', sql`${t.channel} in ('sms', 'email', 'push')`),
 }));
