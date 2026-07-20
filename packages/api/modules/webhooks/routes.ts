@@ -25,12 +25,10 @@ webhookRoutes.post('/telebirr/notify', async (c) => {
   if (event.type === 'payment.settled' || event.type === 'payment.failed') {
 
     const outRequestNo = (event as any).outRequestNo ?? `auto-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
-    const receivedAt = new Date();
     try {
       await db.insert(schema.telebirrNotifyEvents)
-        .values({ merchOrderId: event.merchOrderId, tradeStatus: event.type, outRequestNo, receivedAt });
+        .values({ merchOrderId: event.merchOrderId, tradeStatus: event.type, outRequestNo });
     } catch (err: any) {
-
       if (err.code === '23505') return c.text('SUCCESS');
       throw err;
     }

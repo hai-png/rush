@@ -523,15 +523,12 @@ export const shuttlePositions = pgTable('shuttle_positions', {
 });
 
 export const telebirrNotifyEvents = pgTable('telebirr_notify_events', {
-
   merchOrderId: text('merch_order_id').notNull().references(() => payments.reference, { onDelete: 'restrict' }),
   tradeStatus: text('trade_status').notNull(),
   outRequestNo: text('out_request_no').notNull(),
   receivedAt: ts('received_at').notNull().defaultNow(),
 }, (t) => ({
-
-  pk: primaryKey({ columns: [t.merchOrderId, t.outRequestNo, t.receivedAt] }),
-
+  pk: primaryKey({ columns: [t.merchOrderId, t.outRequestNo] }),
   merchIdx: index('telebirr_notify_events_merch_order_id_index').on(t.merchOrderId, t.receivedAt),
 }));
 
