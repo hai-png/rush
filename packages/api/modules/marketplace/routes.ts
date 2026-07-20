@@ -24,7 +24,7 @@ marketplaceRoutes.get('/seat-releases', requireRole('rider'), async (c) => {
 marketplaceRoutes.post('/seat-releases', requireRole('rider'), async (c) => {
   const body = CreateSeatReleaseInput.parse(await c.req.json());
 
-  const riderId = await riderProfileIdFor(c.get('session').userId);
+  const riderId = await riderProfileIdFor(c.get('session')!.userId);
   const row = await marketplaceService.release(riderId, body);
   return c.json({ data: row }, 201);
 });
@@ -32,7 +32,7 @@ marketplaceRoutes.post('/seat-releases', requireRole('rider'), async (c) => {
 marketplaceRoutes.get('/seat-releases/:id', requireRole('rider'), async (c) => {
   const [row] = await db.select().from(schema.seatReleases).where(eq(schema.seatReleases.id, c.req.param('id')));
   if (!row) throw new NotFoundError('Release not found');
-  const riderId = await riderProfileIdFor(c.get('session').userId);
+  const riderId = await riderProfileIdFor(c.get('session')!.userId);
   if (row.riderId !== riderId) {
 
     throw new NotFoundError('Release not found');
@@ -40,24 +40,24 @@ marketplaceRoutes.get('/seat-releases/:id', requireRole('rider'), async (c) => {
   return c.json({ data: row });
 });
 marketplaceRoutes.delete('/seat-releases/:id', requireRole('rider'), async (c) => {
-  const riderId = await riderProfileIdFor(c.get('session').userId);
+  const riderId = await riderProfileIdFor(c.get('session')!.userId);
   await marketplaceService.cancelRelease(riderId, c.req.param('id'));
   return c.body(null, 204);
 });
 
 marketplaceRoutes.get('/seat-claims', requireRole('rider'), async (c) => {
-  const riderId = await riderProfileIdFor(c.get('session').userId);
+  const riderId = await riderProfileIdFor(c.get('session')!.userId);
   const rows = await db.select().from(schema.seatClaims).where(eq(schema.seatClaims.riderId, riderId));
   return c.json({ data: rows });
 });
 marketplaceRoutes.post('/seat-claims', requireRole('rider'), async (c) => {
   const body = ClaimSeatInput.parse(await c.req.json());
-  const riderId = await riderProfileIdFor(c.get('session').userId);
+  const riderId = await riderProfileIdFor(c.get('session')!.userId);
   const result = await marketplaceService.claim(riderId, body);
   return c.json({ data: { claim: result.claim, checkout: result.checkout } }, 201);
 });
 marketplaceRoutes.get('/seat-claims/:id', requireRole('rider'), async (c) => {
-  const riderId = await riderProfileIdFor(c.get('session').userId);
+  const riderId = await riderProfileIdFor(c.get('session')!.userId);
   const [row] = await db.select().from(schema.seatClaims).where(eq(schema.seatClaims.id, c.req.param('id')));
   if (!row) throw new NotFoundError('Claim not found');
   if (row.riderId !== riderId) throw new NotFoundError('Claim not found');

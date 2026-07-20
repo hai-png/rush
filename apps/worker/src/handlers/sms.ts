@@ -12,7 +12,7 @@ export async function handle(
   }
   let phone = payload.phone;
   if (!phone && payload.userId) {
-    const [u] = await db.select({ phone: schema.users.phone }).from(schema.users).where(eq(schema.users.id, payload.userId));
+    const [u] = await db.select({ phone: schema.users.phone }).from(schema.users).where(eq(schema.users.id, payload.userId) as any);
     phone = u?.phone;
   }
   if (phone) {

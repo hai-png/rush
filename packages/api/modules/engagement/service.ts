@@ -68,11 +68,11 @@ export const engagementService = {
       .orderBy(sql`${schema.notifications.createdAt} desc`).limit(limit + 1);
     const hasMore = rows.length > limit;
     const page = hasMore ? rows.slice(0, limit) : rows;
-    return { rows: page, cursor: hasMore ? encodeCursor(page[page.length - 1].id) : undefined };
+    return { rows: page, cursor: hasMore ? encodeCursor(page[page.length - 1]!.id) : undefined };
   },
   async unreadCount(userId: string) {
-    const [{ count }] = await db.select({ count: sql<number>`count(*)::int` }).from(schema.notifications)
-      .where(and(eq(schema.notifications.userId, userId), isNull(schema.notifications.readAt)));
+    const count = (await db.select({ count: sql<number>`count(*)::int` }).from(schema.notifications)
+      .where(and(eq(schema.notifications.userId, userId), isNull(schema.notifications.readAt))))[0]!.count;
     return count;
   },
   async markRead(userId: string, id: string) {

@@ -25,10 +25,10 @@ const UpdateCorporateInput = z.object({
   contactPhone: z.string().optional(),
 }).strict();
 
-corporateRoutes.get('/', requireRole('corporate_admin'), async (c) => c.json({ data: await corporateService.getOwn(c.get('session').userId) }));
-corporateRoutes.patch('/', requireRole('corporate_admin'), async (c) => c.json({ data: await corporateService.updateOwn(c.get('session').userId, UpdateCorporateInput.parse(await c.req.json())) }));
+corporateRoutes.get('/', requireRole('corporate_admin'), async (c) => c.json({ data: await corporateService.getOwn(c.get('session')!.userId) }));
+corporateRoutes.patch('/', requireRole('corporate_admin'), async (c) => c.json({ data: await corporateService.updateOwn(c.get('session')!.userId, UpdateCorporateInput.parse(await c.req.json()) as any) }));
 
-corporateRoutes.get('/members', requireRole('corporate_admin'), async (c) => c.json({ data: await corporateService.listMembers(c.get('session').userId) }));
+corporateRoutes.get('/members', requireRole('corporate_admin'), async (c) => c.json({ data: await corporateService.listMembers(c.get('session')!.userId) }));
 
 const UpdateMemberInput = z.object({
   approvalStatus: z.enum(['approved', 'rejected', 'pending']).optional(),
@@ -37,11 +37,11 @@ const UpdateMemberInput = z.object({
 
 corporateRoutes.patch('/members/:id', requireRole('corporate_admin'), async (c) => {
   const body = UpdateMemberInput.parse(await c.req.json());
-  return c.json({ data: await corporateService.updateMember(c.get('session').userId, c.req.param('id'), body) });
+  return c.json({ data: await corporateService.updateMember(c.get('session')!.userId, c.req.param('id'), body as any) });
 });
-corporateRoutes.delete('/members/:id', requireRole('corporate_admin'), async (c) => { await corporateService.removeMember(c.get('session').userId, c.req.param('id')); return c.body(null, 204); });
+corporateRoutes.delete('/members/:id', requireRole('corporate_admin'), async (c) => { await corporateService.removeMember(c.get('session')!.userId, c.req.param('id')); return c.body(null, 204); });
 
-corporateRoutes.post('/invites', requireRole('corporate_admin'), async (c) => c.json({ data: await corporateService.generateInvite(c.get('session').userId) }));
+corporateRoutes.post('/invites', requireRole('corporate_admin'), async (c) => c.json({ data: await corporateService.generateInvite(c.get('session')!.userId) }));
 
 corporateRoutes.post('/onboard', requireRole('rider'), async (c) => {
 
@@ -78,6 +78,6 @@ corporateRoutes.post('/onboard', requireRole('rider'), async (c) => {
   }
   code = parsed.code;
 
-  return c.json({ data: await corporateService.onboardRider(c.get('session').userId, { corporateCode: code, employeeId: body.employeeId }) }, 201);
+  return c.json({ data: await corporateService.onboardRider(c.get('session')!.userId, { corporateCode: code, employeeId: body.employeeId }) }, 201);
 });
-corporateRoutes.get('/me', requireRole('rider'), async (c) => c.json({ data: await corporateService.myMembership(c.get('session').userId) }));
+corporateRoutes.get('/me', requireRole('rider'), async (c) => c.json({ data: await corporateService.myMembership(c.get('session')!.userId) }));

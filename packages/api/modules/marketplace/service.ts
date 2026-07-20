@@ -52,16 +52,16 @@ export const marketplaceService = {
 
     try {
 
-      return await db.transaction(async (tx) => {
+      return await db.transaction(async (tx: any) => {
         const [release] = await tx.insert(schema.seatReleases).values({
           subscriptionId: sub.id, riderId, routeId: sub.routeId, window: input.window,
           releaseDate: input.releaseDate, refundAmount: refundAmount.toString(),
           expiresAt: addHours(new Date(`${input.releaseDate}T00:00:00Z`), 24 + SEAT_RELEASE_TTL_HOURS),
         }).returning();
 
-        await subscriptionRepo.incrementRidesUsed(tx, sub.id);
+        await subscriptionRepo.incrementRidesUsed(tx as any, sub.id);
         await tx.insert(schema.outboxEvents).values({ channel: 'notification', payload: { type: 'seat_released', userId: riderId } });
-        return release;
+        return release!;
       });
     } catch (e: any) {
       if (e.code === '23505') throw new ConflictError('Seat already released for this date/window');
@@ -77,7 +77,7 @@ export const marketplaceService = {
       await tx.update(schema.seatReleases).set({ status: 'cancelled', cancelledAt: new Date(), updatedAt: new Date() }).where(eq(schema.seatReleases.id, releaseId));
 
       if (release.subscriptionId) {
-        await subscriptionRepo.decrementRidesUsed(tx, release.subscriptionId);
+        await subscriptionRepo.decrementRidesUsed(tx as any, release.subscriptionId);
       }
     });
   },
@@ -94,7 +94,7 @@ export const marketplaceService = {
         .returning();
       if (claimed.length === 0) throw new ConflictError('Seat already claimed, cancelled, or expired');
 
-      const release = claimed[0];
+      const release = claimed[0]!;
       if (release.riderId === claimerId) throw new BadRequestError('Cannot claim your own released seat');
 
       const merchOrderId = generateMerchOrderId();
@@ -105,12 +105,12 @@ export const marketplaceService = {
 
       const [claim] = await tx.insert(schema.seatClaims).values({
         seatReleaseId: input.seatReleaseId, riderId: claimerId, routeId: release.routeId,
-        window: release.window, paymentId: payment.id, status: 'confirmed',
+        window: release.window, paymentId: payment!.id, status: 'confirmed',
       }).returning();
 
-      await tx.update(schema.payments).set({ seatClaimId: claim.id }).where(eq(schema.payments.id, payment.id));
+      await tx.update(schema.payments).set({ seatClaimId: claim!.id }).where(eq(schema.payments.id, payment!.id));
 
-      return { release, claim, payment };
+      return { release, claim: claim!, payment: payment! };
     });
 
     const provider = getPaymentProvider(input.paymentMethod);

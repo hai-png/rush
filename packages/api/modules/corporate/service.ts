@@ -11,7 +11,7 @@ export const corporateService = {
       }).returning();
       const [corp] = await tx.insert(schema.corporates).values({
         code: input.corpCode, name: input.corpName, contactEmail: input.contactEmail, contactPhone: input.contactPhone,
-        subsidyPercent: input.subsidyPercent, monthlySeatAllowance: input.monthlySeatAllowance, adminUserId: admin.id,
+        subsidyPercent: input.subsidyPercent, monthlySeatAllowance: input.monthlySeatAllowance, adminUserId: admin!.id,
         isActive: false,
       }).returning();
       return { corp, admin };

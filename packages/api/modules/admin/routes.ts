@@ -27,21 +27,21 @@ adminRoutes.patch('/users/:id', async (c) => {
 
   const body = z.object({ action: z.enum(['suspend', 'change_role', 'reactivate']), role: z.enum(ALL_ROLES as [string, ...string[]]).optional() }).parse(await c.req.json());
   const ip = clientIp(c);
-  if (body.action === 'suspend') return c.json({ data: await adminService.suspendUser(c.get('session').userId, c.req.param('id'), ip) });
-  if (body.action === 'reactivate') return c.json({ data: await adminService.reactivateUser(c.get('session').userId, c.req.param('id'), ip) });
+  if (body.action === 'suspend') return c.json({ data: await adminService.suspendUser(c.get('session')!.userId, c.req.param('id'), ip) });
+  if (body.action === 'reactivate') return c.json({ data: await adminService.reactivateUser(c.get('session')!.userId, c.req.param('id'), ip) });
   if (!body.role) return c.json({ error: { code: 'BAD_REQUEST', message: 'role is required for change_role', requestId: c.get('requestId') } }, 400);
-  return c.json({ data: await adminService.changeRole(c.get('session').userId, c.req.param('id'), body.role, ip) });
+  return c.json({ data: await adminService.changeRole(c.get('session')!.userId, c.req.param('id'), body.role, ip) });
 });
-adminRoutes.post('/users/:id/impersonate', async (c) => c.json({ data: await adminService.impersonate(c.get('session').userId, c.req.param('id'), clientIp(c)) }));
+adminRoutes.post('/users/:id/impersonate', async (c) => c.json({ data: await adminService.impersonate(c.get('session')!.userId, c.req.param('id'), clientIp(c)) }));
 
 adminRoutes.get('/contractors/pending', async (c) => {
   const rows = await db.select().from(schema.contractorProfiles).where(eq(schema.contractorProfiles.verificationStatus, 'pending'));
   return c.json({ data: rows });
 });
-adminRoutes.post('/contractors/:id/verify', async (c) => c.json({ data: await documentService.verify(c.get('session').userId, c.req.param('id')) }));
+adminRoutes.post('/contractors/:id/verify', async (c) => c.json({ data: await documentService.verify(c.get('session')!.userId, c.req.param('id')) }));
 adminRoutes.post('/contractors/:id/reject', async (c) => {
   const { reason } = z.object({ reason: z.string().min(3) }).parse(await c.req.json());
-  return c.json({ data: await documentService.reject(c.get('session').userId, c.req.param('id'), reason) });
+  return c.json({ data: await documentService.reject(c.get('session')!.userId, c.req.param('id'), reason) });
 });
 
 adminRoutes.get('/corporates/pending', async (c) => {
@@ -51,7 +51,7 @@ adminRoutes.get('/corporates/pending', async (c) => {
 adminRoutes.post('/corporates/:id/activate', async (c) => c.json({ data: await corporateService.activate(c.req.param('id')) }));
 
 adminRoutes.get('/audit-logs', async (c) => c.json({
-  data: await adminService.searchAuditLogs({ entityType: c.req.query('entityType'), actorId: c.req.query('actorId'), action: c.req.query('action') }, boundedLimit(c.req.query('limit'), 50, 500)),
+  data: await adminService.searchAuditLogs({ entityType: c.req.query('entityType') ?? undefined, actorId: c.req.query('actorId') ?? undefined, action: c.req.query('action') ?? undefined }, boundedLimit(c.req.query('limit'), 50, 500)),
 }));
 
 adminRoutes.get('/subscriptions', async (c) => {
@@ -75,7 +75,7 @@ adminRoutes.post('/payments/:id/verify', async (c) => {
     verifiedAmount: z.string().regex(/^\d+(\.\d{1,2})?$/, 'verifiedAmount must be a decimal ETB string'),
     reason: z.string().min(3).max(500),
   }).parse(await c.req.json());
-  const adminId = c.get('session').userId;
+  const adminId = c.get('session')!.userId;
   const ipAddress = clientIp(c) ?? null;
 
   const result = await db.transaction(async (tx) => {
@@ -133,7 +133,7 @@ adminRoutes.post('/refunds', async (c) => {
     amount: z.string().regex(/^\d+(\.\d{1,2})?$/, 'amount must be a decimal ETB string'),
     reason: z.string().min(3).max(500),
   }).parse(await c.req.json());
-  const adminId = c.get('session').userId;
+  const adminId = c.get('session')!.userId;
   const ipAddress = clientIp(c) ?? null;
   try {
     await scheduleRefund(body.paymentId, Money.fromETBString(body.amount), body.reason);
@@ -171,7 +171,7 @@ adminRoutes.get('/export/:resource', async (c) => {
   }) : rawRows;
   const csv = toCsv(rows);
 
-  const adminId = c.get('session').userId;
+  const adminId = c.get('session')!.userId;
   const ipAddress = clientIp(c) ?? null;
   try {
     await db.insert(schema.outboxEvents).values({
@@ -188,7 +188,7 @@ adminRoutes.get('/export/:resource', async (c) => {
 
 function toCsv(rows: Record<string, unknown>[]): string {
   if (!rows.length) return '';
-  const headers = Object.keys(rows[0]);
+  const headers = Object.keys(rows[0]!);
 
   const FORMULA_LEAD = /^[=+\-@\t\r]/;
   const escape = (v: unknown) => {

@@ -116,7 +116,7 @@ webhookRoutes.post('/telebirr/notify', async (c) => {
       );
       return c.text('SUCCESS');
     }
-    const retry = updated[0];
+    const retry = updated[0]!;
     if (event.type === 'refund.succeeded') {
 
       const { Money } = await import('@addis/shared');

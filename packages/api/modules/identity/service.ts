@@ -55,9 +55,9 @@ export const identityService = {
       const [user] = await tx.insert(schema.users).values({
         phone: input.phone, name: input.name, passwordHash: await hashPassword(input.password), role: 'rider',
       }).returning();
-      const [profile] = await tx.insert(schema.riderProfiles).values({ userId: user.id, homeArea: input.homeArea, workArea: input.workArea }).returning();
+      const [profile] = await tx.insert(schema.riderProfiles).values({ userId: user!.id, homeArea: input.homeArea, workArea: input.workArea }).returning();
 
-      const { passwordHash: _ph, twoFactorSecret: _tfs, ...safeUser } = user;
+      const { passwordHash: _ph, twoFactorSecret: _tfs, ...safeUser } = user!;
       return { user: safeUser, profile };
     });
   },
@@ -71,9 +71,9 @@ export const identityService = {
         phone: input.phone, name: input.name, passwordHash: await hashPassword(input.password), role: 'contractor',
       }).returning();
       const [profile] = await tx.insert(schema.contractorProfiles).values({
-        userId: user.id, licenseNumber: input.licenseNumber, experienceYears: input.experienceYears, verificationStatus: 'unverified',
+        userId: user!.id, licenseNumber: input.licenseNumber, experienceYears: input.experienceYears, verificationStatus: 'unverified',
       }).returning();
-      const { passwordHash: _ph, twoFactorSecret: _tfs, ...safeUser } = user;
+      const { passwordHash: _ph, twoFactorSecret: _tfs, ...safeUser } = user!;
       return { user: safeUser, profile };
     });
   },

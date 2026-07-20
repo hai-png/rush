@@ -24,5 +24,5 @@ export const catalogRepo = {
 function paginate<T extends { id: string }>(rows: T[], limit: number) {
   const hasMore = rows.length > limit;
   const page = hasMore ? rows.slice(0, limit) : rows;
-  return { rows: page, cursor: hasMore ? encodeCursor(page[page.length - 1].id) : undefined };
+  return { rows: page, cursor: hasMore ? encodeCursor(page[page.length - 1]!.id) : undefined };
 }

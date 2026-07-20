@@ -18,5 +18,5 @@ export const tosGateMiddleware: MiddlewareHandler = async (c, next) => {
       return c.json({ error: { code: 'TOS_UPDATE_REQUIRED', message: 'Please accept the updated Terms of Service', requestId: c.get('requestId') } }, 409);
     }
   }
-  await next();
+  return await next();
 };

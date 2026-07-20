@@ -34,9 +34,9 @@ function normalizeForHash(value: unknown): unknown {
   return value;
 }
 
-export async function writeAudit(tx: typeof db, entry: {
-  actorId: string | null; action: string; entityType: string; entityId?: string | null;
-  before?: unknown; after?: unknown; ipAddress?: string | null; userAgent?: string | null;
+export async function writeAudit(tx: any, entry: {
+  actorId: string | null; action: string; entityType: string; entityId?: string;
+  before?: unknown; after?: unknown; ipAddress?: string | undefined; userAgent?: string | undefined;
 }) {
 
   await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${AUDIT_CHAIN_LOCK_KEY}))`);

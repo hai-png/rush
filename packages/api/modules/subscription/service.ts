@@ -58,12 +58,12 @@ export const subscriptionService = {
 
       const merchOrderId = generateMerchOrderId();
       const [payment] = await tx.insert(schema.payments).values({
-        riderId: input.riderId, subscriptionId: sub.id, amount: price.toString(),
+        riderId: input.riderId, subscriptionId: sub!.id, amount: price.toString(),
         method: input.paymentMethod, reference: merchOrderId, status: 'pending',
         retentionExpiresAt: addYears(new Date(), PAYMENT_RETENTION_YEARS),
       }).returning();
 
-      return { sub, payment, merchOrderId };
+      return { sub: sub!, payment: payment!, merchOrderId };
     });
 
     const provider = getPaymentProvider(input.paymentMethod);

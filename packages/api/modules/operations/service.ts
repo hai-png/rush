@@ -62,7 +62,7 @@ export const operationsService = {
         for (const sub of subs) {
           const plan = planById.get(sub.planId);
           if (plan && (plan.ridesIncluded === -1 || sub.ridesUsed < plan.ridesIncluded)) {
-            await subscriptionRepo.incrementRidesUsed(tx, sub.id);
+            await subscriptionRepo.incrementRidesUsed(tx as any, sub.id);
           }
         }
       }
@@ -71,7 +71,7 @@ export const operationsService = {
     });
   },
 
-  async bookRide(riderId: string, input: { tripId: string; subscriptionId?: string; seatClaimId?: string; pickupStop?: string }) {
+  async bookRide(riderId: string, input: { tripId: string; subscriptionId?: string | undefined; seatClaimId?: string | undefined; pickupStop?: string | undefined }) {
     if (!input.subscriptionId && !input.seatClaimId) {
       throw new BadRequestError('A subscriptionId or seatClaimId is required to book a ride');
     }
@@ -133,7 +133,7 @@ export const operationsService = {
     return ride;
   },
 
-  async reportPosition(shuttleId: string, pos: { lat: number; lng: number; heading?: number; speed?: number }) {
+  async reportPosition(shuttleId: string, pos: { lat: number; lng: number; heading?: number | undefined; speed?: number | undefined }) {
 
     if (!Number.isFinite(pos.lat) || pos.lat < -90 || pos.lat > 90) throw new BadRequestError('lat must be in [-90, 90]');
     if (!Number.isFinite(pos.lng) || pos.lng < -180 || pos.lng > 180) throw new BadRequestError('lng must be in [-180, 180]');
@@ -146,6 +146,6 @@ export const operationsService = {
       .values({ shuttleId, ...pos, updatedAt: new Date() })
       .onConflictDoUpdate({ target: schema.shuttlePositions.shuttleId, set: { ...pos, updatedAt: new Date() } })
       .returning();
-    return row;
+    return row!;
   },
 };

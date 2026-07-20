@@ -24,14 +24,14 @@ class InMemoryRedis {
   async set(k: string, v: string, opts?: { nx?: boolean; ex?: number }) {
     const existing = this.cleanup(k);
     if (opts?.nx && existing) return null;
-    this.store.set(k, { value: v, expiresAt: opts?.ex ? Date.now() + opts.ex * 1000 : undefined });
+    this.store.set(k, { value: v, ...(opts?.ex ? { expiresAt: Date.now() + opts.ex * 1000 } : {}) });
     return 'OK';
   }
   async incr(k: string) {
     const e = this.cleanup(k);
     const cur = Number(e?.value ?? 0) + 1;
 
-    this.store.set(k, { value: String(cur), expiresAt: e?.expiresAt });
+    this.store.set(k, { value: String(cur), ...(e?.expiresAt ? { expiresAt: e.expiresAt } : {}) });
     return cur;
   }
   async expire(k: string, sec: number) {
@@ -52,7 +52,7 @@ class InMemoryRedis {
       try { prev = JSON.parse(existing.value); } catch { prev = {}; }
     }
     const merged = { ...prev, ...v };
-    this.store.set(k, { value: JSON.stringify(merged), expiresAt: existing?.expiresAt });
+    this.store.set(k, { value: JSON.stringify(merged), ...(existing?.expiresAt ? { expiresAt: existing.expiresAt } : {}) });
   }
   async hgetall(k: string) {
     const e = this.cleanup(k);

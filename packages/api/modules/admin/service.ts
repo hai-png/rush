@@ -7,12 +7,12 @@ import { writeAudit } from './audit';
 
 export const adminService = {
   async dashboard() {
-    const [activeSubs] = await db.select({ n: sql<number>`count(*)::int` }).from(schema.subscriptions).where(eq(schema.subscriptions.status, 'active'));
-    const [openSeats] = await db.select({ n: sql<number>`count(*)::int` }).from(schema.seatReleases).where(eq(schema.seatReleases.status, 'open'));
-    const [pendingContractors] = await db.select({ n: sql<number>`count(*)::int` }).from(schema.contractorProfiles).where(eq(schema.contractorProfiles.verificationStatus, 'pending'));
-    const [revenue30d] = await db.select({ sum: sql<string>`coalesce(sum(amount), 0)` }).from(schema.payments)
-      .where(and(eq(schema.payments.status, 'completed'), gte(schema.payments.createdAt, sql`now() - interval '30 days'`)));
-    const [openTickets] = await db.select({ n: sql<number>`count(*)::int` }).from(schema.supportTickets).where(eq(schema.supportTickets.status, 'open'));
+    const activeSubs = (await db.select({ n: sql<number>`count(*)::int` }).from(schema.subscriptions).where(eq(schema.subscriptions.status, 'active')))[0]!;
+    const openSeats = (await db.select({ n: sql<number>`count(*)::int` }).from(schema.seatReleases).where(eq(schema.seatReleases.status, 'open')))[0]!;
+    const pendingContractors = (await db.select({ n: sql<number>`count(*)::int` }).from(schema.contractorProfiles).where(eq(schema.contractorProfiles.verificationStatus, 'pending')))[0]!;
+    const revenue30d = (await db.select({ sum: sql<string>`coalesce(sum(amount), 0)` }).from(schema.payments)
+      .where(and(eq(schema.payments.status, 'completed'), gte(schema.payments.createdAt, sql`now() - interval '30 days'`))))[0]!;
+    const openTickets = (await db.select({ n: sql<number>`count(*)::int` }).from(schema.supportTickets).where(eq(schema.supportTickets.status, 'open')))[0]!;
     return { activeSubscriptions: activeSubs.n, openSeatReleases: openSeats.n, pendingContractorVerifications: pendingContractors.n, revenueLast30dETB: revenue30d.sum, openTickets: openTickets.n };
   },
 
@@ -91,7 +91,7 @@ export const adminService = {
     return { accessToken: token, expiresIn: 900 };
   },
 
-  async searchAuditLogs(filters: { entityType?: string; actorId?: string; action?: string }, limit: number) {
+  async searchAuditLogs(filters: { entityType?: string | undefined; actorId?: string | undefined; action?: string | undefined }, limit: number) {
     const conditions = [] as any[];
     if (filters.entityType) conditions.push(eq(schema.auditLogs.entityType, filters.entityType));
     if (filters.actorId) conditions.push(eq(schema.auditLogs.actorId, filters.actorId));

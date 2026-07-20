@@ -10,7 +10,7 @@ cronRoutes.use('*', async (c, next) => {
   if (expected.length < 32) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Cron secret not configured', requestId: c.get('requestId') } }, 401);
   const ok = provided.length === expected.length && timingSafeEqual(Buffer.from(provided), Buffer.from(expected));
   if (!ok) return c.json({ error: { code: 'UNAUTHORIZED', message: 'Invalid cron secret', requestId: c.get('requestId') } }, 401);
-  await next();
+  return await next();
 });
 
 for (const job of CRON_JOBS) {

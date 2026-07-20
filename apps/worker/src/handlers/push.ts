@@ -17,7 +17,7 @@ export async function handle(
   if (evt?.id && await notificationLogHelper.alreadySent(evt.id, 'push')) {
     return;
   }
-  const devices = await db.select().from(schema.devices).where(eq(schema.devices.userId, payload.userId));
+  const devices = await db.select().from(schema.devices).where(eq(schema.devices.userId, payload.userId) as any);
   const expoTokens = devices.filter(d => d.platform !== 'web').map(d => d.pushToken);
   if (!expoTokens.length) return;
 

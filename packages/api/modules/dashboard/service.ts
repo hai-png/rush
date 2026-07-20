@@ -16,8 +16,8 @@ export const dashboardService = {
       .where(and(eq(schema.subscriptions.riderId, profile.id), eq(schema.subscriptions.status, 'active')))
       .orderBy(desc(schema.subscriptions.createdAt)).limit(1);
 
-    const [{ count: unread }] = await db.select({ count: sql<number>`count(*)::int` }).from(schema.notifications)
-      .where(and(eq(schema.notifications.userId, userId), sql`${schema.notifications.readAt} is null`));
+    const unread = (await db.select({ count: sql<number>`count(*)::int` }).from(schema.notifications)
+      .where(and(eq(schema.notifications.userId, userId), sql`${schema.notifications.readAt} is null`)))[0]!.count;
 
     return {
       activeSubscription: sub ? { id: sub.id, status: sub.status, ridesUsed: sub.ridesUsed, plan: { name: sub.planName, ridesIncluded: sub.ridesIncluded }, route: { name: sub.routeName, id: sub.routeId } } : null,
@@ -57,9 +57,9 @@ export const dashboardService = {
   async corporate(adminUserId: string) {
     const [corp] = await db.select().from(schema.corporates).where(eq(schema.corporates.adminUserId, adminUserId));
     if (!corp) return null;
-    const [{ count: memberCount }] = await db.select({ count: sql<number>`count(*)::int` }).from(schema.corporateMembers).where(eq(schema.corporateMembers.corporateId, corp.id));
-    const [{ count: pendingCount }] = await db.select({ count: sql<number>`count(*)::int` }).from(schema.corporateMembers)
-      .where(and(eq(schema.corporateMembers.corporateId, corp.id), eq(schema.corporateMembers.approvalStatus, 'pending')));
+    const memberCount = (await db.select({ count: sql<number>`count(*)::int` }).from(schema.corporateMembers).where(eq(schema.corporateMembers.corporateId, corp.id)))[0]!;
+    const pendingCount = (await db.select({ count: sql<number>`count(*)::int` }).from(schema.corporateMembers)
+      .where(and(eq(schema.corporateMembers.corporateId, corp.id), eq(schema.corporateMembers.approvalStatus, 'pending'))))[0]!;
     return { corporate: corp, memberCount, pendingApprovals: pendingCount };
   },
 };

@@ -24,7 +24,7 @@ export async function handle(payload: AuditPayload, evt?: OutboxEvent) {
       SELECT 1 FROM audit_logs
       WHERE after @> ${JSON.stringify({ outboxEventId })}::jsonb
       LIMIT 1
-    `);
+    ` as any);
     const rows = existing as unknown as Array<{ '?column?'?: number }>;
     if (Array.isArray(rows) && rows.length > 0) {
       if (process.env.NODE_ENV !== 'test') {

@@ -13,7 +13,7 @@ export async function settlePayment(reference: string, reportedAmount?: Money): 
       .where(and(eq(schema.payments.reference, reference), eq(schema.payments.status, 'pending')))
       .returning();
     if (updated.length === 0) return false;
-    const p = updated[0];
+    const p = updated[0]!;
 
     if (reportedAmount) {
       const expected = Money.fromDecimal(p.amount);
@@ -57,7 +57,7 @@ export async function failPayment(reference: string, reasonRaw: unknown): Promis
       .where(and(eq(schema.payments.reference, reference), eq(schema.payments.status, 'pending')))
       .returning();
     if (updated.length === 0) return false;
-    const p = updated[0];
+    const p = updated[0]!;
     if (p.subscriptionId) await transitionSubscription(tx, p.subscriptionId, 'payment.failed');
     if (p.seatClaimId) {
 
@@ -169,7 +169,7 @@ export async function processRefundRetries(limit = 50) {
           await tx.insert(schema.outboxEvents).values({ channel: 'notification', payload: { type: 'refund_failed', userId: payment.riderId } });
           refundCounter.labels('permanent_failure').inc();
         } else {
-          const backoffMin = BACKOFF_MIN[Math.min(attempts - 1, BACKOFF_MIN.length - 1)];
+          const backoffMin = BACKOFF_MIN[Math.min(attempts - 1, BACKOFF_MIN.length - 1)]!;
           await tx.update(schema.refundRetries).set({
             attempts, nextAttemptAt: new Date(Date.now() + backoffMin * 60_000),
             lastError: result.status === 'failed' ? result.error : null, updatedAt: new Date(),

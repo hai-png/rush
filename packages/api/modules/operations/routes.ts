@@ -9,12 +9,12 @@ import { redis } from '../../infra/redis';
 export const operationsRoutes = new TypedOpenAPIHono();
 
 operationsRoutes.get('/trips', requireRole('contractor'), async (c) => {
-  const [profile] = await db.select().from(schema.contractorProfiles).where(eq(schema.contractorProfiles.userId, c.get('session').userId));
+  const [profile] = await db.select().from(schema.contractorProfiles).where(eq(schema.contractorProfiles.userId, c.get('session')!.userId));
   const rows = await db.select().from(schema.trips).where(eq(schema.trips.contractorId, profile!.id));
   return c.json({ data: rows });
 });
 operationsRoutes.post('/trips', requireRole('contractor'), async (c) => {
-  const [profile] = await db.select().from(schema.contractorProfiles).where(eq(schema.contractorProfiles.userId, c.get('session').userId));
+  const [profile] = await db.select().from(schema.contractorProfiles).where(eq(schema.contractorProfiles.userId, c.get('session')!.userId));
 
   const body = z.object({
     shuttleId: z.string(),
@@ -32,25 +32,25 @@ operationsRoutes.post('/trips', requireRole('contractor'), async (c) => {
   return c.json({ data: trip }, 201);
 });
 operationsRoutes.patch('/trips/:id', requireRole('contractor'), async (c) => {
-  const [profile] = await db.select().from(schema.contractorProfiles).where(eq(schema.contractorProfiles.userId, c.get('session').userId));
+  const [profile] = await db.select().from(schema.contractorProfiles).where(eq(schema.contractorProfiles.userId, c.get('session')!.userId));
   const { event } = z.object({ event: z.literal('complete') }).parse(await c.req.json());
   const trip = event === 'complete' ? await operationsService.completeTrip(profile!.id, c.req.param('id')) : null;
   return c.json({ data: trip });
 });
 
 operationsRoutes.get('/rides', requireRole('rider'), async (c) => {
-  const [profile] = await db.select().from(schema.riderProfiles).where(eq(schema.riderProfiles.userId, c.get('session').userId));
+  const [profile] = await db.select().from(schema.riderProfiles).where(eq(schema.riderProfiles.userId, c.get('session')!.userId));
   const rows = await db.select().from(schema.rides).where(eq(schema.rides.riderId, profile!.id));
   return c.json({ data: rows });
 });
 operationsRoutes.post('/rides', requireRole('rider'), async (c) => {
-  const [profile] = await db.select().from(schema.riderProfiles).where(eq(schema.riderProfiles.userId, c.get('session').userId));
+  const [profile] = await db.select().from(schema.riderProfiles).where(eq(schema.riderProfiles.userId, c.get('session')!.userId));
   const body = z.object({ tripId: z.string(), subscriptionId: z.string().optional(), seatClaimId: z.string().optional(), pickupStop: z.string().optional() }).parse(await c.req.json());
   const ride = await operationsService.bookRide(profile!.id, body);
   return c.json({ data: ride }, 201);
 });
 operationsRoutes.patch('/rides/:id', requireRole('rider'), async (c) => {
-  const [profile] = await db.select().from(schema.riderProfiles).where(eq(schema.riderProfiles.userId, c.get('session').userId));
+  const [profile] = await db.select().from(schema.riderProfiles).where(eq(schema.riderProfiles.userId, c.get('session')!.userId));
   const { event } = z.object({ event: z.literal('board') }).parse(await c.req.json());
   const ride = event === 'board' ? await operationsService.board(profile!.id, c.req.param('id')) : null;
   return c.json({ data: ride });
@@ -69,7 +69,7 @@ operationsRoutes.get('/shuttle-positions', async (c) => {
 operationsRoutes.post('/shuttle-positions', requireRole('contractor'), async (c) => {
   const body = z.object({ shuttleId: z.string(), lat: z.number(), lng: z.number(), heading: z.number().optional(), speed: z.number().optional() }).parse(await c.req.json());
 
-  const [profile] = await db.select().from(schema.contractorProfiles).where(eq(schema.contractorProfiles.userId, c.get('session').userId));
+  const [profile] = await db.select().from(schema.contractorProfiles).where(eq(schema.contractorProfiles.userId, c.get('session')!.userId));
   const [shuttle] = await db.select().from(schema.shuttles).where(eq(schema.shuttles.id, body.shuttleId));
 
   if (!shuttle || shuttle.contractorId !== profile?.id) {

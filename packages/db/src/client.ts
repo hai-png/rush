@@ -8,7 +8,7 @@ const env = loadEnv();
 
 const queryClient = postgres(env.DATABASE_URL, {
   max: env.NODE_ENV === 'production' ? 20 : 5,
-  ssl: env.NODE_ENV === 'production' ? 'require' : undefined,
+  ...(env.NODE_ENV === 'production' ? { ssl: 'require' as const } : {}),
   idle_timeout: 30,
   max_lifetime: 60 * 30,
   prepare: false,

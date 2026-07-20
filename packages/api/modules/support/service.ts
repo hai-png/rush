@@ -6,7 +6,7 @@ import { ticketState } from './state';
 
 export const supportService = {
 
-  async createTicket(userId: string, input: { subject: string; body: string; category: string; subscriptionId?: string; paymentId?: string }) {
+  async createTicket(userId: string, input: { subject: string; body: string; category: string; subscriptionId?: string | undefined; paymentId?: string | undefined }) {
     if (input.subscriptionId) {
       const [profile] = await db.select().from(schema.riderProfiles).where(eq(schema.riderProfiles.userId, userId));
       if (!profile) throw new BadRequestError('Rider profile not found');
@@ -22,7 +22,7 @@ export const supportService = {
       if (!payment) throw new ForbiddenError('Payment does not belong to this rider');
     }
     const [ticket] = await db.insert(schema.supportTickets).values({ userId, ...input } as any).returning();
-    await db.insert(schema.outboxEvents).values({ channel: 'audit', payload: { action: 'ticket.created', entityId: ticket.id, actorId: userId } });
+    await db.insert(schema.outboxEvents).values({ channel: 'audit', payload: { action: 'ticket.created', entityId: ticket!.id, actorId: userId } });
     return ticket;
   },
 

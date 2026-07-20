@@ -12,12 +12,12 @@ export async function handle(
   }
   let to = payload.to;
   if (!to) {
-    const [user] = await db.select({ email: schema.users.email }).from(schema.users).where(eq(schema.users.id, payload.userId));
+    const [user] = await db.select({ email: schema.users.email }).from(schema.users).where(eq(schema.users.id, payload.userId) as any);
     if (!user?.email) throw new Error(`User ${payload.userId} has no email address on file`);
     to = user.email;
   }
 
-  const ok = await emailProvider.send({ to, subject: payload.subject, body: payload.body, html: payload.html });
+  const ok = await emailProvider.send({ to, subject: payload.subject, body: payload.body, html: payload.html } as any);
   if (!ok) throw new Error(`Email delivery failed for ${to}`);
 
   if (evt?.id) {
