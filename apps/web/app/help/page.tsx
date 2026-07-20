@@ -1,4 +1,4 @@
-import { getServerApiClient } from '@/lib/sdk';
+import { getServerApiClient } from '@/lib/server-api';
 
 export default async function HelpPage() {
   const client = await getServerApiClient();

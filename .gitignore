@@ -16,6 +16,14 @@ build/
 .turbo/
 .cache/
 
+# Next.js auto-generated type declarations (regenerated on every dev/build).
+next-env.d.ts
+
+# Expo (React Native) build cache and generated native dirs.
+.expo/
+ios/
+android/
+
 # Test artifacts
 coverage/
 *.lcov

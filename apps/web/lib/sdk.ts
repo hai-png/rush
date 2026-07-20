@@ -4,6 +4,10 @@ import { useSession, signOut } from 'next-auth/react';
 import { useMemo } from 'react';
 import type { QueryClient } from '@tanstack/react-query';
 
+// Client-only SDK helpers. The server-side `getServerApiClient` lives in
+// lib/server-api.ts so that the postgres dependency (via auth ->
+// identityService -> @addis/db) is never pulled into the client bundle.
+
 let queryClientRef: QueryClient | null = null;
 export function setQueryClientForSdk(c: QueryClient | null) { queryClientRef = c; }
 
@@ -34,15 +38,4 @@ export function useApiClient() {
     getToken: () => token,
     onUnauthorized: () => handleUnauthorized(),
   }), [token]);
-}
-
-export async function getServerApiClient() {
-  const { auth } = await import('../auth');
-  const session = await auth();
-  if (!session) {
-    throw new Error('Not authenticated — server component called getServerApiClient without a session');
-  }
-  const baseUrl = process.env.NEXTAUTH_URL;
-  if (!baseUrl) throw new Error('NEXTAUTH_URL is not set');
-  return createAddisRideClient({ baseUrl, getToken: () => (session as any).accessToken });
 }

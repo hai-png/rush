@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { Bus, ShieldCheck, Building2 } from 'lucide-react';
 import { Button } from '@addis/ui';
-import { getServerApiClient } from '@/lib/sdk';
+import { getServerApiClient } from '@/lib/server-api';
 
 export default async function LandingPage() {
   const client = await getServerApiClient();

@@ -1,4 +1,4 @@
-import { getServerApiClient } from '@/lib/sdk';
+import { getServerApiClient } from '@/lib/server-api';
 import { StatTile } from '@addis/ui';
 
 export default async function AdminDashboardPage() {

@@ -101,9 +101,10 @@ services:
     # INFRA-004: do NOT expose web's port to the host in production — Caddy
     # is the sole Internet-facing ingress and reaches web over the internal
     # Docker network. Use the `dev` profile (`docker compose --profile dev up`)
-    # to bind 127.0.0.1:3000 for local development.
+    # to bind 0.0.0.0:3000 for local development (0.0.0.0 so Docker Desktop /
+    # dev containers can reach it; safe because dev profile is opt-in).
     profiles: ["dev"]
-    ports: ["127.0.0.1:3000:3000"]
+    ports: ["0.0.0.0:3000:3000"]
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://localhost:3000/api/v1/healthz"]
       interval: 10s
