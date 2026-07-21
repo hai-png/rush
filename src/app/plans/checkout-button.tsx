@@ -3,6 +3,8 @@
 import { useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
@@ -12,17 +14,18 @@ import { api } from '@/lib/api-client';
 export function CheckoutButton({ planId }: { planId: string }) {
   const router = useRouter();
   const [method, setMethod] = useState<'telebirr' | 'cbe'>('telebirr');
+  const [corporateCode, setCorporateCode] = useState('');
   const [loading, setLoading] = useState(false);
 
   async function start() {
     setLoading(true);
     try {
-      const res = await api.post<{ checkout: { status: string; checkoutUrl?: string; instructions?: string }; paymentReference: string }>('/api/v1/subscriptions', { planId, paymentMethod: method });
+      const payload: any = { planId, paymentMethod: method };
+      if (corporateCode.trim()) payload.corporateCode = corporateCode.trim();
+      const res = await api.post<{ checkout: { status: string; checkoutUrl?: string; instructions?: string }; paymentReference: string }>('/api/v1/subscriptions', payload);
       if (res.checkout.status === 'checkout' && res.checkout.checkoutUrl) {
-        // Telebirr redirect (real or mock).
         router.push(res.checkout.checkoutUrl);
       } else if (res.checkout.status === 'manual') {
-        // CBE — show instructions.
         toast.message('CBE transfer instructions', { description: res.checkout.instructions });
       } else {
         toast.error('Unknown checkout response');
@@ -34,6 +37,10 @@ export function CheckoutButton({ planId }: { planId: string }) {
 
   return (
     <div className="space-y-2">
+      <div>
+        <Label className="text-xs text-muted-foreground">Corporate code (optional)</Label>
+        <Input value={corporateCode} onChange={e => setCorporateCode(e.target.value.toUpperCase())} placeholder="Enter code for subsidy" className="h-8 text-sm" />
+      </div>
       <Select value={method} onValueChange={(v) => setMethod(v as any)}>
         <SelectTrigger className="w-full"><SelectValue placeholder="Payment method" /></SelectTrigger>
         <SelectContent>

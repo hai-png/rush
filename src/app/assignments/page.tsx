@@ -7,6 +7,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { SignOutButton } from '@/components/sign-out-button';
+import { RouteMap } from '@/components/route-map';
 
 export default async function AssignmentsPage() {
   const session = await requireSession();
@@ -70,16 +71,16 @@ export default async function AssignmentsPage() {
                       <Badge>active</Badge>
                     </div>
 
-                    {/* Pickup locations */}
                     <div className="border-t pt-2">
                       <div className="text-xs font-medium mb-1">Pickup locations (choose when booking):</div>
-                      <div className="flex flex-wrap gap-2">
+                      <div className="flex flex-wrap gap-2 mb-3">
                         {a.route.pickups.map(p => (
                           <span key={p.id} className="text-xs bg-muted rounded-md px-2 py-1">
                             {p.name} <span className="text-muted-foreground">~{p.estimatedPickupTime}</span>
                           </span>
                         ))}
                       </div>
+                      <RouteMap pickups={a.route.pickups} origin={a.route.origin} destination={a.route.destination} />
                     </div>
 
                     <div className="border-t pt-2 mt-2 flex gap-2">

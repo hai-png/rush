@@ -38,9 +38,9 @@ export async function POST_telebirr_notify(ctx: any) {
     } else if (event.type === 'payment.failed') {
       await failPayment(event.merchOrderId, raw, outRequestNo, tradeStatus, raw);
     } else if (event.type === 'refund.succeeded') {
-      console.log(`[telebirr-webhook] refund succeeded: ${event.refundRequestNo}`);
+      logger.info({ refundRequestNo: event.refundRequestNo }, '[telebirr-webhook] refund succeeded');
     } else if (event.type === 'refund.failed') {
-      console.warn(`[telebirr-webhook] refund failed: ${event.refundRequestNo}`);
+      logger.warn({ refundRequestNo: event.refundRequestNo }, '[telebirr-webhook] refund failed');
     }
 
     return NextResponse.json({ data: { ok: true } });

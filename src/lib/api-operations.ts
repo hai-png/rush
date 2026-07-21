@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { BadRequestError, NotFoundError, ConflictError, ForbiddenError } from '@/lib/errors';
 import { consumeRide } from '@/lib/subscription';
 import { audit } from '@/lib/audit';
+import { logger } from '@/lib/logger';
 
 export async function GET_rides({ session }: any) {
   const rides = await db.ride.findMany({
@@ -111,7 +112,7 @@ export async function POST_complete({ session, params, ipAddress, userAgent }: a
       const profile = await db.contractorProfile.findUnique({ where: { userId: trip.driverId } });
       if (profile) await recomputeContractorRating(profile.id);
     } catch (err) {
-      console.error('[trip.complete] recompute rating failed:', err);
+      logger.error({ err: (err as Error).message }, '[trip.complete] recompute rating failed');
     }
   }
   return { data: { id: trip.id, status: 'completed' } };

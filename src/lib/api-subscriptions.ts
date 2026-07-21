@@ -67,14 +67,27 @@ export async function POST_create({ session, body, ipAddress, userAgent }: any) 
     include: { plan: true },
   });
 
-  // Create the pending payment + checkout.
+  // Apply corporate subsidy if applicable.
+  let riderAmountCents = plan.priceCents;
+  let corporateSubsidyCents = 0;
+  if (corporateId) {
+    const corp = await db.corporate.findUnique({ where: { id: corporateId } });
+    if (corp) {
+      corporateSubsidyCents = Math.round(plan.priceCents * corp.subsidyPercent / 100);
+      riderAmountCents = plan.priceCents - corporateSubsidyCents;
+    }
+  }
+
+  // Create the pending payment + checkout (rider pays their share).
   const reference = `PO${createId()}`;
   const provider = getPaymentProvider(input.paymentMethod);
   const env = loadEnv();
   const checkout = await provider.createCheckout({
     merchOrderId: reference,
-    amount: Money.fromCents(plan.priceCents),
-    description: `${plan.name} subscription`,
+    amount: Money.fromCents(riderAmountCents),
+    description: corporateSubsidyCents > 0
+      ? `${plan.name} subscription (${100 - Math.round(corporateSubsidyCents / plan.priceCents * 100)}% after corporate subsidy)`
+      : `${plan.name} subscription`,
     notifyUrl: env.TELEBIRR_NOTIFY_URL || `${env.APP_BASE_URL}/api/v1/webhooks/telebirr/notify`,
     redirectUrl: env.TELEBIRR_REDIRECT_URL || `${env.APP_BASE_URL}/checkout/complete`,
   });
@@ -85,7 +98,7 @@ export async function POST_create({ session, body, ipAddress, userAgent }: any) 
       userId: session.id,
       subscriptionId: sub.id,
       method: input.paymentMethod,
-      amountCents: plan.priceCents,
+      amountCents: riderAmountCents,
       status: 'pending',
     },
   });
