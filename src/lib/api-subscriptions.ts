@@ -1,5 +1,4 @@
 // Subscriptions — list, create, fetch, cancel.
-// Creating a subscription creates a pending_payment row + a pending payment
 // and returns the checkout URL (telebirr) or instructions (cbe).
 import { db } from '@/lib/db';
 import { z } from 'zod';
@@ -145,7 +144,6 @@ export async function POST_cancel({ session, params, ipAddress, userAgent }: any
   return { data: { id: sub.id, status: 'cancelled' } };
 }
 
-// POST /api/v1/subscriptions/:id/renew — renew a subscription for another period.
 // Creates a new pending payment + checkout URL for the same plan.
 export async function POST_renew({ session, params, body }: any) {
   const sub = await db.subscription.findUnique({

@@ -178,7 +178,6 @@ export async function POST_audit_verify() {
 // Keep Money import for future use (admin endpoints may need it).
 void Money;
 
-// ─── Payment detail + refund ────────────────────────────────────────────────
 
 export async function GET_payment({ params }: any) {
   const payment = await db.payment.findUnique({
@@ -213,7 +212,6 @@ export async function POST_refund({ session, params, body, ipAddress, userAgent 
   return { status: 202, data: { ok: true, message: 'Refund scheduled' } };
 }
 
-// ─── Plan edit/disable ──────────────────────────────────────────────────────
 
 const PlanUpdateInput = z.object({
   name: z.string().min(1).optional(),
@@ -237,7 +235,6 @@ export async function PATCH_plan({ session, params, body, ipAddress, userAgent }
   return { data: updated };
 }
 
-// ─── Route edit/disable ─────────────────────────────────────────────────────
 
 const RouteUpdateInput = z.object({
   origin: z.string().min(1).optional(),
@@ -257,7 +254,6 @@ export async function PATCH_route({ session, params, body, ipAddress, userAgent 
   return { data: updated };
 }
 
-// ─── Shuttle edit/disable ───────────────────────────────────────────────────
 
 const ShuttleUpdateInput = z.object({
   model: z.string().min(1).optional(),
@@ -276,8 +272,6 @@ export async function PATCH_shuttle({ session, params, body, ipAddress, userAgen
   return { data: updated };
 }
 
-// ─── Trips ───────────────────────────────────────────────────────────────────
-// Admin can create a trip on any route+shuttle; contractor can create trips
 // only on their own shuttles.
 
 const TripInput = z.object({
@@ -333,7 +327,6 @@ export async function GET_my_trips({ session }: any) {
   return { data: trips };
 }
 
-// ─── Contractor rating auto-update ──────────────────────────────────────────
 export async function recomputeContractorRating(contractorId: string): Promise<void> {
   const completedRides = await db.ride.count({
     where: { status: 'completed', trip: { driverId: contractorId } },

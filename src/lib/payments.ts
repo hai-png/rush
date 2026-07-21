@@ -43,10 +43,6 @@ export type WebhookEvent =
   | { type: 'refund.succeeded'; refundRequestNo: string; raw: unknown; signatureValid: boolean; timestampMs: number }
   | { type: 'refund.failed'; refundRequestNo: string; raw: unknown; signatureValid: boolean; timestampMs: number };
 
-// ─── InApp SDK ───────────────────────────────────────────────────────────────
-// Used by native mobile clients (Android/iOS) that have the Telebirr SuperApp
-// SDK embedded. The backend creates an InApp order and returns prepay_id +
-// receiveCode; the mobile SDK uses those to launch Telebirr SuperApp and
 // complete the payment.
 export type InAppCheckoutResult = {
   prepayId: string;
@@ -54,13 +50,6 @@ export type InAppCheckoutResult = {
   merchOrderId: string;
 };
 
-// ─── Subscription Payment ────────────────────────────────────────────────────
-// Recurring billing via Telebirr mandates. The customer signs a one-time
-// mandate in the Telebirr SuperApp (front-end SDK call); the merchant then
-// calls disburseOrder on each billing date to pull funds (PIN-free).
-//
-// The sign-mandate step is a front-end SDK call (`merchant://...` deep link),
-// not a backend HTTP API. The backend only generates the contract number and
 // later queries / cancels / disburses.
 export type MandateSignUrlResult = {
   mctContractNo: string; // 32-digit numeric, unique per subscription
@@ -93,8 +82,6 @@ export interface PaymentProvider {
   disburse?(opts: { mctContractNo: string; merchOrderId: string; amount: Money; reason: string }): Promise<DisburseResult>;
 }
 
-// ─── Mock Telebirr ──────────────────────────────────────────────────────────
-// Returns a checkout URL pointing at /telebirr-stub?order=<merchOrderId>. The
 // stub page simulates the user paying and POSTs to the real webhook endpoint.
 class MockTelebirrProvider implements PaymentProvider {
   readonly name = 'telebirr' as const;
@@ -178,38 +165,9 @@ class MockTelebirrProvider implements PaymentProvider {
   }
 }
 
-// ─── Real Telebirr (H5 C2B Web Payment + InApp SDK + Subscription) ─────────
-//
-// Two-layer auth:
-//   1. Fabric Token (short-lived bearer) from POST /payment/v1/token
 //   2. RSA-PSS-SHA256 signature in the request body's `sign` field
-//
-// H5 flow (web app, browser-redirect):
-//   1. Backend: applyFabricToken() -> bearer token (cached)
-//   2. Backend: createPreOrder() -> prepay_id + sign
-//   3. Backend: buildCheckoutUrl(prepay_id, sign) -> URL for browser redirect
-//   4. User: pays on Telebirr-hosted page
-//   5. Telebirr: POSTs to notify_url with signed payload
-//   6. Backend: parseWebhook() verifies signature + dedups + settles payment
-//
-// InApp flow (native mobile app with Telebirr SDK):
-//   1. Backend: applyFabricToken() -> bearer token
-//   2. Backend: createInAppOrder() -> prepay_id + receiveCode
-//   3. Mobile SDK: uses prepay_id + receiveCode to launch Telebirr SuperApp
-//   4. User: pays in SuperApp
-//   5. Telebirr: POSTs to notify_url (same as H5)
-//
-// Subscription flow (recurring billing):
-//   1. Front-end SDK: invokes merchant:// deep-link to sign mandate
-//   2. Backend: queryMandate() to check signing status
-//   3. On each billing date: Backend calls disburse() to pull funds PIN-free
-//   4. To cancel: Backend calls cancelMandate()
-//
-// Signature algorithm:
 //   - SHA256withRSA with PSS padding + MGF1-SHA256 (NOT PKCS#1 v1.5)
 //   - Exclude fields: sign, sign_type, header, refund_info, openType,
-//     raw_request, biz_content (as a key — its children ARE signed),
-//     wallet_reference_data
 //   - Sort keys lexicographically, join as k=v&k=v
 class TelebirrProvider implements PaymentProvider {
   readonly name = 'telebirr' as const;
@@ -229,7 +187,6 @@ class TelebirrProvider implements PaymentProvider {
       : 'https://developerportal.ethiotelebirr.et:38443/payment/web/paygate?';
   }
 
-  // ─── Signature helpers ──────────────────────────────────────────────────
   // Excluded from signing per Telebirr docs. Note: `biz_content` is excluded
   // as a key but its children ARE flattened and signed.
   private static EXCLUDE_FIELDS = new Set([
@@ -294,7 +251,6 @@ class TelebirrProvider implements PaymentProvider {
     return Math.floor(Date.now() / 1000).toString();
   }
 
-  // ─── Layer 1: Fabric Token (cached) ────────────────────────────────────
   private cachedToken: { token: string; expiresAt: number } | null = null;
 
   private async applyFabricToken(): Promise<string> {
@@ -330,7 +286,6 @@ class TelebirrProvider implements PaymentProvider {
     return Date.UTC(y, mo, d, h, mi, se);
   }
 
-  // ─── Layer 2: business API call (signs + sends) ────────────────────────
   private async callBusinessApi<T = any>(
     endpoint: string,
     bizContent: Record<string, any>,
@@ -362,7 +317,6 @@ class TelebirrProvider implements PaymentProvider {
     return res.json() as Promise<T>;
   }
 
-  // ─── H5 Create Order (preOrder) ────────────────────────────────────────
   async createCheckout(intent: PaymentIntent): Promise<CheckoutResult> {
     const bizContent = {
       appid: this.env.TELEBIRR_MERCHANT_APP_ID,
@@ -415,8 +369,6 @@ class TelebirrProvider implements PaymentProvider {
     return `${this.webBase}${queryString}&version=1.0&trade_type=Checkout`;
   }
 
-  // ─── InApp SDK: createOrder ────────────────────────────────────────────
-  // For native mobile clients with the Telebirr SuperApp SDK embedded.
   // Returns prepay_id + receiveCode; the mobile SDK launches SuperApp with those.
   async createInAppOrder(intent: PaymentIntent): Promise<InAppCheckoutResult> {
     const bizContent = {
@@ -462,7 +414,6 @@ class TelebirrProvider implements PaymentProvider {
     };
   }
 
-  // ─── Query Order ────────────────────────────────────────────────────────
   async verifyPayment(reference: string): Promise<PaymentStatusResult> {
     const bizContent = {
       appid: this.env.TELEBIRR_MERCHANT_APP_ID,
@@ -496,7 +447,6 @@ class TelebirrProvider implements PaymentProvider {
     return { status, amount, raw: response };
   }
 
-  // ─── Refund ──────────────────────────────────────────────────────────────
   async refund(req: RefundRequest): Promise<RefundResult> {
     const bizContent = {
       appid: this.env.TELEBIRR_MERCHANT_APP_ID,
@@ -535,8 +485,6 @@ class TelebirrProvider implements PaymentProvider {
     }
   }
 
-  // ─── Subscription: build mandate sign URL ────────────────────────────────
-  // The sign-mandate step is a front-end SDK call (merchant:// deep link),
   // not a backend HTTP API. We just build the URL with the merchant's params.
   buildMandateSignUrl(opts: { mctContractNo: string; mandateTemplateId: string }): MandateSignUrlResult {
     const params = new URLSearchParams({
@@ -551,7 +499,6 @@ class TelebirrProvider implements PaymentProvider {
     };
   }
 
-  // ─── Subscription: query mandate ─────────────────────────────────────────
   async queryMandate(mctContractNo: string): Promise<MandateQueryResult> {
     const bizContent = {
       appid: this.env.TELEBIRR_MERCHANT_APP_ID,
@@ -583,7 +530,6 @@ class TelebirrProvider implements PaymentProvider {
     }
   }
 
-  // ─── Subscription: cancel mandate ────────────────────────────────────────
   async cancelMandate(mctContractNo: string): Promise<{ ok: boolean }> {
     const bizContent = {
       appid: this.env.TELEBIRR_MERCHANT_APP_ID,
@@ -602,7 +548,6 @@ class TelebirrProvider implements PaymentProvider {
     }
   }
 
-  // ─── Subscription: disburse (pull funds PIN-free) ─────────────────────────
   async disburse(opts: { mctContractNo: string; merchOrderId: string; amount: Money; reason: string }): Promise<DisburseResult> {
     const bizContent = {
       appid: this.env.TELEBIRR_MERCHANT_APP_ID,
@@ -637,7 +582,6 @@ class TelebirrProvider implements PaymentProvider {
     }
   }
 
-  // ─── Webhook ─────────────────────────────────────────────────────────────
   async parseWebhook(req: Request): Promise<WebhookEvent> {
     const raw = await req.text();
     let payload: any;
@@ -682,7 +626,6 @@ class TelebirrProvider implements PaymentProvider {
 }
 
 
-// ─── CBE manual bank transfer ───────────────────────────────────────────────
 class CbeProvider implements PaymentProvider {
   readonly name = 'cbe' as const;
   async createCheckout(intent: PaymentIntent): Promise<CheckoutResult> {
@@ -700,7 +643,6 @@ class CbeProvider implements PaymentProvider {
   }
 }
 
-// ─── Registry ───────────────────────────────────────────────────────────────
 let cachedProviders: Record<string, PaymentProvider> | null = null;
 export function getPaymentProvider(method: 'telebirr' | 'cbe'): PaymentProvider {
   if (!cachedProviders) {

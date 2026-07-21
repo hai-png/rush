@@ -97,7 +97,6 @@ export async function handleDocumentUpload(req: NextRequest, session: any): Prom
   }
 }
 
-// GET /api/v1/contractor/documents — list the current contractor's documents.
 export async function GET_documents({ session }: any) {
   if (session.role !== 'contractor' && session.role !== 'platform_admin') {
     throw new ForbiddenError('Only contractors can view their documents');
@@ -110,7 +109,6 @@ export async function GET_documents({ session }: any) {
   return { data: profile.documents };
 }
 
-// GET /api/v1/contractor/documents/:contractorId — admin-only.
 export async function GET_documents_for({ session, params }: any) {
   if (session.role !== 'platform_admin') throw new ForbiddenError('Admin only');
   const profile = await db.contractorProfile.findUnique({

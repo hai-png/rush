@@ -1,7 +1,4 @@
 // Route dispatcher — single source of truth for the API surface.
-// Each entry maps (METHOD, path-pattern) to a handler. The catch-all route
-// file at app/api/v1/[[...route]]/route.ts looks up the handler here.
-//
 // Path patterns use :param for path parameters (e.g. /subscriptions/:id).
 
 import { NextRequest } from 'next/server';
@@ -15,7 +12,6 @@ type RouteEntry = {
   options: ApiOptions;
   handler: Handler;
   // If true, the dispatcher bypasses JSON body parsing + the api() wrapper
-  // and calls the handler directly with (req, session, params). Used for
   // multipart upload routes that need raw Request access.
   raw?: boolean;
 };
@@ -41,7 +37,6 @@ export function findRoute(method: string, path: string): { entry: RouteEntry; pa
   return null;
 }
 
-// ─── Handler imports ────────────────────────────────────────────────────────
 import * as identity from '@/lib/api-identity';
 import * as catalog from '@/lib/api-catalog';
 import * as subscriptions from '@/lib/api-subscriptions';
@@ -64,7 +59,6 @@ import * as telebirr from '@/lib/api-telebirr';
 import * as health from '@/lib/api-health';
 import * as assignments from '@/lib/api-assignments';
 
-// ─── Route table ────────────────────────────────────────────────────────────
 // Note: the catch-all mounts at /api/v1, so paths here are relative to that.
 const ROUTES: RouteEntry[] = [
   // Identity / auth
@@ -216,6 +210,11 @@ const ROUTES: RouteEntry[] = [
   r('GET',  '/admin/export/:resource', { requireAuth: true, requireRole: ['platform_admin'] }, adminAdvanced.GET_export_csv),
   r('DELETE', '/admin/routes/:id', { requireAuth: true, requireRole: ['platform_admin'] }, adminAdvanced.DELETE_route),
   r('DELETE', '/admin/shuttles/:id', { requireAuth: true, requireRole: ['platform_admin'] }, adminAdvanced.DELETE_shuttle),
+  r('GET', '/admin/settings', { requireAuth: true, requireRole: ['platform_admin'] }, adminAdvanced.GET_settings),
+  r('PUT', '/admin/settings', { requireAuth: true, requireRole: ['platform_admin'] }, adminAdvanced.PUT_settings),
+  r('POST', '/admin/bulk/expire', { requireAuth: true, requireRole: ['platform_admin'] }, adminAdvanced.POST_bulk_expire),
+  r('POST', '/admin/bulk/suspend', { requireAuth: true, requireRole: ['platform_admin'] }, adminAdvanced.POST_bulk_suspend),
+  r('PATCH', '/admin/routes/:id/price', { requireAuth: true, requireRole: ['platform_admin'] }, adminAdvanced.PATCH_route_price),
 
   // Contractor-scoped (the contractor themselves, not admin-gated)
   r('GET', '/contractor/shuttles', { requireAuth: true, requireRole: ['contractor'] }, admin.GET_my_shuttles),

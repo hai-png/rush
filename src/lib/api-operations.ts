@@ -117,7 +117,6 @@ export async function POST_complete({ session, params, ipAddress, userAgent }: a
   return { data: { id: trip.id, status: 'completed' } };
 }
 
-// ─── Trip + Ride updates ────────────────────────────────────────────────────
 import { z as z2 } from 'zod';
 
 const TripUpdateInput = z2.object({
@@ -168,7 +167,6 @@ export async function PATCH_ride({ session, params, body, ipAddress, userAgent }
   return { data: updated };
 }
 
-// POST /api/v1/trips — create a trip (alternative to /admin/trips).
 const TripCreateInput = z2.object({
   routeId: z2.string().min(1),
   shuttleId: z2.string().min(1),
@@ -201,8 +199,6 @@ export async function POST_trip({ session, body, ipAddress, userAgent }: any) {
   return { status: 201, data: trip };
 }
 
-// ─── Shuttle positions (GPS tracking) ───────────────────────────────────────
-// For MVP, we store shuttle positions in-memory (no schema change needed).
 // In production, this would be a ShuttlePosition table + Redis for the live stream.
 
 const positions = new Map<string, { lat: number; lng: number; heading: number; speed: number; updatedAt: number }>();
@@ -243,7 +239,6 @@ export async function GET_shuttle_positions({ session }: any) {
   return { data: result };
 }
 
-// GET /api/v1/shuttle-positions/stream — Server-Sent Events stream.
 // This is a raw handler (not via api() wrapper) because it returns a stream.
 import { NextRequest, NextResponse } from 'next/server';
 

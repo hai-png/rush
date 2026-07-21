@@ -1,20 +1,4 @@
 // Telebirr advanced endpoints — InApp SDK + Subscription Payment.
-// These supplement the basic H5 checkout that's wired into /api/v1/subscriptions.
-//
-// InApp SDK:
-//   POST /api/v1/payments/telebirr/inapp-checkout
-//     - For mobile clients with the Telebirr SDK. Returns prepay_id + receiveCode.
-//     - The mobile SDK uses those to launch Telebirr SuperApp.
-//
-// Subscription Payment:
-//   POST /api/v1/payments/telebirr/mandate/sign-url
-//     - Returns the merchant:// deep-link URL the front-end SDK invokes.
-//     - The customer signs the mandate in Telebirr SuperApp (PIN entry).
-//   GET  /api/v1/payments/telebirr/mandate/:mctContractNo
-//     - Query mandate status (active / cancelled / unknown)
-//   POST /api/v1/payments/telebirr/mandate/:mctContractNo/cancel
-//     - Cancel a mandate (no further disbursements possible)
-//   POST /api/v1/payments/telebirr/disburse
 //     - Pull funds from a signed mandate (PIN-free). Used by the scheduler.
 
 import { z } from 'zod';
@@ -26,7 +10,6 @@ import { BadRequestError, NotFoundError } from '@/lib/errors';
 import { createId } from '@/lib/id';
 import { audit } from '@/lib/audit';
 
-// ─── InApp SDK ───────────────────────────────────────────────────────────────
 const InAppInput = z.object({
   amountCents: z.number().int().positive(),
   description: z.string().min(1).max(200),
@@ -77,7 +60,6 @@ export async function POST_inapp_checkout({ session, body }: any) {
   };
 }
 
-// ─── Subscription: mandate sign URL ──────────────────────────────────────────
 const MandateSignInput = z.object({
   mandateTemplateId: z.string().min(1),
   // Optional: link this mandate to a subscription for our records
@@ -102,7 +84,6 @@ export async function POST_mandate_sign_url({ session, body }: any) {
 
   // If subscriptionId was provided, record the contract number on the subscription
   // (in a real app, you'd add a `telebirrMctContractNo` field to Subscription).
-  // For MVP, just return the URL + contract number — the front-end invokes the
   // deep link, then polls /mandate/:mctContractNo to confirm signing.
 
   await audit({
@@ -119,7 +100,6 @@ export async function POST_mandate_sign_url({ session, body }: any) {
   };
 }
 
-// ─── Subscription: query mandate ─────────────────────────────────────────────
 export async function GET_mandate({ params }: any) {
   const provider = getPaymentProvider('telebirr');
   if (!provider.queryMandate) {
@@ -129,7 +109,6 @@ export async function GET_mandate({ params }: any) {
   return { data: result };
 }
 
-// ─── Subscription: cancel mandate ────────────────────────────────────────────
 export async function POST_mandate_cancel({ session, params, ipAddress, userAgent }: any) {
   const provider = getPaymentProvider('telebirr');
   if (!provider.cancelMandate) {
@@ -147,8 +126,6 @@ export async function POST_mandate_cancel({ session, params, ipAddress, userAgen
   return { data: result };
 }
 
-// ─── Subscription: disburse (pull funds) ─────────────────────────────────────
-// Typically called by the cron scheduler, not by users. Auth via CRON_SECRET
 // in production; in dev, any signed-in admin can trigger for testing.
 const DisburseInput = z.object({
   mctContractNo: z.string().length(32),

@@ -1,6 +1,4 @@
 // Webhooks — Telebirr payment notifications.
-// This endpoint receives the raw Telebirr webhook, parses + verifies it,
-// records the dedup event (composite PK merchOrderId+outRequestNo), and
 // settles or fails the payment.
 import { NextResponse } from 'next/server';
 import { getPaymentProvider } from '@/lib/payments';
@@ -16,7 +14,6 @@ export async function POST_telebirr_notify(ctx: any) {
     }
 
     // The api() middleware already parsed the JSON body into ctx.body.
-    // Build a synthetic Request to feed into parseWebhook (which expects a
     // web Request per the provider interface).
     const rawBody = JSON.stringify(ctx.body ?? {});
     const syntheticReq = new Request('http://localhost/webhook', {

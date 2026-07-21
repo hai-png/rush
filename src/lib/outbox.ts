@@ -17,7 +17,6 @@ export async function enqueueNotification(notif: {
   userId: string; type: string; title: string; body: string; link?: string;
 }): Promise<void> {
   // For notifications, write the notification row directly AND enqueue an
-  // outbox event for SMS/email fanout. This way the user sees the notification
   // immediately even if the outbox drains slowly.
   await db.notification.create({ data: notif });
   await enqueue('notification', notif);

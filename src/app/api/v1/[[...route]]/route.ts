@@ -1,10 +1,4 @@
 // Single API entry point. All /api/v1/* requests dispatch via the route table
-// in src/lib/api-routes.ts. The per-route options (requireAuth, requireRole,
-// exemptFromTosGate) are applied per-request by calling api() with the matched
-// entry's options.
-//
-// For `raw` routes (multipart upload, file download), the api() wrapper still
-// runs (auth/csrf/rate-limit) but skips JSON body parsing and calls the
 // handler with the raw NextRequest.
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -29,7 +23,6 @@ function handle(method: string) {
     }
 
     // For raw routes, we need to do auth outside the api() wrapper because
-    // api() consumes req.text() for body parsing. We'll do a lightweight auth
     // pass, then call the raw handler directly.
     if (found.entry.raw) {
       return handleRaw(req, ctx, found);

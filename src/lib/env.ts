@@ -1,5 +1,4 @@
 // Tightly-scoped env loader. No placeholder detection (the original's
-// "reject changeme/secret" rule was security theater in dev). Just expose
 // the env vars the app uses, with sane dev defaults.
 
 type Env = {

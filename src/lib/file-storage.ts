@@ -1,5 +1,4 @@
 // File storage — saves uploaded files to local disk under UPLOAD_DIR.
-// Returns a storage key (relative path) that gets stored in the DB.
 // In production, swap saveFile/readFile for S3-compatible storage.
 
 import { createHash, randomUUID } from 'node:crypto';

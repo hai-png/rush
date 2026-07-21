@@ -1,10 +1,4 @@
 // Route assignments + pickup locations.
-//
-// Admin assigns routes to contractors for a month with a schedule pattern.
-// Contractors accept/reject. Riders browse active assignments and book rides
-// against them (choosing a pickup location).
-//
-// The scheduler (cron) generates individual Trip rows from the assignment's
 // schedule pattern (e.g. Mon-Fri → ~22 trips/month).
 
 import { db } from '@/lib/db';
@@ -12,9 +6,7 @@ import { z } from 'zod';
 import { BadRequestError, NotFoundError, ForbiddenError, ConflictError } from '@/lib/errors';
 import { audit } from '@/lib/audit';
 
-// ─── Pickup locations ────────────────────────────────────────────────────────
 
-// GET /api/v1/routes/:id/pickups — list pickup locations for a route.
 export async function GET_pickups({ params }: any) {
   const pickups = await db.pickupLocation.findMany({
     where: { routeId: params.id, isActive: true },
@@ -23,7 +15,6 @@ export async function GET_pickups({ params }: any) {
   return { data: pickups };
 }
 
-// POST /api/v1/routes/:id/pickups — admin adds a pickup location.
 const PickupInput = z.object({
   name: z.string().min(1).max(100),
   lat: z.number().min(-90).max(90).optional(),
@@ -44,7 +35,6 @@ export async function POST_pickup({ session, params, body, ipAddress, userAgent 
   return { status: 201, data: pickup };
 }
 
-// DELETE /api/v1/pickups/:id — admin removes a pickup location.
 export async function DELETE_pickup({ session, params, ipAddress, userAgent }: any) {
   if (session.role !== 'platform_admin') throw new ForbiddenError('Admin only');
   await db.pickupLocation.update({ where: { id: params.id }, data: { isActive: false } });
@@ -52,9 +42,7 @@ export async function DELETE_pickup({ session, params, ipAddress, userAgent }: a
   return { data: { id: params.id, isActive: false } };
 }
 
-// ─── Route assignments ───────────────────────────────────────────────────────
 
-// GET /api/v1/assignments — list active assignments (riders browse these).
 export async function GET_assignments({ session }: any) {
   const now = new Date();
   const assignments = await db.routeAssignment.findMany({
@@ -75,7 +63,6 @@ export async function GET_assignments({ session }: any) {
   return { data: assignments };
 }
 
-// GET /api/v1/assignments/:id — single assignment detail.
 export async function GET_assignment({ params }: any) {
   const assignment = await db.routeAssignment.findUnique({
     where: { id: params.id },
@@ -90,7 +77,6 @@ export async function GET_assignment({ params }: any) {
   return { data: assignment };
 }
 
-// POST /api/v1/admin/assignments — admin assigns a route to a contractor.
 const AssignmentInput = z.object({
   routeId: z.string().min(1),
   contractorId: z.string().min(1),
@@ -217,7 +203,6 @@ export async function generateTripsFromAssignment(assignment: any): Promise<numb
   return created;
 }
 
-// POST /api/v1/assignments/:id/accept — contractor accepts an assignment.
 export async function POST_accept_assignment({ session, params, ipAddress, userAgent }: any) {
   const assignment = await db.routeAssignment.findUnique({ where: { id: params.id } });
   if (!assignment) throw new NotFoundError('Assignment not found');
@@ -234,7 +219,6 @@ export async function POST_accept_assignment({ session, params, ipAddress, userA
   return { data: { id: params.id, status: 'active' } };
 }
 
-// POST /api/v1/assignments/:id/reject — contractor rejects an assignment.
 export async function POST_reject_assignment({ session, params, body, ipAddress, userAgent }: any) {
   const assignment = await db.routeAssignment.findUnique({ where: { id: params.id } });
   if (!assignment) throw new NotFoundError('Assignment not found');
@@ -257,7 +241,6 @@ export async function POST_reject_assignment({ session, params, body, ipAddress,
   return { data: { id: params.id, status: 'cancelled' } };
 }
 
-// GET /api/v1/contractor/assignments — contractor lists their assignments.
 export async function GET_my_assignments({ session }: any) {
   if (session.role !== 'contractor' && session.role !== 'platform_admin') {
     throw new ForbiddenError('Contractor only');

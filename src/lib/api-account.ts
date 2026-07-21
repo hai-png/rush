@@ -59,7 +59,6 @@ export async function POST_delete({ session, ipAddress, userAgent }: any) {
   return { data: { ok: true } };
 }
 
-// GET /api/v1/account — current user's account details.
 export async function GET_account({ session }: any) {
   const user = await db.user.findUnique({
     where: { id: session.id },
@@ -70,7 +69,6 @@ export async function GET_account({ session }: any) {
   return { data: safe };
 }
 
-// PATCH /api/v1/account — update name + email.
 import { z } from 'zod';
 import { BadRequestError } from '@/lib/errors';
 

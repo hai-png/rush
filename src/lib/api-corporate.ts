@@ -1,11 +1,4 @@
 // Corporate endpoints:
-//   POST /api/v1/corporate/onboard   — rider becomes corporate_admin + creates a corporate
-//   POST /api/v1/corporate/invites   — corporate_admin generates an invite code
-//   GET  /api/v1/corporate/invites   — list invites for the current corporate
-//   POST /api/v1/corporate/signup    — rider joins a corporate via invite code (status: pending)
-//   GET  /api/v1/corporate/members   — corporate_admin lists their members
-//   POST /api/v1/corporate/members/:id/approve — approve a pending member
-//   POST /api/v1/corporate/members/:id/reject  — reject a pending member
 //   GET  /api/v1/corporate           — get the current corporate_admin's corporate
 
 import { db } from '@/lib/db';
@@ -285,7 +278,6 @@ export async function POST_validate_invite({ body }: any) {
   return { data: { corporateName: invite.corporate.name, subsidyPercent: invite.corporate.subsidyPercent, maxUses: invite.maxUses, usesCount: invite.usesCount } };
 }
 
-// GET /api/v1/corporate/me — alias for GET /corporate (current corporate).
 export async function GET_me({ session }: any) {
   if (session.role !== 'corporate_admin' && session.role !== 'platform_admin') {
     throw new ForbiddenError('Corporate admin only');
@@ -300,7 +292,6 @@ export async function GET_me({ session }: any) {
   return { data: corp };
 }
 
-// PATCH /api/v1/corporate — update corporate settings.
 const UpdateCorporateInput = z.object({
   name: z.string().min(2).max(100).optional(),
   contactEmail: z.string().email().optional(),
@@ -322,7 +313,6 @@ export async function PATCH_corporate({ session, body, ipAddress, userAgent }: a
   return { data: updated };
 }
 
-// DELETE /api/v1/corporate/members/:id — remove a member (soft delete).
 export async function DELETE_member({ session, params, ipAddress, userAgent }: any) {
   if (session.role !== 'corporate_admin' && session.role !== 'platform_admin') {
     throw new ForbiddenError('Corporate admin only');
@@ -340,7 +330,6 @@ export async function DELETE_member({ session, params, ipAddress, userAgent }: a
   return { data: { id: params.id, isActive: false } };
 }
 
-// PATCH /api/v1/corporate/members/:id — update member (e.g. reset rides used).
 const UpdateMemberInput = z.object({
   ridesUsedThisMonth: z.number().int().min(0).optional(),
   employeeId: z.string().min(1).max(50).optional(),

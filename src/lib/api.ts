@@ -1,19 +1,4 @@
 // API handler composition — replaces the original's Hono middleware stack.
-//
-// Usage:
-//   export const POST = api({ requireAuth: true }, async ({ session, body, ctx }) => {
-//     return { data: ... };
-//   });
-//
-// Wraps the handler with:
-//   1. Request context (requestId, ipAddress, userAgent, logger)
-//   2. Auth (verifies bearer token or session cookie, sets `session`)
-//   3. CSRF (double-submit, bearer-exempt-when-no-session-cookie)
-//   4. Rate-limit (in-memory sliding window, keyed by IP / userId / phone)
-//   5. Idempotency (DB-backed, anon keys ignored — fixes SEC-011)
-//   6. ToS gate (409 if session.tosVersion !== CURRENT_TOS_VERSION, exempt paths)
-//   7. Error envelope (AppError -> { error: { code, message, requestId } })
-//
 // All security invariants baked in from the start. No patches.
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -46,7 +31,6 @@ export type ApiOptions = {
   // Idempotency is auto-applied to POST with an Idempotency-Key header.
 };
 
-// ─── Client IP ──────────────────────────────────────────────────────────────
 function clientIp(req: NextRequest): string | undefined {
   const xff = req.headers.get('x-forwarded-for');
   if (xff) {
@@ -57,8 +41,6 @@ function clientIp(req: NextRequest): string | undefined {
   return req.headers.get('x-real-ip') ?? undefined;
 }
 
-// ─── Rate limiter (in-memory sliding window) ────────────────────────────────
-// Single-process; that's fine for a single-server dev deployment. For
 // production multi-instance, swap this for Redis.
 type RateBucket = { count: number; expiresAt: number };
 const rateBuckets = new Map<string, RateBucket>();
@@ -142,7 +124,6 @@ setInterval(() => {
   }
 }, 5 * 60_000).unref?.();
 
-// ─── CSRF (double-submit) ───────────────────────────────────────────────────
 function readCookie(req: NextRequest, name: string): string | undefined {
   const cookieHeader = req.headers.get('cookie') ?? '';
   for (const part of cookieHeader.split(';')) {
@@ -183,7 +164,6 @@ async function csrfCheck(req: NextRequest): Promise<void> {
   }
 }
 
-// ─── ToS gate ───────────────────────────────────────────────────────────────
 const TOS_EXEMPT = [
   /^\/api\/v1\/tos/,
   /^\/api\/v1\/auth\/(login|token|logout|refresh|password|2fa|sessions|me|otp|phone|register)/,
@@ -201,7 +181,6 @@ function tosGate(path: string, session: Session | null): void {
   }
 }
 
-// ─── Idempotency ────────────────────────────────────────────────────────────
 const IDEMPOTENCY_EXEMPT = [
   /^\/api\/v1\/auth\//,
   /^\/api\/v1\/webhooks\//,
@@ -266,7 +245,6 @@ async function persistIdempotency(scopedKey: string, status: number, body: unkno
   }
 }
 
-// ─── Main api() wrapper ─────────────────────────────────────────────────────
 type HandlerResult = { status?: number; data?: unknown; headers?: Record<string, string> } | unknown;
 type Handler = (ctx: ApiContext & { body?: any; params: Record<string, string> }) => Promise<HandlerResult> | HandlerResult;
 
