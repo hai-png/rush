@@ -138,3 +138,39 @@ export async function POST_claim({ session, body, params, ipAddress, userAgent }
     },
   };
 }
+
+// GET /api/v1/marketplace/my-releases — list the current user's seat releases.
+export async function GET_my_releases({ session }: any) {
+  const releases = await db.seatRelease.findMany({
+    where: { userId: session.id },
+    include: {
+      trip: { include: { route: true, shuttle: true } },
+      claims: { include: { claimant: { select: { name: true, phone: true } } } },
+    },
+    orderBy: { createdAt: 'desc' },
+    take: 50,
+  });
+  return { data: releases };
+}
+
+// POST /api/v1/marketplace/seat-releases/:id/cancel — cancel an open release.
+// Only the seller can cancel; only open releases can be cancelled.
+export async function POST_cancel_release({ session, params, ipAddress, userAgent }: any) {
+  const release = await db.seatRelease.findUnique({ where: { id: params.id } });
+  if (!release) throw new NotFoundError('Seat release not found');
+  if (release.userId !== session.id) throw new NotFoundError('Seat release not found');
+  if (release.status !== 'open') throw new BadRequestError(`Cannot cancel a ${release.status} release`);
+
+  await db.seatRelease.update({
+    where: { id: release.id },
+    data: { status: 'cancelled' },
+  });
+  await audit({
+    actorId: session.id,
+    action: 'seat_release.cancelled',
+    entityType: 'seat_release',
+    entityId: release.id,
+    ipAddress, userAgent,
+  });
+  return { data: { id: release.id, status: 'cancelled' } };
+}

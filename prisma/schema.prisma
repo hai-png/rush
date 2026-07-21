@@ -50,6 +50,8 @@ model User {
   drivesShuttles     Shuttle[]
   idempotencyRecords IdempotencyRecord[]
   otpCodes           OtpCode[]
+  uploadedFiles      UploadedFile[]       @relation("FileUploader")
+  corporateInvites   CorporateInvite[]    @relation("InviteCreator")
 
   @@index([isActive, deletedAt])
 }
@@ -78,6 +80,8 @@ model ContractorProfile {
   verifiedAt          DateTime?
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
+
+  documents           ContractorDocument[]
 }
 
 model Corporate {
@@ -97,7 +101,7 @@ model Corporate {
 
   members      CorporateMember[]
   subscriptions Subscription[]
-
+  invites      CorporateInvite[]
 }
 
 model CorporateMember {
@@ -415,6 +419,8 @@ model TicketMessage {
   authorId   String
   author     User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
   body       String
+  fileId     String?  // optional attachment
+  file       UploadedFile? @relation("TicketMessageFile", fields: [fileId], references: [id], onDelete: SetNull)
   createdAt  DateTime @default(now())
 
   @@index([ticketId, createdAt])
@@ -499,4 +505,63 @@ model IdempotencyRecord {
 
   @@index([userId])
   @@index([expiresAt])
+}
+
+// ─── File uploads ────────────────────────────────────────────────────────────
+// Generic uploaded file record. Bytes live on disk (UPLOAD_DIR) or S3 in
+// production; this table is the metadata index.
+
+model UploadedFile {
+  id              String   @id @default(cuid())
+  uploaderId      String
+  uploader        User     @relation("FileUploader", fields: [uploaderId], references: [id], onDelete: Cascade)
+  originalFilename String
+  storageKey      String   @unique
+  mimeType        String
+  sizeBytes       Int
+  checksumSha256  String
+  scanStatus      String   @default("pending") // pending | clean | infected | error
+  createdAt       DateTime @default(now())
+
+  contractorDocuments ContractorDocument[]
+  ticketMessages      TicketMessage[]    @relation("TicketMessageFile")
+
+  @@index([uploaderId])
+  @@index([scanStatus])
+}
+
+// Contractor onboarding documents: registration (business license), insurance,
+// inspection (vehicle safety). Required before verification_status can move
+// from 'unverified' to 'verified'.
+model ContractorDocument {
+  id              String   @id @default(cuid())
+  contractorId    String
+  contractor      ContractorProfile @relation(fields: [contractorId], references: [id], onDelete: Cascade)
+  type            String   // registration | insurance | inspection
+  fileId          String
+  file            UploadedFile @relation(fields: [fileId], references: [id], onDelete: Restrict)
+  uploadedAt      DateTime @default(now())
+
+  @@unique([contractorId, type])
+  @@index([contractorId])
+}
+
+// ─── Corporate invites ──────────────────────────────────────────────────────
+// A corporate admin generates an invite code; members use it during signup
+// to associate themselves with the corporate. The admin then approves/rejects.
+model CorporateInvite {
+  id          String    @id @default(cuid())
+  corporateId String
+  corporate   Corporate @relation(fields: [corporateId], references: [id], onDelete: Cascade)
+  code        String    @unique
+  createdById String
+  createdByUser User    @relation("InviteCreator", fields: [createdById], references: [id], onDelete: Cascade)
+  note        String?
+  maxUses     Int       @default(50)
+  usesCount   Int       @default(0)
+  expiresAt   DateTime?
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+
+  @@index([corporateId])
 }

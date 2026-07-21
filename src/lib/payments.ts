@@ -38,10 +38,45 @@ export type RefundResult =
   | { status: 'failed'; error: string; permanent: boolean };
 
 export type WebhookEvent =
-  | { type: 'payment.settled'; merchOrderId: string; amount?: Money; raw: unknown; signatureValid: boolean; timestampMs: number }
-  | { type: 'payment.failed'; merchOrderId: string; raw: unknown; signatureValid: boolean; timestampMs: number }
+  | { type: 'payment.settled'; merchOrderId: string; amount?: Money; raw: unknown; signatureValid: boolean; timestampMs: number; outRequestNo?: string; transId?: string }
+  | { type: 'payment.failed'; merchOrderId: string; raw: unknown; signatureValid: boolean; timestampMs: number; outRequestNo?: string }
   | { type: 'refund.succeeded'; refundRequestNo: string; raw: unknown; signatureValid: boolean; timestampMs: number }
   | { type: 'refund.failed'; refundRequestNo: string; raw: unknown; signatureValid: boolean; timestampMs: number };
+
+// ─── InApp SDK ───────────────────────────────────────────────────────────────
+// Used by native mobile clients (Android/iOS) that have the Telebirr SuperApp
+// SDK embedded. The backend creates an InApp order and returns prepay_id +
+// receiveCode; the mobile SDK uses those to launch Telebirr SuperApp and
+// complete the payment.
+export type InAppCheckoutResult = {
+  prepayId: string;
+  receiveCode: string;
+  merchOrderId: string;
+};
+
+// ─── Subscription Payment ────────────────────────────────────────────────────
+// Recurring billing via Telebirr mandates. The customer signs a one-time
+// mandate in the Telebirr SuperApp (front-end SDK call); the merchant then
+// calls disburseOrder on each billing date to pull funds (PIN-free).
+//
+// The sign-mandate step is a front-end SDK call (`merchant://...` deep link),
+// not a backend HTTP API. The backend only generates the contract number and
+// later queries / cancels / disburses.
+export type MandateSignUrlResult = {
+  mctContractNo: string; // 32-digit numeric, unique per subscription
+  signUrl: string; // merchant:// deep link for the front-end SDK to invoke
+};
+
+export type MandateQueryResult = {
+  status: 'active' | 'cancelled' | 'unknown';
+  mandateTemplateId?: string;
+  raw?: unknown;
+};
+
+export type DisburseResult =
+  | { status: 'succeeded'; paymentOrderId: string }
+  | { status: 'processing'; paymentOrderId?: string }
+  | { status: 'failed'; error: string; permanent: boolean };
 
 export interface PaymentProvider {
   readonly name: 'telebirr' | 'cbe';
@@ -49,6 +84,13 @@ export interface PaymentProvider {
   verifyPayment?(reference: string): Promise<PaymentStatusResult>;
   refund?(req: RefundRequest): Promise<RefundResult>;
   parseWebhook?(req: Request): Promise<WebhookEvent>;
+  // InApp SDK (mobile only)
+  createInAppOrder?(intent: PaymentIntent): Promise<InAppCheckoutResult>;
+  // Subscription Payment
+  buildMandateSignUrl?(opts: { mctContractNo: string; mandateTemplateId: string }): MandateSignUrlResult;
+  queryMandate?(mctContractNo: string): Promise<MandateQueryResult>;
+  cancelMandate?(mctContractNo: string): Promise<{ ok: boolean }>;
+  disburse?(opts: { mctContractNo: string; merchOrderId: string; amount: Money; reason: string }): Promise<DisburseResult>;
 }
 
 // ─── Mock Telebirr ──────────────────────────────────────────────────────────
@@ -63,7 +105,7 @@ class MockTelebirrProvider implements PaymentProvider {
     url.searchParams.set('title', intent.description);
     return { status: 'checkout', checkoutUrl: url.toString(), prepayId: `mock-${intent.merchOrderId}` };
   }
-  async verifyPayment(reference: string): Promise<PaymentStatusResult> {
+  async verifyPayment(_reference: string): Promise<PaymentStatusResult> {
     // The mock doesn't have a query endpoint — settlements come via webhook only.
     return { status: 'pending' };
   }
@@ -71,6 +113,41 @@ class MockTelebirrProvider implements PaymentProvider {
     // Mock always succeeds immediately.
     console.log(`[MockTelebirr] refund ${req.refundRequestNo} for ${req.merchOrderId}: ${req.amount.toString()} — ${req.reason}`);
     return { status: 'succeeded' };
+  }
+  async createInAppOrder(intent: PaymentIntent): Promise<InAppCheckoutResult> {
+    // Mock returns the same shape as H5 checkout but with a receiveCode the
+    // mobile SDK would use to launch Telebirr SuperApp.
+    console.log(`[MockTelebirr:InApp] createOrder for ${intent.merchOrderId}`);
+    return {
+      prepayId: `mock-inapp-${intent.merchOrderId}`,
+      receiveCode: `RCV${Date.now()}`,
+      merchOrderId: intent.merchOrderId,
+    };
+  }
+  buildMandateSignUrl(opts: { mctContractNo: string; mandateTemplateId: string }): MandateSignUrlResult {
+    // In mock mode, point at a local stub page that simulates the mandate-sign
+    // flow. In real mode, this is a `merchant://` deep link the mobile/web SDK
+    // invokes to open Telebirr SuperApp.
+    const env = loadEnv();
+    const url = new URL('/telebirr-stub', env.APP_BASE_URL);
+    url.searchParams.set('mandate', opts.mctContractNo);
+    url.searchParams.set('template', opts.mandateTemplateId);
+    return {
+      mctContractNo: opts.mctContractNo,
+      signUrl: url.toString(),
+    };
+  }
+  async queryMandate(mctContractNo: string): Promise<MandateQueryResult> {
+    console.log(`[MockTelebirr:Subscription] queryMandate ${mctContractNo}`);
+    return { status: 'active' };
+  }
+  async cancelMandate(mctContractNo: string): Promise<{ ok: boolean }> {
+    console.log(`[MockTelebirr:Subscription] cancelMandate ${mctContractNo}`);
+    return { ok: true };
+  }
+  async disburse(opts: { mctContractNo: string; merchOrderId: string; amount: Money; reason: string }): Promise<DisburseResult> {
+    console.log(`[MockTelebirr:Subscription] disburse ${opts.merchOrderId} for ${opts.mctContractNo}: ${opts.amount.toString()} — ${opts.reason}`);
+    return { status: 'succeeded', paymentOrderId: `mock-disburse-${opts.merchOrderId}` };
   }
   async parseWebhook(req: Request): Promise<WebhookEvent> {
     const raw = await req.text();
@@ -88,6 +165,7 @@ class MockTelebirrProvider implements PaymentProvider {
 
     // Mock signatures are always considered valid (the stub page generates them).
     const signatureValid = payload.sign === 'mock-signature';
+    const outRequestNo = payload.out_request_no ?? `orno-${Date.now()}`;
 
     if (payload.refund_request_no) {
       return payload.trade_status === 'Success'
@@ -95,146 +173,514 @@ class MockTelebirrProvider implements PaymentProvider {
         : { type: 'refund.failed', refundRequestNo: payload.refund_request_no, raw: payload, signatureValid, timestampMs };
     }
     return payload.trade_status === 'Success'
-      ? { type: 'payment.settled', merchOrderId: payload.merch_order_id, amount: Money.fromETBString(payload.total_amount), raw: payload, signatureValid, timestampMs }
-      : { type: 'payment.failed', merchOrderId: payload.merch_order_id, raw: payload, signatureValid, timestampMs };
+      ? { type: 'payment.settled', merchOrderId: payload.merch_order_id, amount: Money.fromETBString(payload.total_amount), raw: payload, signatureValid, timestampMs, outRequestNo, transId: payload.trans_id }
+      : { type: 'payment.failed', merchOrderId: payload.merch_order_id, raw: payload, signatureValid, timestampMs, outRequestNo };
   }
 }
 
-// ─── Real Telebirr ──────────────────────────────────────────────────────────
+// ─── Real Telebirr (H5 C2B Web Payment + InApp SDK + Subscription) ─────────
+//
+// Two-layer auth:
+//   1. Fabric Token (short-lived bearer) from POST /payment/v1/token
+//   2. RSA-PSS-SHA256 signature in the request body's `sign` field
+//
+// H5 flow (web app, browser-redirect):
+//   1. Backend: applyFabricToken() -> bearer token (cached)
+//   2. Backend: createPreOrder() -> prepay_id + sign
+//   3. Backend: buildCheckoutUrl(prepay_id, sign) -> URL for browser redirect
+//   4. User: pays on Telebirr-hosted page
+//   5. Telebirr: POSTs to notify_url with signed payload
+//   6. Backend: parseWebhook() verifies signature + dedups + settles payment
+//
+// InApp flow (native mobile app with Telebirr SDK):
+//   1. Backend: applyFabricToken() -> bearer token
+//   2. Backend: createInAppOrder() -> prepay_id + receiveCode
+//   3. Mobile SDK: uses prepay_id + receiveCode to launch Telebirr SuperApp
+//   4. User: pays in SuperApp
+//   5. Telebirr: POSTs to notify_url (same as H5)
+//
+// Subscription flow (recurring billing):
+//   1. Front-end SDK: invokes merchant:// deep-link to sign mandate
+//   2. Backend: queryMandate() to check signing status
+//   3. On each billing date: Backend calls disburse() to pull funds PIN-free
+//   4. To cancel: Backend calls cancelMandate()
+//
+// Signature algorithm:
+//   - SHA256withRSA with PSS padding + MGF1-SHA256 (NOT PKCS#1 v1.5)
+//   - Exclude fields: sign, sign_type, header, refund_info, openType,
+//     raw_request, biz_content (as a key — its children ARE signed),
+//     wallet_reference_data
+//   - Sort keys lexicographically, join as k=v&k=v
 class TelebirrProvider implements PaymentProvider {
   readonly name = 'telebirr' as const;
   private env = loadEnv();
-  private base = this.env.TELEBIRR_ENV === 'production'
-    ? 'https://superapp.ethiomobilemoney.et'
-    : 'https://developerportal.ethiotelebirr.et';
 
-  private canonicalize(payload: Record<string, unknown>): string {
-    return Object.keys(payload).filter(k => k !== 'sign').sort().map(k => `${k}=${JSON.stringify(payload[k])}`).join('&');
+  private get apiBase(): string {
+    return this.env.TELEBIRR_ENV === 'production'
+      ? 'https://superapp.ethiomobilemoney.et:38443/apiaccess/payment/gateway'
+      : 'https://developerportal.ethiotelebirr.et:38443/apiaccess/payment/gateway';
   }
 
-  private sign(payload: Record<string, unknown>): string {
-    
-    const signer = createSign('RSA-SHA256');
-    signer.update(this.canonicalize(payload));
-    return signer.sign(this.env.TELEBIRR_PRIVATE_KEY, 'base64');
+  private get webBase(): string {
+    // Testbed ends with `?` (the URL builder appends `&field=...`).
+    // Production: confirm with Ethio telecom; using the documented testbed shape.
+    return this.env.TELEBIRR_ENV === 'production'
+      ? 'https://superapp.ethiomobilemoney.et:38443/payment/web/paygate?'
+      : 'https://developerportal.ethiotelebirr.et:38443/payment/web/paygate?';
   }
+
+  // ─── Signature helpers ──────────────────────────────────────────────────
+  // Excluded from signing per Telebirr docs. Note: `biz_content` is excluded
+  // as a key but its children ARE flattened and signed.
+  private static EXCLUDE_FIELDS = new Set([
+    'sign', 'sign_type', 'header', 'refund_info',
+    'openType', 'raw_request', 'biz_content', 'wallet_reference_data',
+  ]);
+
+  private buildStringToSign(req: Record<string, any>): string {
+    const flat: Record<string, string> = {};
+    for (const [k, v] of Object.entries(req)) {
+      if (TelebirrProvider.EXCLUDE_FIELDS.has(k)) continue;
+      if (v === undefined || v === null || v === '') continue;
+      flat[k] = String(v);
+    }
+    // biz_content is excluded as a key, but its children are flattened + signed.
+    const biz = req.biz_content;
+    if (biz && typeof biz === 'object') {
+      for (const [k, v] of Object.entries(biz)) {
+        if (TelebirrProvider.EXCLUDE_FIELDS.has(k)) continue;
+        if (v === undefined || v === null || v === '') continue;
+        flat[k] = String(v);
+      }
+    }
+    return Object.keys(flat)
+      .sort()
+      .map((k) => `${k}=${flat[k]}`)
+      .join('&');
+  }
+
+  private signTelebirr(req: Record<string, any>): string {
+    const data = this.buildStringToSign(req);
+    return createSign('sha256')
+      .update(data, 'utf8')
+      .sign({
+        key: this.env.TELEBIRR_PRIVATE_KEY,
+        padding: 1, // RSA_PKCS1_PSS_PADDING
+        saltLength: 0, // RSA_PSS_SALTLEN_DIGEST
+      })
+      .toString('base64');
+  }
+
+  private verifyTelebirr(payload: Record<string, any>, signatureBase64: string): boolean {
+    const data = this.buildStringToSign(payload);
+    try {
+      return createVerify('sha256')
+        .update(data, 'utf8')
+        .verify({
+          key: this.env.TELEBIRR_PUBLIC_KEY,
+          padding: 1, // RSA_PKCS1_PSS_PADDING
+          saltLength: 0,
+        }, signatureBase64, 'base64');
+    } catch {
+      return false;
+    }
+  }
+
+  private createNonceStr(): string {
+    return randomUUID().replace(/-/g, '');
+  }
+
+  private createTimestamp(): string {
+    return Math.floor(Date.now() / 1000).toString();
+  }
+
+  // ─── Layer 1: Fabric Token (cached) ────────────────────────────────────
+  private cachedToken: { token: string; expiresAt: number } | null = null;
 
   private async applyFabricToken(): Promise<string> {
-    const res = await fetch(`${this.base}/hcp/fabric/accessToken`, {
+    if (this.cachedToken && Date.now() < this.cachedToken.expiresAt - 60_000) {
+      return this.cachedToken.token;
+    }
+    const res = await fetch(`${this.apiBase}/payment/v1/token`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ appId: this.env.TELEBIRR_FABRIC_APP_ID, appSecret: this.env.TELEBIRR_APP_SECRET }),
+      headers: {
+        'Content-Type': 'application/json',
+        'X-APP-Key': this.env.TELEBIRR_FABRIC_APP_ID,
+      },
+      body: JSON.stringify({ appSecret: this.env.TELEBIRR_APP_SECRET }),
     });
-    if (!res.ok) throw new Error(`telebirr token request failed: ${res.status}`);
-    const json = await res.json();
-    return json.token as string;
+    if (!res.ok) {
+      throw new Error(`applyFabricToken HTTP ${res.status}: ${await res.text()}`);
+    }
+    const data = await res.json() as { token: string; expirationDate?: string };
+    // expirationDate is yyyyMMddHHmmss; fall back to 1h if absent.
+    const expiresAt = data.expirationDate ? this.parseTelebirrDate(data.expirationDate) : Date.now() + 3600_000;
+    this.cachedToken = { token: data.token, expiresAt };
+    return data.token;
   }
 
-  async createCheckout(intent: PaymentIntent): Promise<CheckoutResult> {
+  private parseTelebirrDate(s: string): number {
+    // yyyyMMddHHmmss -> epoch ms
+    const y = +s.slice(0, 4);
+    const mo = +s.slice(4, 6) - 1;
+    const d = +s.slice(6, 8);
+    const h = +s.slice(8, 10);
+    const mi = +s.slice(10, 12);
+    const se = +s.slice(12, 14);
+    return Date.UTC(y, mo, d, h, mi, se);
+  }
+
+  // ─── Layer 2: business API call (signs + sends) ────────────────────────
+  private async callBusinessApi<T = any>(
+    endpoint: string,
+    bizContent: Record<string, any>,
+    method: string,
+  ): Promise<T> {
     const token = await this.applyFabricToken();
-    const body = {
+    const req: Record<string, any> = {
+      timestamp: this.createTimestamp(),
+      nonce_str: this.createNonceStr(),
+      method,
+      version: '1.0',
+      biz_content: bizContent,
+    };
+    req.sign = this.signTelebirr(req);
+    req.sign_type = 'SHA256WithRSA';
+
+    const res = await fetch(`${this.apiBase}${endpoint}`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'X-APP-Key': this.env.TELEBIRR_FABRIC_APP_ID,
+        'Authorization': token, // already includes 'Bearer '
+      },
+      body: JSON.stringify(req),
+    });
+    if (!res.ok) {
+      throw new Error(`Telebirr ${endpoint} HTTP ${res.status}: ${await res.text()}`);
+    }
+    return res.json() as Promise<T>;
+  }
+
+  // ─── H5 Create Order (preOrder) ────────────────────────────────────────
+  async createCheckout(intent: PaymentIntent): Promise<CheckoutResult> {
+    const bizContent = {
+      appid: this.env.TELEBIRR_MERCHANT_APP_ID,
+      merch_code: this.env.TELEBIRR_MERCHANT_CODE,
       merch_order_id: intent.merchOrderId,
-      merchant_app_id: this.env.TELEBIRR_MERCHANT_APP_ID,
-      merchant_code: this.env.TELEBIRR_MERCHANT_CODE,
       title: intent.description,
       total_amount: intent.amount.toDecimalString(),
       trans_currency: 'ETB',
-      trade_type: 'Web',
       timeout_express: '120m',
-      business_type: 'BuyGoods',
-      payee_identifier_type: '04',
       notify_url: intent.notifyUrl,
       redirect_url: intent.redirectUrl,
+      payee_type: '5000', // H5 sample value; confirm with ET
     };
-    const sign = this.sign(body);
-    const res = await fetch(`${this.base}/payment/v1/merchant/createOrder`, {
-      method: 'POST',
-      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ ...body, sign }),
-    });
-    if (!res.ok) throw new Error(`telebirr createOrder failed: ${res.status}`);
-    const json = await res.json();
-    return { status: 'checkout', checkoutUrl: json.checkoutUrl, prepayId: json.prepayId };
+
+    const response = await this.callBusinessApi<{
+      result: string;
+      code: string;
+      msg: string;
+      biz_content: { prepay_id: string; merch_order_id: string };
+      sign: string;
+    }>('/payment/v1/merchant/preOrder', bizContent, 'payment.preorder');
+
+    if (response.result !== 'SUCCESS' || response.code !== '0') {
+      throw new Error(`Telebirr preOrder failed: ${response.msg} (code ${response.code})`);
+    }
+
+    const checkoutUrl = this.buildCheckoutUrl(response.biz_content.prepay_id, response.sign);
+    return {
+      status: 'checkout',
+      checkoutUrl,
+      prepayId: response.biz_content.prepay_id,
+    };
   }
 
+  // Build the user-facing redirect URL: web/paygate?<signed fields>.
+  private buildCheckoutUrl(prepayId: string, sign: string): string {
+    // Per the docs, the checkout URL is the webBase + a sorted query string
+    // of the biz_content fields + sign + sign_type, then &version=1.0&trade_type=Checkout.
+    const timestamp = this.createTimestamp();
+    const nonceStr = this.createNonceStr();
+    const queryString = [
+      `appid=${this.env.TELEBIRR_MERCHANT_APP_ID}`,
+      `merch_code=${this.env.TELEBIRR_MERCHANT_CODE}`,
+      `nonce_str=${nonceStr}`,
+      `prepay_id=${prepayId}`,
+      `timestamp=${timestamp}`,
+      `sign=${sign}`,
+      `sign_type=SHA256WithRSA`,
+    ].join('&');
+    return `${this.webBase}${queryString}&version=1.0&trade_type=Checkout`;
+  }
+
+  // ─── InApp SDK: createOrder ────────────────────────────────────────────
+  // For native mobile clients with the Telebirr SuperApp SDK embedded.
+  // Returns prepay_id + receiveCode; the mobile SDK launches SuperApp with those.
+  async createInAppOrder(intent: PaymentIntent): Promise<InAppCheckoutResult> {
+    const bizContent = {
+      appid: this.env.TELEBIRR_MERCHANT_APP_ID,
+      merch_code: this.env.TELEBIRR_MERCHANT_CODE,
+      merch_order_id: intent.merchOrderId,
+      title: intent.description,
+      total_amount: intent.amount.toDecimalString(),
+      trans_currency: 'ETB',
+      timeout_express: '120m',
+      notify_url: intent.notifyUrl,
+      payee_type: '3000', // InApp uses 3000 (H5 uses 5000) per docs
+    };
+
+    // Note: docs have an inconsistency — spec table says /payment/v1/inapp/createOrder,
+    // sample code says /payment/v1/merchant/inapp/createOrder. Try spec path first.
+    let response: any;
+    try {
+      response = await this.callBusinessApi<{
+        result: string;
+        code: string;
+        msg: string;
+        biz_content: { prepay_id: string; receive_code: string; merch_order_id: string };
+      }>('/payment/v1/inapp/createOrder', bizContent, 'payment.inapp.createOrder');
+    } catch (e) {
+      // Fall back to the sample-code path on 404.
+      response = await this.callBusinessApi<{
+        result: string;
+        code: string;
+        msg: string;
+        biz_content: { prepay_id: string; receive_code: string; merch_order_id: string };
+      }>('/payment/v1/merchant/inapp/createOrder', bizContent, 'payment.inapp.createOrder');
+    }
+
+    if (response.result !== 'SUCCESS' || response.code !== '0') {
+      throw new Error(`Telebirr InApp createOrder failed: ${response.msg} (code ${response.code})`);
+    }
+
+    return {
+      prepayId: response.biz_content.prepay_id,
+      receiveCode: response.biz_content.receive_code,
+      merchOrderId: response.biz_content.merch_order_id,
+    };
+  }
+
+  // ─── Query Order ────────────────────────────────────────────────────────
   async verifyPayment(reference: string): Promise<PaymentStatusResult> {
-    const token = await this.applyFabricToken();
-    const res = await fetch(`${this.base}/payment/v1/merchant/queryOrder?merch_order_id=${encodeURIComponent(reference)}`, {
-      headers: { Authorization: `Bearer ${token}` },
-    });
-    if (!res.ok) return { status: 'pending' };
-    const json = await res.json();
-    const status = json.trade_status === 'Success' ? 'completed' : json.trade_status === 'Fail' ? 'failed' : 'pending';
-    const amountStr = json.total_amount ?? json.trade_amount ?? json.amount;
-    const amount = typeof amountStr === 'string' ? Money.fromETBString(amountStr) : undefined;
-    return { status, amount, raw: json };
+    const bizContent = {
+      appid: this.env.TELEBIRR_MERCHANT_APP_ID,
+      merch_code: this.env.TELEBIRR_MERCHANT_CODE,
+      merch_order_id: reference,
+    };
+    const response = await this.callBusinessApi<{
+      result: string;
+      code: string;
+      msg: string;
+      biz_content: {
+        trade_status: string;
+        total_amount?: string;
+        trans_id?: string;
+      };
+    }>('/payment/v1/merchant/queryOrder', bizContent, 'payment.query');
+
+    if (response.result !== 'SUCCESS') {
+      return { status: 'pending', raw: response };
+    }
+
+    // queryOrder trade_status: WAIT_PAY, PAYING, PAY_SUCCESS, PAY_FAILED,
+    // ORDER_CLOSED, ACCEPTED, REFUNDING, REFUND_SUCCESS, REFUND_FAILED
+    let status: 'pending' | 'completed' | 'failed' = 'pending';
+    if (response.biz_content.trade_status === 'PAY_SUCCESS') status = 'completed';
+    else if (response.biz_content.trade_status === 'PAY_FAILED' || response.biz_content.trade_status === 'ORDER_CLOSED') status = 'failed';
+
+    const amount = response.biz_content.total_amount
+      ? Money.fromETBString(response.biz_content.total_amount)
+      : undefined;
+    return { status, amount, raw: response };
   }
 
+  // ─── Refund ──────────────────────────────────────────────────────────────
   async refund(req: RefundRequest): Promise<RefundResult> {
-    const token = await this.applyFabricToken();
-    const body = {
+    const bizContent = {
+      appid: this.env.TELEBIRR_MERCHANT_APP_ID,
+      merch_code: this.env.TELEBIRR_MERCHANT_CODE,
       merch_order_id: req.merchOrderId,
       refund_request_no: req.refundRequestNo,
-      refund_amount: req.amount.toDecimalString(),
-      reason: req.reason,
+      refund_reason: req.reason,
+      actual_amount: req.amount.toDecimalString(),
+      trans_currency: 'ETB',
     };
-    const sign = this.sign(body);
     try {
-      const res = await fetch(`${this.base}/payment/v1/merchant/refundOrder`, {
-        method: 'POST',
-        headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...body, sign }),
-      });
-      const json = await res.json().catch(() => ({}));
-      if (res.ok && json.code === 'SUCCESS') return { status: 'succeeded' };
-      if (json.code === 'REFUND_DUPLICATED') return { status: 'succeeded' };
-      if (json.code === 'REFUND_PROCESSING') return { status: 'processing', retryAfterMs: 15 * 60_000 };
-      const permanent = json.code === 'INSUFFICIENT_BALANCE' || json.code === 'ACCOUNT_FROZEN';
-      return { status: 'failed', error: json.message ?? `HTTP ${res.status}`, permanent };
+      const response = await this.callBusinessApi<{
+        result: string;
+        code: string;
+        msg: string;
+        biz_content: {
+          refund_status: string;
+          refund_amount?: string;
+        };
+      }>('/payment/v1/merchant/refund', bizContent, 'payment.refund');
+
+      if (response.result !== 'SUCCESS') {
+        return { status: 'failed', error: response.msg || 'Unknown error', permanent: false };
+      }
+
+      const st = response.biz_content.refund_status;
+      if (st === 'REFUND_SUCCESS' || st === 'REFUND_DUPLICATED') return { status: 'succeeded' };
+      if (st === 'REFUNDING') return { status: 'processing', retryAfterMs: 15 * 60_000 };
+      return {
+        status: 'failed',
+        error: `Refund ${st}`,
+        permanent: st === 'REFUND_FAILED',
+      };
     } catch (e) {
       return { status: 'failed', error: (e as Error).message, permanent: false };
     }
   }
 
+  // ─── Subscription: build mandate sign URL ────────────────────────────────
+  // The sign-mandate step is a front-end SDK call (merchant:// deep link),
+  // not a backend HTTP API. We just build the URL with the merchant's params.
+  buildMandateSignUrl(opts: { mctContractNo: string; mandateTemplateId: string }): MandateSignUrlResult {
+    const params = new URLSearchParams({
+      mctShortCode: this.env.TELEBIRR_MERCHANT_CODE,
+      mctContractNo: opts.mctContractNo,
+      mandateTemplateId: opts.mandateTemplateId,
+      thirdAppId: this.env.TELEBIRR_MERCHANT_APP_ID,
+    });
+    return {
+      mctContractNo: opts.mctContractNo,
+      signUrl: `merchant://10000000016?${params.toString()}`,
+    };
+  }
+
+  // ─── Subscription: query mandate ─────────────────────────────────────────
+  async queryMandate(mctContractNo: string): Promise<MandateQueryResult> {
+    const bizContent = {
+      appid: this.env.TELEBIRR_MERCHANT_APP_ID,
+      merch_code: this.env.TELEBIRR_MERCHANT_CODE,
+      mct_contract_no: mctContractNo,
+    };
+    try {
+      const response = await this.callBusinessApi<{
+        result: string;
+        code: string;
+        msg: string;
+        biz_content: {
+          mandate_status?: string; // ACTIVE, CANCELLED, etc.
+          mandate_template_id?: string;
+        };
+      }>('/payment/v1/mandates/query', bizContent, 'payment.queryMandate');
+
+      if (response.result !== 'SUCCESS') {
+        return { status: 'unknown', raw: response };
+      }
+      const st = (response.biz_content.mandate_status ?? '').toUpperCase();
+      return {
+        status: st === 'ACTIVE' ? 'active' : st === 'CANCELLED' ? 'cancelled' : 'unknown',
+        mandateTemplateId: response.biz_content.mandate_template_id,
+        raw: response,
+      };
+    } catch (e) {
+      return { status: 'unknown', raw: { error: (e as Error).message } };
+    }
+  }
+
+  // ─── Subscription: cancel mandate ────────────────────────────────────────
+  async cancelMandate(mctContractNo: string): Promise<{ ok: boolean }> {
+    const bizContent = {
+      appid: this.env.TELEBIRR_MERCHANT_APP_ID,
+      merch_code: this.env.TELEBIRR_MERCHANT_CODE,
+      mct_contract_no: mctContractNo,
+    };
+    try {
+      const response = await this.callBusinessApi<{
+        result: string;
+        code: string;
+        msg: string;
+      }>('/payment/v1/mandateContract/cancel', bizContent, 'payment.cancelMandate');
+      return { ok: response.result === 'SUCCESS' };
+    } catch {
+      return { ok: false };
+    }
+  }
+
+  // ─── Subscription: disburse (pull funds PIN-free) ─────────────────────────
+  async disburse(opts: { mctContractNo: string; merchOrderId: string; amount: Money; reason: string }): Promise<DisburseResult> {
+    const bizContent = {
+      appid: this.env.TELEBIRR_MERCHANT_APP_ID,
+      merch_code: this.env.TELEBIRR_MERCHANT_CODE,
+      mct_contract_no: opts.mctContractNo,
+      merch_order_id: opts.merchOrderId,
+      disburse_amount: opts.amount.toDecimalString(),
+      trans_currency: 'ETB',
+      disburse_reason: opts.reason,
+    };
+    try {
+      const response = await this.callBusinessApi<{
+        result: string;
+        code: string;
+        msg: string;
+        biz_content: {
+          payment_order_id?: string;
+          disburse_status?: string; // SUCCESS, PROCESSING, FAILED
+        };
+      }>('/payment/v1/merchant/disburseOrder', bizContent, 'payment.disbursement');
+
+      if (response.result !== 'SUCCESS') {
+        return { status: 'failed', error: response.msg || 'Unknown error', permanent: false };
+      }
+      const st = (response.biz_content.disburse_status ?? '').toUpperCase();
+      const paymentOrderId = response.biz_content.payment_order_id ?? '';
+      if (st === 'SUCCESS') return { status: 'succeeded', paymentOrderId };
+      if (st === 'PROCESSING') return { status: 'processing', paymentOrderId };
+      return { status: 'failed', error: `Disburse ${st}`, permanent: st === 'FAILED' };
+    } catch (e) {
+      return { status: 'failed', error: (e as Error).message, permanent: false };
+    }
+  }
+
+  // ─── Webhook ─────────────────────────────────────────────────────────────
   async parseWebhook(req: Request): Promise<WebhookEvent> {
-    
     const raw = await req.text();
     let payload: any;
     try { payload = JSON.parse(raw); } catch { throw new Error('Invalid telebirr webhook JSON'); }
 
-    const timestampMs = typeof payload.timestamp === 'number'
+    // Timestamp: docs say "13 chars" but samples use 10-digit Unix seconds.
+    // Accept either; reject if >5min old (replay protection).
+    const ts = typeof payload.timestamp === 'number'
       ? payload.timestamp
       : typeof payload.timestamp === 'string' && payload.timestamp.trim() !== '' && !isNaN(Number(payload.timestamp))
         ? Number(payload.timestamp)
         : undefined;
-    if (timestampMs === undefined) {
+    if (ts === undefined) {
       throw new Error('Telebirr webhook missing numeric timestamp — possible replay');
     }
+    const timestampMs = ts < 1e12 ? ts * 1000 : ts; // seconds -> ms
     if (Date.now() - timestampMs > 5 * 60_000) {
       throw new Error('Telebirr webhook timestamp too old (replay suspected)');
     }
 
+    // Verify signature using SP's public key.
     let signatureValid = false;
-    if (typeof payload.sign === 'string' && payload.sign) {
-      const verifier = createVerify('RSA-SHA256');
-      verifier.update(this.canonicalize(payload));
-      try {
-        signatureValid = verifier.verify(this.env.TELEBIRR_PUBLIC_KEY, payload.sign, 'base64');
-      } catch {
-        signatureValid = false;
-      }
+    if (typeof payload.sign === 'string' && payload.sign && this.env.TELEBIRR_PUBLIC_KEY) {
+      signatureValid = this.verifyTelebirr(payload, payload.sign);
     }
 
+    // Notify trade_status values: Completed, Failure, Pending, Paying, Expired
+    // (different from queryOrder's PAY_SUCCESS/PAY_FAILED)
+    const outRequestNo = payload.out_request_no ?? payload.trans_id ?? `orno-${Date.now()}`;
+
     if (payload.refund_request_no) {
-      return payload.trade_status === 'Success'
+      // Refund notify (rare — refunds usually sync via refund() response)
+      return payload.trade_status === 'Completed' || payload.trade_status === 'REFUND_SUCCESS'
         ? { type: 'refund.succeeded', refundRequestNo: payload.refund_request_no, raw: payload, signatureValid, timestampMs }
         : { type: 'refund.failed', refundRequestNo: payload.refund_request_no, raw: payload, signatureValid, timestampMs };
     }
-    return payload.trade_status === 'Success'
-      ? { type: 'payment.settled', merchOrderId: payload.merch_order_id, amount: Money.fromETBString(payload.total_amount), raw: payload, signatureValid, timestampMs }
-      : { type: 'payment.failed', merchOrderId: payload.merch_order_id, raw: payload, signatureValid, timestampMs };
+
+    return payload.trade_status === 'Completed' || payload.trade_status === 'Success' || payload.trade_status === 'PAY_SUCCESS'
+      ? { type: 'payment.settled', merchOrderId: payload.merch_order_id, amount: Money.fromETBString(payload.total_amount), raw: payload, signatureValid, timestampMs, outRequestNo, transId: payload.trans_id }
+      : { type: 'payment.failed', merchOrderId: payload.merch_order_id, raw: payload, signatureValid, timestampMs, outRequestNo };
   }
 }
+
 
 // ─── CBE manual bank transfer ───────────────────────────────────────────────
 class CbeProvider implements PaymentProvider {

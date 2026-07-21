@@ -28,18 +28,20 @@ export default async function AdminPaymentsPage() {
         <Card>
           <CardContent className="py-3 divide-y">
             {payments.map(p => (
-              <div key={p.id} className="py-2 text-sm flex items-center justify-between">
-                <div>
-                  <div className="font-mono text-xs">{p.reference}</div>
-                  <div className="text-xs text-muted-foreground">{p.user.name} · {p.user.phone} · {p.subscription?.plan?.name ?? '—'}</div>
+              <Link key={p.id} href={`/admin/payments/${p.id}`} className="block py-2 text-sm hover:bg-accent/30 -mx-3 px-3 rounded">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="font-mono text-xs">{p.reference}</div>
+                    <div className="text-xs text-muted-foreground">{p.user.name} · {p.user.phone} · {p.subscription?.plan?.name ?? '—'}</div>
+                  </div>
+                  <div className="flex items-center gap-2">
+                    <span>{(p.amountCents / 100).toFixed(0)} ETB</span>
+                    {p.refundAmountCents > 0 && <span className="text-xs text-muted-foreground">refunded {(p.refundAmountCents / 100).toFixed(0)}</span>}
+                    <Badge variant="outline">{p.status}</Badge>
+                    <Badge>{p.method}</Badge>
+                  </div>
                 </div>
-                <div className="flex items-center gap-2">
-                  <span>{(p.amountCents / 100).toFixed(0)} ETB</span>
-                  {p.refundAmountCents > 0 && <span className="text-xs text-muted-foreground">refunded {(p.refundAmountCents / 100).toFixed(0)}</span>}
-                  <Badge variant="outline">{p.status}</Badge>
-                  <Badge>{p.method}</Badge>
-                </div>
-              </div>
+              </Link>
             ))}
           </CardContent>
         </Card>

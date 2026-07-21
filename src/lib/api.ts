@@ -23,6 +23,7 @@ import { db } from '@/lib/db';
 import { verifySession } from '@/lib/auth';
 import { AppError, UnauthorizedError, ForbiddenError, RateLimitError, ConflictError, toErrorEnvelope } from '@/lib/errors';
 import { CURRENT_TOS_VERSION } from '@/lib/env';
+import { ensureSchedulerStarted } from '@/lib/scheduler';
 
 export const SESSION_COOKIE = 'addis-session';
 const CSRF_COOKIE = 'addis-csrf';
@@ -272,6 +273,8 @@ type Handler = (ctx: ApiContext & { body?: any; params: Record<string, string> }
 export function api(options: ApiOptions, handler: Handler) {
   return async (req: NextRequest, ctx: { params: Promise<Record<string, string>> }): Promise<NextResponse> => {
     const requestId = crypto.randomUUID();
+    // Start the background scheduler on first API request (no-op if already started).
+    ensureSchedulerStarted();
     const ip = clientIp(req);
     const ua = req.headers.get('user-agent') ?? undefined;
 

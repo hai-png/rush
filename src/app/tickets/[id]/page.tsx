@@ -24,6 +24,21 @@ export default async function TicketDetailPage({ params }: { params: Promise<{ i
   if (!ticket) notFound();
   if (ticket.userId !== session.id && session.role !== 'platform_admin') notFound();
 
+  // Mark support_reply notifications pointing at this ticket as read.
+  try {
+    await db.notification.updateMany({
+      where: {
+        userId: session.id,
+        type: 'support_reply',
+        link: `/tickets/${id}`,
+        readAt: null,
+      },
+      data: { readAt: new Date() },
+    });
+  } catch (e) {
+    console.error('[ticket-view] mark-read failed:', e);
+  }
+
   return (
     <div className="min-h-screen flex flex-col">
       <header className="border-b">

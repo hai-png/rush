@@ -1,9 +1,11 @@
 // Support — tickets + messages.
+import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { z } from 'zod';
-import { NotFoundError, ForbiddenError } from '@/lib/errors';
+import { NotFoundError, ForbiddenError, toErrorEnvelope } from '@/lib/errors';
 import { audit } from '@/lib/audit';
 import { enqueueNotification } from '@/lib/outbox';
+import { saveFile, FileUploadError } from '@/lib/file-storage';
 
 export async function GET_list({ session }: any) {
   const tickets = await db.supportTicket.findMany({
@@ -98,4 +100,78 @@ export async function POST_message({ session, params, body }: any) {
     });
   }
   return { status: 201, data: msg };
+}
+
+// POST /api/v1/tickets/:id/messages/with-attachment (multipart, raw)
+// Creates a ticket message with an optional file attachment. The file is
+// uploaded via multipart/form-data with fields: body (string), file (optional).
+// (Imports at top of file.)
+
+export async function handleTicketMessageWithAttachment(req: NextRequest, session: any, params: any): Promise<NextResponse> {
+  const requestId = crypto.randomUUID();
+  try {
+    if (!session) {
+      return NextResponse.json({ error: { code: 'UNAUTHORIZED', message: 'Sign in required', requestId } }, { status: 401 });
+    }
+    const ticket = await db.supportTicket.findUnique({ where: { id: params.id } });
+    if (!ticket) return NextResponse.json({ error: { code: 'NOT_FOUND', message: 'Ticket not found', requestId } }, { status: 404 });
+    if (ticket.userId !== session.id && session.role !== 'platform_admin') {
+      return NextResponse.json({ error: { code: 'FORBIDDEN', message: 'Not your ticket', requestId } }, { status: 403 });
+    }
+
+    const formData = await req.formData();
+    const bodyText = formData.get('body') as string;
+    const file = formData.get('file');
+
+    if (!bodyText || bodyText.length < 1) {
+      return NextResponse.json({ error: { code: 'BAD_REQUEST', message: 'Message body required', requestId } }, { status: 400 });
+    }
+
+    let fileId: string | undefined;
+    if (file && file instanceof File) {
+      const meta = await saveFile(file, `tickets/${ticket.id}`);
+      const uploaded = await db.uploadedFile.create({
+        data: {
+          uploaderId: session.id,
+          originalFilename: meta.originalFilename,
+          storageKey: meta.storageKey,
+          mimeType: meta.mimeType,
+          sizeBytes: meta.sizeBytes,
+          checksumSha256: meta.checksumSha256,
+          scanStatus: 'clean',
+        },
+      });
+      fileId = uploaded.id;
+    }
+
+    const msg = await db.$transaction(async (tx) => {
+      const m = await tx.ticketMessage.create({
+        data: { ticketId: params.id, authorId: session.id, body: bodyText, fileId },
+        include: { file: true },
+      });
+      if (session.role === 'platform_admin' && ticket.status !== 'closed') {
+        await tx.supportTicket.update({ where: { id: params.id }, data: { status: 'in_progress' } });
+      }
+      return m;
+    });
+
+    const notifyUserId = session.role === 'platform_admin' ? ticket.userId : undefined;
+    if (notifyUserId) {
+      await enqueueNotification({
+        userId: notifyUserId,
+        type: 'support_reply',
+        title: 'New reply on your ticket',
+        body: bodyText.slice(0, 100),
+        link: `/tickets/${ticket.id}`,
+      });
+    }
+
+    return NextResponse.json({ data: msg }, { status: 201 });
+  } catch (err) {
+    if (err instanceof FileUploadError) {
+      return NextResponse.json({ error: { code: 'BAD_REQUEST', message: err.message, requestId } }, { status: 400 });
+    }
+    const { status, body } = toErrorEnvelope(err, requestId);
+    return NextResponse.json(body, { status });
+  }
 }
