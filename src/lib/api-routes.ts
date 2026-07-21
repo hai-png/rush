@@ -215,6 +215,7 @@ const ROUTES: RouteEntry[] = [
   r('POST', '/admin/bulk/expire', { requireAuth: true, requireRole: ['platform_admin'] }, adminAdvanced.POST_bulk_expire),
   r('POST', '/admin/bulk/suspend', { requireAuth: true, requireRole: ['platform_admin'] }, adminAdvanced.POST_bulk_suspend),
   r('PATCH', '/admin/routes/:id/price', { requireAuth: true, requireRole: ['platform_admin'] }, adminAdvanced.PATCH_route_price),
+  r('POST', '/admin/faqs', { requireAuth: true, requireRole: ['platform_admin'] }, admin.POST_faq),
 
   // Contractor-scoped (the contractor themselves, not admin-gated)
   r('GET', '/contractor/shuttles', { requireAuth: true, requireRole: ['contractor'] }, admin.GET_my_shuttles),

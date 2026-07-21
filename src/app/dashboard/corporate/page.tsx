@@ -34,7 +34,8 @@ export default async function CorporateDashboardPage() {
         <div className="container mx-auto px-4 py-4 flex items-center justify-between">
           <Link href="/" className="text-xl font-bold">Addis Ride · Corporate</Link>
           <div className="flex gap-2 items-center text-sm">
-            <Button asChild variant="ghost"><Link href="/corporate/members">All members</Link></Button>
+            <Button asChild variant="ghost"><Link href="/corporate/members">Members</Link></Button>
+            <Button asChild variant="ghost"><Link href="/corporate/settings">Settings</Link></Button>
             <SignOutButton />
           </div>
         </div>
