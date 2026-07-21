@@ -29,6 +29,7 @@ export default async function ContractorDashboardPage() {
         <div className="container mx-auto px-4 py-4 flex items-center justify-between">
           <Link href="/" className="text-xl font-bold">Addis Ride</Link>
           <div className="flex gap-2 items-center">
+            <Button asChild variant="ghost"><Link href="/contractor/assignments">My Assignments</Link></Button>
             <Button asChild variant="ghost"><Link href="/dashboard/contractor/trips">My trips</Link></Button>
             <Button asChild variant="ghost"><Link href="/dashboard/contractor/documents">Documents</Link></Button>
             <Button asChild variant="ghost"><Link href="/account">Account</Link></Button>

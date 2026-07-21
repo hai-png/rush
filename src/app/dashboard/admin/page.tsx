@@ -35,6 +35,7 @@ export default async function AdminDashboardPage() {
             <Button asChild variant="ghost"><Link href="/admin/contractors">Contractors</Link></Button>
             <Button asChild variant="ghost"><Link href="/admin/shuttles">Shuttles</Link></Button>
             <Button asChild variant="ghost"><Link href="/admin/routes">Routes</Link></Button>
+            <Button asChild variant="ghost"><Link href="/admin/assignments">Assignments</Link></Button>
             <Button asChild variant="ghost"><Link href="/admin/tickets">Tickets</Link></Button>
             <Button asChild variant="ghost"><Link href="/admin/audit-logs">Audit</Link></Button>
             <SignOutButton />

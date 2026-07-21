@@ -20,6 +20,7 @@ const RideInput = z.object({
   tripId: z.string().min(1),
   subscriptionId: z.string().optional(),
   seatClaimId: z.string().optional(),
+  pickupLocationId: z.string().optional(),
 }).refine(v => v.subscriptionId || v.seatClaimId, 'Either subscriptionId or seatClaimId is required');
 
 export async function POST_ride({ session, body, ipAddress, userAgent }: any) {
@@ -52,6 +53,8 @@ export async function POST_ride({ session, body, ipAddress, userAgent }: any) {
         userId: session.id,
         subscriptionId: input.subscriptionId,
         seatClaimId: input.seatClaimId,
+        pickupLocationId: input.pickupLocationId,
+        assignmentId: trip.assignmentId,
         status: 'booked',
       },
     });

@@ -68,15 +68,15 @@ async function main() {
   });
   console.log(`  contractor: ${contractor.phone} / contractor-pass-1234`);
 
-  // Plans
+  // Plans — trial is paid (no free plan)
   const trialPlan = await prisma.subscriptionPlan.upsert({
     where: { slug: 'trial' },
     update: {},
     create: {
       slug: 'trial',
-      name: 'Trial',
-      description: '14-day trial, 10 rides',
-      priceCents: 0,
+      name: '2-Week Trial',
+      description: '14-day trial, 10 rides — paid introduction',
+      priceCents: 50000, // 500 ETB (paid, not free)
       ridesIncluded: 10,
       durationDays: 14,
       isTrial: true,
@@ -126,6 +126,22 @@ async function main() {
   });
   console.log(`  route: ${route.origin} → ${route.destination}`);
 
+  // Pickup locations for the route
+  const pickups = [
+    { name: 'Bole Friendship', lat: 9.0085, lng: 38.7575, estimatedPickupTime: '07:00', sortOrder: 0 },
+    { name: 'Bole Rwanda', lat: 9.0132, lng: 38.7645, estimatedPickupTime: '07:10', sortOrder: 1 },
+    { name: 'CMC', lat: 9.0220, lng: 38.7820, estimatedPickupTime: '07:20', sortOrder: 2 },
+    { name: 'Megenagna', lat: 9.0320, lng: 38.8020, estimatedPickupTime: '07:30', sortOrder: 3 },
+  ];
+  for (const p of pickups) {
+    await prisma.pickupLocation.upsert({
+      where: { id: `pickup-${p.name.toLowerCase().replace(/\s+/g, '-')}` },
+      update: {},
+      create: { id: `pickup-${p.name.toLowerCase().replace(/\s+/g, '-')}`, routeId: route.id, ...p },
+    });
+  }
+  console.log(`  pickups: ${pickups.length} locations`);
+
   // Shuttle
   const shuttle = await prisma.shuttle.upsert({
     where: { plate: 'AA-12345' },
@@ -141,7 +157,29 @@ async function main() {
   });
   console.log(`  shuttle: ${shuttle.plate}`);
 
-  // Trip — tomorrow 8am
+  // Route assignment — contractor commits to this route for the current month
+  const now = new Date();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
+  const assignment = await prisma.routeAssignment.upsert({
+    where: { routeId_contractorId_monthStart: { routeId: route.id, contractorId: contractor.id, monthStart } },
+    update: {},
+    create: {
+      routeId: route.id,
+      contractorId: contractor.id,
+      shuttleId: shuttle.id,
+      monthStart,
+      monthEnd,
+      schedulePattern: JSON.stringify({ days: ['mon', 'tue', 'wed', 'thu', 'fri'], windows: ['morning', 'evening'] }),
+      status: 'active',
+      maxSeats: shuttle.capacity,
+      assignedById: admin.id,
+      acceptedAt: now,
+    },
+  });
+  console.log(`  assignment: ${assignment.id} (${assignment.status})`);
+
+  // Trip — tomorrow 8am (linked to the assignment)
   const trip = await prisma.trip.upsert({
     where: { id: 'trip-demo-001' },
     update: {},
@@ -153,6 +191,7 @@ async function main() {
       departureAt: new Date(Date.now() + 24 * 3600_000),
       window: 'morning',
       status: 'scheduled',
+      assignmentId: assignment.id,
     },
   });
   console.log(`  trip: ${trip.id}`);

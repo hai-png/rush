@@ -128,6 +128,7 @@ export default async function RiderDashboardPage() {
           <section>
             <h2 className="text-lg font-semibold mb-3">Quick actions</h2>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+              <Button asChild variant="outline"><Link href="/assignments"><Calendar className="h-4 w-4 mr-1" /> Browse routes</Link></Button>
               <Button asChild variant="outline"><Link href="/trips"><Calendar className="h-4 w-4 mr-1" /> Browse trips</Link></Button>
               <Button asChild variant="outline"><Link href="/tickets/new"><Ticket className="h-4 w-4 mr-1" /> New ticket</Link></Button>
               <Button asChild variant="outline"><Link href="/notifications"><Bell className="h-4 w-4 mr-1" /> Notifications</Link></Button>
