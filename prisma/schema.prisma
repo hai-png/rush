@@ -48,6 +48,8 @@ model User {
   tosAcceptances     TosAcceptance[]
   drivesTrips        Trip[]               @relation("TripDriver")
   drivesShuttles     Shuttle[]
+  assignmentsAsContractor RouteAssignment[] @relation("AssignmentContractor")
+  assignmentsAsAssigner   RouteAssignment[] @relation("AssignmentAssigner")
   idempotencyRecords IdempotencyRecord[]
   otpCodes           OtpCode[]
   uploadedFiles      UploadedFile[]       @relation("FileUploader")
@@ -198,8 +200,30 @@ model Route {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  trips        Trip[]
+  pickups          PickupLocation[]
+  assignments     RouteAssignment[]
+  trips           Trip[]  // legacy — keep for backward compat
 
+}
+
+// Predefined pickup locations along a route. Riders choose one when booking.
+// e.g. Route "Bole → Merkato" might have pickups at: Bole Friendship, Bole
+// Rwanda, CMC, Megenagna. Each has a name + lat/lng + estimated pickup time.
+model PickupLocation {
+  id          String   @id @default(cuid())
+  routeId     String
+  route       Route     @relation(fields: [routeId], references: [id], onDelete: Cascade)
+  name        String   // e.g. "Bole Friendship"
+  lat         Float?
+  lng         Float?
+  estimatedPickupTime String  // e.g. "07:15" — HH:MM relative to departure
+  sortOrder   Int      @default(0)  // order along the route
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+
+  rides       Ride[]
+
+  @@index([routeId])
 }
 
 model Shuttle {
@@ -216,6 +240,7 @@ model Shuttle {
   updatedAt     DateTime @updatedAt
 
   trips         Trip[]
+  assignments   RouteAssignment[]
 
 }
 
@@ -231,6 +256,9 @@ model Trip {
   seatsBooked   Int      @default(0)
   status        String   @default("scheduled") // scheduled | in_transit | completed | cancelled
   window        String   // morning | evening
+  // Link to the monthly assignment this trip was generated from.
+  assignmentId  String?
+  assignment    RouteAssignment? @relation(fields: [assignmentId], references: [id], onDelete: SetNull)
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
@@ -239,6 +267,57 @@ model Trip {
 
   @@index([routeId, departureAt])
   @@index([shuttleId, departureAt])
+  @@index([assignmentId])
+}
+
+// ─── Route Assignments (monthly commitments) ────────────────────────────────
+// A contractor commits to serving a route for a month with a specific shuttle
+// and a recurring schedule (e.g. Mon-Fri mornings + evenings). Admin assigns
+// routes to contractors; riders subscribe to assignments.
+//
+// This replaces the old "Trip per day" model. Individual daily trips are
+// generated from the assignment's schedule pattern (Mon-Fri → 20-22 trips/month).
+
+model RouteAssignment {
+  id            String   @id @default(cuid())
+  routeId       String
+  route         Route    @relation(fields: [routeId], references: [id], onDelete: Restrict)
+  contractorId  String   // the driver/contractor assigned to this route
+  contractor    User     @relation("AssignmentContractor", fields: [contractorId], references: [id], onDelete: Cascade)
+  shuttleId     String
+  shuttle       Shuttle  @relation(fields: [shuttleId], references: [id], onDelete: Restrict)
+
+  // Monthly period — the contractor commits to this route for this month.
+  // Format: monthStart is the first day of the month at 00:00.
+  monthStart    DateTime
+  monthEnd      DateTime
+
+  // Schedule pattern: which days of week + which windows.
+  // Stored as JSON: { "days": ["mon","tue","wed","thu","fri"], "windows": ["morning","evening"] }
+  // The scheduler generates individual Trip rows from this pattern.
+  schedulePattern String  // JSON
+
+  // Status: admin assigns → contractor accepts → active → completed
+  status        String   @default("assigned") // assigned | accepted | active | completed | cancelled
+
+  // Capacity tracking
+  maxSeats      Int      @default(0)  // copied from shuttle.capacity for quick reference
+  seatsBooked   Int      @default(0)
+
+  assignedById  String?  // admin who assigned
+  assignedBy    User?    @relation("AssignmentAssigner", fields: [assignedById], references: [id], onDelete: SetNull)
+  acceptedAt    DateTime?
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  trips         Trip[]   // generated daily trips
+  rides         Ride[]   // rides booked against this assignment
+
+  @@unique([routeId, contractorId, monthStart])  // one assignment per route+contractor+month
+  @@index([contractorId, monthStart])
+  @@index([routeId, monthStart])
+  @@index([status, monthStart])
 }
 
 // ─── Subscriptions + payments ────────────────────────────────────────────────
@@ -379,6 +458,12 @@ model Ride {
   subscription    Subscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
   seatClaimId     String?
   seatClaim       SeatClaim? @relation(fields: [seatClaimId], references: [id], onDelete: SetNull)
+  // The pickup location the rider chose for this ride.
+  pickupLocationId String?
+  pickupLocation   PickupLocation? @relation(fields: [pickupLocationId], references: [id], onDelete: SetNull)
+  // Link to the monthly assignment (for reporting — which assignment generated this ride).
+  assignmentId   String?
+  assignment     RouteAssignment? @relation(fields: [assignmentId], references: [id], onDelete: SetNull)
   status          String   @default("booked") // booked | boarded | completed | no_show | cancelled
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
@@ -387,6 +472,8 @@ model Ride {
   @@index([tripId])
   @@index([subscriptionId])
   @@index([seatClaimId])
+  @@index([pickupLocationId])
+  @@index([assignmentId])
 }
 
 // ─── Support ─────────────────────────────────────────────────────────────────

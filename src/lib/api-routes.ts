@@ -62,6 +62,7 @@ import * as documents from '@/lib/api-documents';
 import * as files from '@/lib/api-files';
 import * as telebirr from '@/lib/api-telebirr';
 import * as health from '@/lib/api-health';
+import * as assignments from '@/lib/api-assignments';
 
 // ─── Route table ────────────────────────────────────────────────────────────
 // Note: the catch-all mounts at /api/v1, so paths here are relative to that.
@@ -89,9 +90,20 @@ const ROUTES: RouteEntry[] = [
   r('GET', '/plans', {}, catalog.GET_plans),
   r('GET', '/routes', {}, catalog.GET_routes),
   r('GET', '/routes/:id', {}, catalog.GET_route),
+  r('GET', '/routes/:id/pickups', {}, assignments.GET_pickups),
+  r('POST', '/routes/:id/pickups', { requireAuth: true, requireRole: ['platform_admin'] }, assignments.POST_pickup),
+  r('DELETE', '/pickups/:id', { requireAuth: true, requireRole: ['platform_admin'] }, assignments.DELETE_pickup),
   r('GET', '/shuttles', {}, catalog.GET_shuttles),
   r('GET', '/trips', {}, catalog.GET_trips),
   r('GET', '/faqs', {}, catalog.GET_faqs),
+
+  // Route assignments (monthly commitments)
+  r('GET', '/assignments', { requireAuth: true }, assignments.GET_assignments),
+  r('GET', '/assignments/:id', { requireAuth: true }, assignments.GET_assignment),
+  r('POST', '/admin/assignments', { requireAuth: true, requireRole: ['platform_admin'] }, assignments.POST_assignment),
+  r('POST', '/assignments/:id/accept', { requireAuth: true, requireRole: ['contractor', 'platform_admin'] }, assignments.POST_accept_assignment),
+  r('POST', '/assignments/:id/reject', { requireAuth: true, requireRole: ['contractor', 'platform_admin'] }, assignments.POST_reject_assignment),
+  r('GET', '/contractor/assignments', { requireAuth: true, requireRole: ['contractor', 'platform_admin'] }, assignments.GET_my_assignments),
 
   // Subscriptions
   r('GET', '/subscriptions', { requireAuth: true }, subscriptions.GET_list),
