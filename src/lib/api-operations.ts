@@ -37,13 +37,13 @@ export async function POST_ride({ session, body, ipAddress, userAgent }: any) {
     if (sub.status !== 'active') throw new BadRequestError('Subscription not active');
   }
 
-  const updated = await db.trip.updateMany({
-    where: { id: trip.id, seatsBooked: { lt: trip.shuttle.capacity } },
-    data: { seatsBooked: { increment: 1 } },
-  });
-  if (updated.count === 0) throw new ConflictError('Trip is full');
-
   const ride = await db.$transaction(async (tx) => {
+    const updated = await tx.trip.updateMany({
+      where: { id: trip.id, seatsBooked: { lt: trip.shuttle.capacity } },
+      data: { seatsBooked: { increment: 1 } },
+    });
+    if (updated.count === 0) throw new ConflictError('Trip is full');
+
     if (input.subscriptionId) {
       await consumeRide(tx, input.subscriptionId);
     }

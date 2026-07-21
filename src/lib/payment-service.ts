@@ -10,6 +10,7 @@ import { enqueueNotification } from '@/lib/outbox';
 import { audit } from '@/lib/audit';
 import { createId } from '@/lib/id';
 import { Prisma } from '@prisma/client';
+import { logger } from '@/lib/logger';
 
 export async function settlePayment(reference: string, reportedAmount: Money | undefined, outRequestNo: string, tradeStatus: string, rawPayload: unknown): Promise<boolean> {
   // Side effects (notifications, audit) collected during the tx and run AFTER
@@ -113,21 +114,15 @@ export async function settlePayment(reference: string, reportedAmount: Money | u
 }
 
 export async function failPayment(reference: string, reasonRaw: unknown, outRequestNo: string, tradeStatus: string, rawPayload: unknown): Promise<boolean> {
-  return await db.$transaction(async (tx) => {
-    // Dedup
+  const sideEffects: Array<() => Promise<void>> = [];
+
+  const result = await db.$transaction(async (tx) => {
     try {
       await tx.telebirrNotifyEvent.create({
-        data: {
-          merchOrderId: reference,
-          outRequestNo,
-          tradeStatus,
-          rawPayload: JSON.stringify(rawPayload),
-        },
+        data: { merchOrderId: reference, outRequestNo, tradeStatus, rawPayload: JSON.stringify(rawPayload) },
       });
     } catch (e) {
-      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') {
-        return false;
-      }
+      if (e instanceof Prisma.PrismaClientKnownRequestError && e.code === 'P2002') return false;
       throw e;
     }
 
@@ -140,9 +135,6 @@ export async function failPayment(reference: string, reasonRaw: unknown, outRequ
     const p = await tx.payment.findUnique({ where: { reference } });
     if (!p) return false;
 
-    if (p.subscriptionId) {
-      await transitionSubscription(tx, p.subscriptionId, 'payment.failed');
-    }
     if (p.seatClaimId) {
       await tx.seatClaim.update({ where: { id: p.seatClaimId }, data: { status: 'refunded' } });
       const claim = await tx.seatClaim.findUnique({ where: { id: p.seatClaimId } });
@@ -151,14 +143,18 @@ export async function failPayment(reference: string, reasonRaw: unknown, outRequ
       }
     }
 
-    await enqueueNotification({
-      userId: p.userId,
-      type: 'payment_failed',
-      title: 'Payment failed',
-      body: `Your payment of ${Money.fromCents(p.amountCents).toString()} failed.`,
+    const userId = p.userId;
+    const amountCents = p.amountCents;
+    sideEffects.push(async () => {
+      await enqueueNotification({ userId, type: 'payment_failed', title: 'Payment failed', body: `Your payment of ${Money.fromCents(amountCents).toString()} failed.` });
     });
     return true;
   });
+
+  for (const fx of sideEffects) {
+    try { await fx(); } catch (e) { logger.error({ err: (e as Error).message }, '[failPayment] side effect failed'); }
+  }
+  return result;
 }
 
 // Row-locked refund scheduling — PAY-003 fix baked in.

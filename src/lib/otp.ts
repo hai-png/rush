@@ -3,6 +3,7 @@
 // also returned to the caller so the test UI can display it. In production
 // the code is only sent via SMS (mocked here as a console log).
 import { db } from '@/lib/db';
+import { randomInt } from 'node:crypto';
 import { hashPassword, verifyPassword } from '@/lib/auth';
 import { BadRequestError, RateLimitError } from '@/lib/errors';
 import { EthiopianPhone } from '@/lib/phone';
@@ -31,7 +32,7 @@ export async function sendOtp(rawPhone: string, purpose: OtpPurpose): Promise<{ 
     throw new RateLimitError(60, 'Too many OTP requests. Wait 10 minutes.');
   }
 
-  const code = Math.floor(100000 + Math.random() * 900000).toString();
+  const code = (100000 + randomInt(900000)).toString();
   const codeHash = await hashPassword(code);
   await db.otpCode.create({
     data: {
@@ -44,7 +45,9 @@ export async function sendOtp(rawPhone: string, purpose: OtpPurpose): Promise<{ 
 
   // In dev, return the code so the UI can auto-fill. In prod, send via SMS.
   // SMS is mocked either way (console.log).
-  console.log(`[OTP] ${phone} (${purpose}): ${code}`);
+  if (process.env.NODE_ENV !== 'production') {
+    console.log(`[OTP] ${phone} (${purpose}): ${code}`);
+  }
   return { devCode: process.env.NODE_ENV === 'production' ? undefined : code };
 }
 
