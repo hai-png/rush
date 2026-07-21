@@ -8,15 +8,25 @@ import { NextRequest } from 'next/server';
 import { api, ApiOptions } from '@/lib/api';
 
 type Handler = (ctx: any) => Promise<any> | any;
-type RouteEntry = { method: string; pattern: RegExp; paramNames: string[]; options: ApiOptions; handler: Handler };
+type RouteEntry = {
+  method: string;
+  pattern: RegExp;
+  paramNames: string[];
+  options: ApiOptions;
+  handler: Handler;
+  // If true, the dispatcher bypasses JSON body parsing + the api() wrapper
+  // and calls the handler directly with (req, session, params). Used for
+  // multipart upload routes that need raw Request access.
+  raw?: boolean;
+};
 
-function r(method: string, path: string, options: ApiOptions, handler: Handler): RouteEntry {
+function r(method: string, path: string, options: ApiOptions, handler: Handler, raw = false): RouteEntry {
   const paramNames: string[] = [];
   const patternStr = path.replace(/:([a-zA-Z_]+)/g, (_, name) => {
     paramNames.push(name);
     return '([^/]+)';
   });
-  return { method, pattern: new RegExp(`^${patternStr}$`), paramNames, options, handler };
+  return { method, pattern: new RegExp(`^${patternStr}$`), paramNames, options, handler, raw };
 }
 
 export function findRoute(method: string, path: string): { entry: RouteEntry; params: Record<string, string> } | null {
@@ -46,6 +56,9 @@ import * as tos from '@/lib/api-tos';
 import * as account from '@/lib/api-account';
 import * as dashboard from '@/lib/api-dashboard';
 import * as engagement from '@/lib/api-engagement';
+import * as corporate from '@/lib/api-corporate';
+import * as documents from '@/lib/api-documents';
+import * as files from '@/lib/api-files';
 
 // ─── Route table ────────────────────────────────────────────────────────────
 // Note: the catch-all mounts at /api/v1, so paths here are relative to that.
@@ -138,10 +151,34 @@ const ROUTES: RouteEntry[] = [
   r('GET', '/admin/tickets', { requireAuth: true, requireRole: ['platform_admin'] }, admin.GET_tickets),
   r('POST', '/admin/tickets/:id/messages', { requireAuth: true, requireRole: ['platform_admin'] }, admin.POST_ticket_message),
   r('POST', '/admin/audit/verify', { requireAuth: true, requireRole: ['platform_admin'] }, admin.POST_audit_verify),
+  r('POST', '/admin/trips', { requireAuth: true, requireRole: ['platform_admin', 'contractor'] }, admin.POST_trips),
+
+  // Contractor-scoped (the contractor themselves, not admin-gated)
+  r('GET', '/contractor/shuttles', { requireAuth: true, requireRole: ['contractor'] }, admin.GET_my_shuttles),
+  r('GET', '/contractor/trips', { requireAuth: true, requireRole: ['contractor'] }, admin.GET_my_trips),
 
   // Webhooks (no auth — but verified via provider signatures / cron secret)
   r('POST', '/webhooks/telebirr/notify', { exemptFromTosGate: true }, webhooks.POST_telebirr_notify),
 
   // Cron (secret-gated)
   r('POST', '/cron/run', { exemptFromTosGate: true }, cron.POST_run),
+
+  // Corporate
+  r('POST', '/corporate/onboard', { requireAuth: true }, corporate.POST_onboard),
+  r('GET',  '/corporate', { requireAuth: true, requireRole: ['corporate_admin', 'platform_admin'] }, corporate.GET_current),
+  r('GET',  '/corporate/invites', { requireAuth: true, requireRole: ['corporate_admin', 'platform_admin'] }, corporate.GET_invites),
+  r('POST', '/corporate/invites', { requireAuth: true, requireRole: ['corporate_admin', 'platform_admin'] }, corporate.POST_invite),
+  r('POST', '/corporate/signup', { requireAuth: true, requireRole: ['rider'] }, corporate.POST_signup),
+  r('POST', '/corporate/validate-invite', { exemptFromTosGate: true }, corporate.POST_validate_invite),
+  r('GET',  '/corporate/members', { requireAuth: true, requireRole: ['corporate_admin', 'platform_admin'] }, corporate.GET_members),
+  r('POST', '/corporate/members/:id/approve', { requireAuth: true, requireRole: ['corporate_admin', 'platform_admin'] }, corporate.POST_approve),
+  r('POST', '/corporate/members/:id/reject', { requireAuth: true, requireRole: ['corporate_admin', 'platform_admin'] }, corporate.POST_reject),
+
+  // Contractor documents (multipart — raw handler)
+  r('GET',  '/contractor/documents', { requireAuth: true, requireRole: ['contractor', 'platform_admin'] }, documents.GET_documents),
+  r('GET',  '/contractor/documents/:contractorId', { requireAuth: true, requireRole: ['platform_admin'] }, documents.GET_documents_for),
+  r('POST', '/contractor/documents', { requireAuth: true, requireRole: ['contractor', 'platform_admin'] }, documents.handleDocumentUpload, true),
+
+  // Files (download is raw so it can stream bytes; upload via contractor/documents)
+  r('GET',  '/files/:id', { requireAuth: true }, files.handleFileDownload, true),
 ];

@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { SignOutButton } from '@/components/sign-out-button';
 import { ClaimButton } from './claim-button';
+import { Plus } from 'lucide-react';
 
 export default async function OpenSeatsPage() {
   const session = await requireSession();
@@ -32,7 +33,12 @@ export default async function OpenSeatsPage() {
         </div>
       </header>
       <main className="flex-1 container mx-auto px-4 py-8 max-w-4xl">
-        <h1 className="text-2xl font-bold mb-2">Seat marketplace</h1>
+        <div className="flex items-center justify-between mb-2">
+          <h1 className="text-2xl font-bold">Seat marketplace</h1>
+          {session.role === 'rider' && (
+            <Button asChild size="sm"><Link href="/open-seats/new"><Plus className="h-4 w-4 mr-1" /> List a seat</Link></Button>
+          )}
+        </div>
         <p className="text-muted-foreground mb-6 text-sm">Open seats from riders who couldn't make their trip. Claim one for the route fare.</p>
         {releases.length === 0 ? (
           <Card><CardContent className="py-6 text-center text-muted-foreground">No open seats right now.</CardContent></Card>

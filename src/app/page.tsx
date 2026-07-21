@@ -160,8 +160,8 @@ export default function Home() {
       {/* Footer */}
       <footer className="border-t bg-muted/30">
         <div className="container mx-auto px-4 py-6 max-w-5xl text-sm text-muted-foreground flex flex-wrap justify-between gap-2">
-          <span>© {new Date().getFullYear()} Addis Ride — clean reimplementation</span>
-          <span>Built from <code>rush</code> @ critical-review-zharden, rewritten from scratch</span>
+          <span>© {new Date().getFullYear()} Addis Ride</span>
+          <span>Shuttle subscription platform · Addis Ababa</span>
         </div>
       </footer>
     </div>

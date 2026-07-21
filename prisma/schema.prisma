@@ -50,6 +50,8 @@ model User {
   drivesShuttles     Shuttle[]
   idempotencyRecords IdempotencyRecord[]
   otpCodes           OtpCode[]
+  uploadedFiles      UploadedFile[]       @relation("FileUploader")
+  corporateInvites   CorporateInvite[]    @relation("InviteCreator")
 
   @@index([isActive, deletedAt])
 }
@@ -78,6 +80,8 @@ model ContractorProfile {
   verifiedAt          DateTime?
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
+
+  documents           ContractorDocument[]
 }
 
 model Corporate {
@@ -97,7 +101,7 @@ model Corporate {
 
   members      CorporateMember[]
   subscriptions Subscription[]
-
+  invites      CorporateInvite[]
 }
 
 model CorporateMember {
@@ -499,4 +503,73 @@ model IdempotencyRecord {
 
   @@index([userId])
   @@index([expiresAt])
+}
+
+// ─── File uploads ────────────────────────────────────────────────────────────
+// Generic uploaded file record. The actual bytes live on disk (UPLOAD_DIR) or
+// S3 in production; this table is the metadata index. Used by contractor
+// documents (registration/insurance/inspection) and any future upload needs.
+
+model UploadedFile {
+  id              String   @id @default(cuid())
+  uploaderId      String
+  uploader        User     @relation("FileUploader", fields: [uploaderId], references: [id], onDelete: Cascade)
+  originalFilename String
+  storageKey      String   @unique // path under UPLOAD_DIR (e.g. contractor-docs/<id>.pdf)
+  mimeType        String
+  sizeBytes       Int
+  checksumSha256  String
+  // Document scan status — for contractor docs, a real AV scan would set this.
+  // 'pending' on upload, 'clean' after scan, 'infected' if a threat is found.
+  scanStatus      String   @default("pending") // pending | clean | infected | error
+  createdAt       DateTime @default(now())
+
+  contractorDocuments ContractorDocument[]
+
+  @@index([uploaderId])
+  @@index([scanStatus])
+}
+
+// Contractor onboarding documents: registration (business license), insurance,
+// inspection (vehicle safety). Required before verification_status can move
+// from 'unverified' to 'verified'.
+model ContractorDocument {
+  id              String   @id @default(cuid())
+  contractorId    String   // references ContractorProfile.id
+  contractor      ContractorProfile @relation(fields: [contractorId], references: [id], onDelete: Cascade)
+  type            String   // registration | insurance | inspection
+  fileId          String
+  file            UploadedFile @relation(fields: [fileId], references: [id], onDelete: Restrict)
+  uploadedAt      DateTime @default(now())
+
+  @@unique([contractorId, type]) // one of each type per contractor
+  @@index([contractorId])
+}
+
+// Extend User with UploadedFile relation
+// (added at the User model below — would normally be inside User, but
+//  Prisma doesn't allow editing inline; we declare the relation here and
+//  Prisma links it via the @relation attribute on UploadedFile.uploader).
+
+// Extend ContractorProfile with documents relation
+// (similar — linked via @relation on ContractorDocument.contractor)
+
+// ─── Corporate invites ──────────────────────────────────────────────────────
+// A corporate admin generates an invite code; members use it during signup
+// to associate themselves with the corporate. The admin then approves/rejects.
+model CorporateInvite {
+  id          String    @id @default(cuid())
+  corporateId String
+  corporate   Corporate @relation(fields: [corporateId], references: [id], onDelete: Cascade)
+  code        String    @unique
+  createdById String
+  createdByUser User    @relation("InviteCreator", fields: [createdById], references: [id], onDelete: Cascade)
+  note        String?   // free-form, e.g. "For Engineering team"
+  maxUses     Int       @default(50)
+  usesCount   Int       @default(0)
+  expiresAt   DateTime?
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+
+  @@index([corporateId])
 }

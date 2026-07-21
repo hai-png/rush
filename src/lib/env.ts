@@ -21,6 +21,8 @@ type Env = {
   CBE_ACCOUNT_NAME: string;
   CBE_BANK_BRANCH: string;
   APP_BASE_URL: string;
+  UPLOAD_DIR: string;
+  UPLOAD_MAX_BYTES: number;
 };
 
 let cachedEnv: Env | null = null;
@@ -64,14 +66,16 @@ export function loadEnv(): Env {
     TELEBIRR_APP_SECRET: process.env.TELEBIRR_APP_SECRET || '',
     TELEBIRR_MERCHANT_APP_ID: process.env.TELEBIRR_MERCHANT_APP_ID || '',
     TELEBIRR_MERCHANT_CODE: process.env.TELEBIRR_MERCHANT_CODE || '',
-    TELEBIRR_PRIVATE_KEY: process.env.TELEBIRR_PRIVATE_KEY || '',
-    TELEBIRR_PUBLIC_KEY: process.env.TELEBIRR_PUBLIC_KEY || '',
+    TELEBIRR_PRIVATE_KEY: (process.env.TELEBIRR_PRIVATE_KEY || '').replace(/\\n/g, '\n'),
+    TELEBIRR_PUBLIC_KEY: (process.env.TELEBIRR_PUBLIC_KEY || '').replace(/\\n/g, '\n'),
     TELEBIRR_NOTIFY_URL: process.env.TELEBIRR_NOTIFY_URL || '',
     TELEBIRR_REDIRECT_URL: process.env.TELEBIRR_REDIRECT_URL || '',
     CBE_ACCOUNT_NUMBER: process.env.CBE_ACCOUNT_NUMBER || '',
     CBE_ACCOUNT_NAME: process.env.CBE_ACCOUNT_NAME || '',
     CBE_BANK_BRANCH: process.env.CBE_BANK_BRANCH || '',
     APP_BASE_URL: process.env.APP_BASE_URL || 'http://localhost:3000',
+    UPLOAD_DIR: process.env.UPLOAD_DIR || './db/uploads',
+    UPLOAD_MAX_BYTES: Number(process.env.UPLOAD_MAX_BYTES) || 10 * 1024 * 1024,
   };
   return cachedEnv;
 }

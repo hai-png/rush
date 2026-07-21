@@ -157,5 +157,65 @@ export async function POST_audit_verify() {
   return { data: result };
 }
 
+// ─── Trips ───────────────────────────────────────────────────────────────────
+// Admin can create a trip on any route+shuttle; contractor can create trips
+// only on their own shuttles.
+
+const TripInput = z.object({
+  routeId: z.string().min(1),
+  shuttleId: z.string().min(1),
+  departureAt: z.string().datetime(),
+  window: z.enum(['morning', 'evening']),
+});
+
+export async function POST_trips({ body, session, ipAddress, userAgent }: any) {
+  const input = TripInput.parse(body);
+
+  // Look up the shuttle to verify ownership (contractor) or just existence (admin).
+  const shuttle = await db.shuttle.findUnique({ where: { id: input.shuttleId } });
+  if (!shuttle) throw new NotFoundError('Shuttle not found');
+  if (session.role === 'contractor' && shuttle.contractorId !== session.id) {
+    throw new BadRequestError('You can only create trips on your own shuttles');
+  }
+
+  // Verify the route exists + is active.
+  const route = await db.route.findUnique({ where: { id: input.routeId } });
+  if (!route || !route.isActive) throw new NotFoundError('Route not found');
+
+  // Set driverId to the shuttle's contractor.
+  const trip = await db.trip.create({
+    data: {
+      routeId: input.routeId,
+      shuttleId: input.shuttleId,
+      driverId: shuttle.contractorId,
+      departureAt: new Date(input.departureAt),
+      window: input.window,
+      status: 'scheduled',
+    },
+    include: { route: true, shuttle: true },
+  });
+  await audit({ actorId: session.id, action: 'trip.created', entityType: 'trip', entityId: trip.id, after: input, ipAddress, userAgent });
+  return { status: 201, data: trip };
+}
+
+// Contractor: list their own shuttles (for the trip-creation form).
+export async function GET_my_shuttles({ session }: any) {
+  if (session.role !== 'contractor') throw new ForbiddenError('Contractor only');
+  const shuttles = await db.shuttle.findMany({ where: { contractorId: session.id }, orderBy: { plate: 'asc' } });
+  return { data: shuttles };
+}
+
+// Contractor: list their trips (past + upcoming).
+export async function GET_my_trips({ session }: any) {
+  if (session.role !== 'contractor') throw new ForbiddenError('Contractor only');
+  const trips = await db.trip.findMany({
+    where: { driverId: session.id },
+    include: { route: true, shuttle: true },
+    orderBy: { departureAt: 'desc' },
+    take: 50,
+  });
+  return { data: trips };
+}
+
 // Keep Money import for future use (admin endpoints may need it).
 void Money;

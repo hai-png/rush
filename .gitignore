@@ -52,3 +52,20 @@ prompt
 server.log
 # Skills directory
 /skills/
+
+# Sandbox dev script artifacts
+.zscripts/dev.pid
+.zscripts/dev.log
+
+# Local SQLite DB + uploads (never commit user data)
+db/*.db
+db/uploads/
+
+# Examples directory (sandbox boilerplate, not part of the app)
+/examples/
+
+# Mini-services (sandbox boilerplate)
+/mini-services/
+
+# Caddyfile (sandbox gateway config, not part of the app)
+Caddyfile
