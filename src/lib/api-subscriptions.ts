@@ -202,3 +202,16 @@ export async function POST_renew({ session, params, body }: any) {
     },
   };
 }
+
+export async function DELETE_subscription({ session, params, ipAddress, userAgent }: any) {
+  const sub = await db.subscription.findUnique({ where: { id: params.id } });
+  if (!sub) throw new NotFoundError('Subscription not found');
+  if (sub.userId !== session.id && session.role !== 'platform_admin') {
+    throw new NotFoundError('Subscription not found');
+  }
+  if (sub.status === 'cancelled') throw new ConflictError('Already cancelled');
+  if (sub.status === 'expired') throw new ConflictError('Already expired');
+  await db.subscription.update({ where: { id: sub.id }, data: { status: 'cancelled', cancelledAt: new Date() } });
+  await audit({ actorId: session.id, action: 'subscription.cancelled', entityType: 'subscription', entityId: sub.id, ipAddress, userAgent });
+  return { data: { id: sub.id, status: 'cancelled' } };
+}

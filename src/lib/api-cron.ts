@@ -40,3 +40,14 @@ export async function POST_run(ctx: any) {
     return NextResponse.json(body, { status });
   }
 }
+
+export async function GET_cron_jobs() {
+  return {
+    data: [
+      { name: 'outbox-drain', route: '/api/v1/cron/run', intervalMs: 30_000 },
+      { name: 'refund-retries', route: '/api/v1/cron/run', intervalMs: 60_000 },
+      { name: 'expire-stale', route: '/api/v1/cron/run', intervalMs: 300_000 },
+      { name: 'monthly-reset', route: '/api/v1/cron/run', intervalMs: 3_600_000 },
+    ],
+  };
+}

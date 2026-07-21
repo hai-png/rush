@@ -104,6 +104,7 @@ const ROUTES: RouteEntry[] = [
   r('POST', '/subscriptions', { requireAuth: true }, subscriptions.POST_create),
   r('GET', '/subscriptions/:id', { requireAuth: true }, subscriptions.GET_one),
   r('POST', '/subscriptions/:id/cancel', { requireAuth: true }, subscriptions.POST_cancel),
+  r('DELETE', '/subscriptions/:id', { requireAuth: true }, subscriptions.DELETE_subscription),
   r('POST', '/subscriptions/:id/renew', { requireAuth: true }, subscriptions.POST_renew),
 
   // Payments
@@ -230,6 +231,7 @@ const ROUTES: RouteEntry[] = [
 
   // Cron (secret-gated)
   r('POST', '/cron/run', { exemptFromTosGate: true }, cron.POST_run),
+  r('GET', '/cron', { exemptFromTosGate: true }, cron.GET_cron_jobs),
 
   // Telebirr advanced (InApp SDK + Subscription Payment)
   r('POST', '/payments/telebirr/inapp-checkout', { requireAuth: true }, telebirr.POST_inapp_checkout),
