@@ -1,5 +1,4 @@
 // Browser-side API client. Handles JSON encoding, CSRF header injection,
-// bearer token attach from localStorage (optional — session cookie is the
 // default), and 401 -> /login redirect.
 
 const CSRF_HEADER = 'x-csrf-token';

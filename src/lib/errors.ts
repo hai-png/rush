@@ -1,5 +1,4 @@
 // Typed error envelope — single source of truth for HTTP error responses.
-// All errors propagate as AppError subclasses; the error middleware converts
 // them to { error: { code, message, requestId } }.
 
 export class AppError extends Error {

@@ -41,7 +41,6 @@ export async function GET_faqs() {
   return { data: faqs };
 }
 
-// GET /api/v1/routes/:id — single route detail.
 import { NotFoundError } from '@/lib/errors';
 
 export async function GET_route({ params }: any) {

@@ -15,29 +15,20 @@ jobs:
       - run: bun install
       - run: bun run lint
 
-  typecheck:
+  test:
     runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: oven-sh/setup-bun@v2
-      - run: bun install
-      - run: bun run typecheck || true  # non-blocking for now
-
-  e2e:
-    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: file:./db/test.db
+      NODE_ENV: test
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2
       - run: bun install
       - run: bun run db:push
-        env:
-          DATABASE_URL: file:./db/test.db
       - run: bun run db:seed
-        env:
-          DATABASE_URL: file:./db/test.db
       - run: |
           bun run dev &
-          sleep 10
+          DEV_PID=$!
+          sleep 15
           bash scripts/e2e-test.sh
-        env:
-          DATABASE_URL: file:./db/test.db
+          kill $DEV_PID

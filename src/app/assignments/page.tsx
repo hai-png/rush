@@ -1,5 +1,4 @@
 // Rider: browse route assignments — see which routes are available this month,
-// which contractor is driving, and the pickup locations. Riders can book rides
 // against the trips generated from the assignment.
 import Link from 'next/link';
 import { requireSession } from '@/lib/session-server';

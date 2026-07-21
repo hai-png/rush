@@ -1,10 +1,4 @@
 // Single API entry point. All /api/v1/* requests dispatch via the route table
-// in src/lib/api-routes.ts. The per-route options (requireAuth, requireRole,
-// exemptFromTosGate) are applied per-request by calling api() with the matched
-// entry's options.
-//
-// For `raw` routes (multipart upload, file download), the api() wrapper still
-// runs (auth/csrf/rate-limit) but skips JSON body parsing and calls the
 // handler with the raw NextRequest.
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -12,7 +6,6 @@ import { findRoute } from '@/lib/api-routes';
 import { api } from '@/lib/api';
 import { verifySession } from '@/lib/auth';
 import { NotFoundError, toErrorEnvelope } from '@/lib/errors';
-import { getCookie } from 'next/headers';
 
 type Ctx = { params: Promise<{ route?: string[] }> };
 
@@ -30,12 +23,7 @@ function handle(method: string) {
     }
 
     // For raw routes, we need to do auth outside the api() wrapper because
-    // api() consumes req.text() for body parsing. We'll do a lightweight auth
-<<<<<<< HEAD
-    // pass + CSRF check, then call the raw handler directly.
-=======
     // pass, then call the raw handler directly.
->>>>>>> main
     if (found.entry.raw) {
       return handleRaw(req, ctx, found);
     }
@@ -76,11 +64,6 @@ async function handleRaw(
       try {
         session = await verifySession(token);
       } catch (err) {
-<<<<<<< HEAD
-        // For downloads, we want to return the auth error to the browser
-        // (so it can prompt for sign-in). For uploads, same.
-=======
->>>>>>> main
         const { status, body } = toErrorEnvelope(err, requestId);
         return NextResponse.json(body, { status, headers: { 'x-request-id': requestId } });
       }
@@ -96,14 +79,7 @@ async function handleRaw(
       }
     }
 
-<<<<<<< HEAD
-    // Call the raw handler with (req, session, params).
-    // The handler signature varies (handleFileUpload: (req, session);
-    // handleFileDownload: (req, session, fileId)). Pass params and let the
-    // handler pick what it needs.
-=======
     // Call the raw handler with (req, session, params, ctx).
->>>>>>> main
     const result = await found.entry.handler(req, session, found.params, { requestId });
     if (result instanceof NextResponse) {
       result.headers.set('x-request-id', requestId);

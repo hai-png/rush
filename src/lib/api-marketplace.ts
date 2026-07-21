@@ -139,7 +139,6 @@ export async function POST_claim({ session, body, params, ipAddress, userAgent }
   };
 }
 
-// GET /api/v1/marketplace/my-releases — list the current user's seat releases.
 export async function GET_my_releases({ session }: any) {
   const releases = await db.seatRelease.findMany({
     where: { userId: session.id },
@@ -153,7 +152,6 @@ export async function GET_my_releases({ session }: any) {
   return { data: releases };
 }
 
-// POST /api/v1/marketplace/seat-releases/:id/cancel — cancel an open release.
 // Only the seller can cancel; only open releases can be cancelled.
 export async function POST_cancel_release({ session, params, ipAddress, userAgent }: any) {
   const release = await db.seatRelease.findUnique({ where: { id: params.id } });
@@ -175,7 +173,6 @@ export async function POST_cancel_release({ session, params, ipAddress, userAgen
   return { data: { id: release.id, status: 'cancelled' } };
 }
 
-// GET /api/v1/marketplace/seat-releases/:id — single release detail.
 export async function GET_release({ session, params }: any) {
   const release = await db.seatRelease.findUnique({
     where: { id: params.id },
@@ -190,7 +187,6 @@ export async function GET_release({ session, params }: any) {
   return { data: release };
 }
 
-// DELETE /api/v1/marketplace/seat-releases/:id — delete (cancel) a release.
 export async function DELETE_release({ session, params, ipAddress, userAgent }: any) {
   const release = await db.seatRelease.findUnique({ where: { id: params.id } });
   if (!release) throw new NotFoundError('Seat release not found');
@@ -203,7 +199,6 @@ export async function DELETE_release({ session, params, ipAddress, userAgent }: 
   return { data: { id: release.id, status: 'cancelled' } };
 }
 
-// GET /api/v1/marketplace/seat-claims — list the current user's claims.
 export async function GET_claims({ session }: any) {
   const claims = await db.seatClaim.findMany({
     where: { claimantUserId: session.id },
@@ -217,7 +212,6 @@ export async function GET_claims({ session }: any) {
   return { data: claims };
 }
 
-// GET /api/v1/marketplace/seat-claims/:id — single claim detail.
 export async function GET_claim({ session, params }: any) {
   const claim = await db.seatClaim.findUnique({
     where: { id: params.id },
@@ -233,7 +227,6 @@ export async function GET_claim({ session, params }: any) {
   return { data: claim };
 }
 
-// POST /api/v1/marketplace/seat-claims — create a claim directly (alternative
 // to POST /seat-releases/:id/claim). Takes a seatReleaseId + paymentMethod.
 const ClaimCreateInput = z.object({
   seatReleaseId: z.string().min(1),

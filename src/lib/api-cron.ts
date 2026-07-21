@@ -6,8 +6,6 @@ import { NextResponse } from 'next/server';
 import { loadEnv } from '@/lib/env';
 =======
 // Cron — secret-gated endpoint to manually trigger background tasks.
-// In normal operation, the in-process scheduler (src/lib/scheduler.ts) runs
-// these on intervals automatically. This endpoint exists for ops to force a
 // run (e.g. after a deploy, or if the scheduler is lagging).
 import { NextResponse } from 'next/server';
 >>>>>>> main

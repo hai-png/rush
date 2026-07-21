@@ -47,7 +47,6 @@ export async function handleFileUpload(req: NextRequest, session: any): Promise<
   }
 }
 
-// GET /api/v1/files/:id — streams the file content. Auth required.
 export async function handleFileDownload(req: NextRequest, session: any, params: { id: string }): Promise<NextResponse> {
   const requestId = crypto.randomUUID();
   try {

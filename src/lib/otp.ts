@@ -1,5 +1,4 @@
 // OTP service — phone-based one-time codes for signup verification, password
-// reset, phone change. Codes are 6 digits, hashed at rest with bcrypt.
 // In dev (NODE_ENV !== 'production'), the code is logged to the console and
 // also returned to the caller so the test UI can display it. In production
 // the code is only sent via SMS (mocked here as a console log).

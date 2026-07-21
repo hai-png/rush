@@ -1,7 +1,4 @@
 // Payment service — settlement, failure, refunds.
-// `scheduleRefund` row-locks the payment to prevent concurrent over-refund
-// (PAY-003 fix baked in from the start).
-// `settlePayment` uses the TelebirrNotifyEvent composite PK (merchOrderId, outRequestNo)
 // for dedup — done right the first time (PAY-002 / DB-001 fix baked in).
 
 import { db } from '@/lib/db';

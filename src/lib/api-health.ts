@@ -32,7 +32,6 @@ export async function GET_health() {
   };
 }
 
-// GET /api/v1/healthz — k8s-style liveness probe (minimal, no DB check).
 export async function GET_healthz() {
   return { data: { status: 'alive', timestamp: new Date().toISOString() } };
 }

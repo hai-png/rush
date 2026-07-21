@@ -1,18 +1,5 @@
 // In-process scheduler — runs background tasks on intervals.
 // In production this would be a separate worker process or external cron,
-// but for the MVP slice we run it inside the Next.js dev server process.
-//
-// Tasks:
-//   - Every 30s: drain outbox (notifications, SMS, email, audit, webhook)
-//   - Every 60s: process refund retries (pending -> processing -> succeeded/failed)
-//   - Every 5min: expire active subscriptions past their endDate
-//   - Every 5min: expire open seat releases past their expiresAt
-//   - Every 1h (at minute 0): reset corporate members' monthly ride counters
-//   - Every 1h (at minute 0): send subscription-expiring-soon notifications
-//
-// All intervals use .unref() so the scheduler doesn't keep the process alive
-// on its own (important for graceful shutdowns).
-//
 // The scheduler is started lazily on first API request via ensureSchedulerStarted().
 
 import { db } from '@/lib/db';
@@ -53,7 +40,6 @@ export function ensureSchedulerStarted(): void {
   logger.info('[scheduler] started: outbox(30s), refunds(60s), expire(5m), hourly(1h)');
 }
 
-// ─── Drain outbox ────────────────────────────────────────────────────────────
 async function drainOutbox(): Promise<void> {
   let processed = 0;
   // Loop until the queue is empty (or we hit a safety cap).
@@ -135,7 +121,6 @@ async function drainOutbox(): Promise<void> {
   }
 }
 
-// ─── Expire stale subs + seat releases ──────────────────────────────────────
 async function expireStale(): Promise<void> {
   const expiredSubs = await db.subscription.updateMany({
     where: { status: 'active', endDate: { lt: new Date() } },
@@ -168,7 +153,6 @@ async function expireStale(): Promise<void> {
   }
 }
 
-// ─── Hourly jobs ────────────────────────────────────────────────────────────
 async function hourlyJobs(): Promise<void> {
   await Promise.all([resetCorporateMonthlyCounters(), sendSubscriptionExpiryWarnings()]);
 }

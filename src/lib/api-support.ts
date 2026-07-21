@@ -102,9 +102,6 @@ export async function POST_message({ session, params, body }: any) {
   return { status: 201, data: msg };
 }
 
-// POST /api/v1/tickets/:id/messages/with-attachment (multipart, raw)
-// Creates a ticket message with an optional file attachment. The file is
-// uploaded via multipart/form-data with fields: body (string), file (optional).
 // (Imports at top of file.)
 
 export async function handleTicketMessageWithAttachment(req: NextRequest, session: any, params: any): Promise<NextResponse> {
@@ -176,7 +173,6 @@ export async function handleTicketMessageWithAttachment(req: NextRequest, sessio
   }
 }
 
-// PATCH /api/v1/tickets/:id — update ticket status (admin or ticket owner).
 import { z as z2 } from 'zod';
 
 const TicketUpdateInput = z2.object({
@@ -201,7 +197,6 @@ export async function PATCH_ticket({ session, params, body, ipAddress, userAgent
   return { data: updated };
 }
 
-// GET /api/v1/tickets/:id/messages — list messages for a ticket.
 export async function GET_messages({ session, params }: any) {
   const ticket = await db.supportTicket.findUnique({ where: { id: params.id } });
   if (!ticket) throw new NotFoundError('Ticket not found');

@@ -1,6 +1,5 @@
 #!/usr/bin/env bun
 // Generate an OpenAPI 3.1 spec from the route table.
-// Run with: bun run scripts/gen-openapi.ts
 // Output: download/openapi.json
 
 import { writeFileSync } from 'node:fs';
