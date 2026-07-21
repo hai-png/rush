@@ -108,7 +108,7 @@ export async function settlePayment(reference: string, reportedAmount: Money | u
 
   // Run side effects after the tx commits.
   for (const fx of sideEffects) {
-    try { await fx(); } catch (e) { console.error('[settlePayment] side effect failed:', e); }
+    try { await fx(); } catch (e) { logger.error({ err: (e as Error).message }, '[settlePayment] side effect failed'); }
   }
   return result;
 }
@@ -202,7 +202,7 @@ export async function scheduleRefund(paymentId: string, amount: Money, reason: s
 
   // Run side effects after the tx commits.
   for (const fx of sideEffects) {
-    try { await fx(); } catch (e) { console.error('[scheduleRefund] side effect failed:', e); }
+    try { await fx(); } catch (e) { logger.error({ err: (e as Error).message }, '[scheduleRefund] side effect failed'); }
   }
 }
 

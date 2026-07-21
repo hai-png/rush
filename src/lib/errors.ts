@@ -1,4 +1,5 @@
 // Typed error envelope — single source of truth for HTTP error responses.
+import { logger } from '@/lib/logger';
 // them to { error: { code, message, requestId } }.
 
 export class AppError extends Error {
@@ -47,7 +48,7 @@ export function toErrorEnvelope(err: unknown, requestId: string): { status: numb
       body: { error: { code: 'VALIDATION_ERROR', message: 'Invalid request body', details: (err as any).issues, requestId } },
     };
   }
-  console.error('[unhandled]', err);
+  logger.error({ err }, '[unhandled]');
   return {
     status: 500,
     body: { error: { code: 'INTERNAL', message: 'Something went wrong', requestId } },

@@ -1,5 +1,6 @@
 // Engagement — notifications.
 import { db } from '@/lib/db';
+import { logger } from '@/lib/logger';
 
 export async function GET_notifications({ session }: any) {
   const notifs = await db.notification.findMany({
@@ -77,12 +78,12 @@ const DeviceInput = z.object({
 export async function POST_device({ session, body }: any) {
   const input = DeviceInput.parse(body);
   // For MVP, we don't have a Device model in the schema. Log it.
-  console.log(`[device] register: user=${session.id} platform=${input.platform} token=${input.pushToken.slice(0, 16)}...`);
+  logger.info({ userId: session.id, platform: input.platform }, '[device] register');
   return { status: 201, data: { ok: true } };
 }
 
 export async function DELETE_device({ session, body }: any) {
   const { pushToken } = z.object({ pushToken: z.string() }).parse(body);
-  console.log(`[device] unregister: user=${session.id} token=${pushToken.slice(0, 16)}...`);
+  logger.info({ userId: session.id }, '[device] unregister');
   return { data: { ok: true } };
 }

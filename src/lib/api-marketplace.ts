@@ -115,7 +115,7 @@ export async function POST_claim({ session, body, params, ipAddress, userAgent }
         seatReleaseId: release.id,
         claimantUserId: session.id,
         paymentId: payment.id,
-        status: 'confirmed', // will be confirmed when payment settles; for now it's "confirmed pending payment"
+        status: 'pending',
       },
     });
   });
@@ -282,7 +282,7 @@ export async function POST_claim_direct({ session, body, ipAddress, userAgent }:
         seatReleaseId: release.id,
         claimantUserId: session.id,
         paymentId: payment.id,
-        status: 'confirmed',
+        status: 'pending',
       },
     });
   });

@@ -8,10 +8,17 @@ import { Badge } from '@/components/ui/badge';
 import { SignOutButton } from '@/components/sign-out-button';
 import { BookRideButton } from './book-ride-button';
 
-export default async function TripsPage() {
+export default async function TripsPage({ searchParams }: { searchParams: Promise<{ assignment?: string }> }) {
   const session = await requireSession();
+  const sp = await searchParams;
+  const assignmentFilter = sp.assignment;
+
   const trips = await db.trip.findMany({
-    where: { status: 'scheduled', departureAt: { gt: new Date() } },
+    where: {
+      status: 'scheduled',
+      departureAt: { gt: new Date() },
+      ...(assignmentFilter && { assignmentId: assignmentFilter }),
+    },
     include: { route: true, shuttle: { include: { contractor: { select: { name: true } } } } },
     orderBy: { departureAt: 'asc' },
     take: 50,

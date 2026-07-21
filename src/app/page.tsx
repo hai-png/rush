@@ -1,183 +1,268 @@
-// Landing page — entry point. Shows app overview, links to all flows.
-// The preview pane renders / by default; deeper routes are reachable by navigation.
-
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { Bus, CreditCard, Users, Shield, Ticket, MapPin, Bell, ChevronRight } from 'lucide-react';
+import { Bus, CreditCard, Users, Shield, Ticket, MapPin, Bell, ChevronRight, Zap, Clock, TrendingUp, CheckCircle2, ArrowRight } from 'lucide-react';
 
 export default function Home() {
   return (
-    <div className="min-h-screen flex flex-col">
-      {/* Header */}
-      <header className="border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60 sticky top-0 z-40">
+    <div className="min-h-screen flex flex-col bg-background">
+      {/* Nav */}
+      <nav className="sticky top-0 z-50 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
         <div className="container mx-auto flex h-16 items-center justify-between px-4">
           <div className="flex items-center gap-2">
-            <Bus className="h-6 w-6 text-primary" />
-            <span className="text-xl font-bold">Addis Ride</span>
-            <Badge variant="secondary" className="ml-2">Clean rebuild</Badge>
+            <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+              <Bus className="h-5 w-5" />
+            </div>
+            <span className="text-xl font-bold tracking-tight">Addis Ride</span>
           </div>
           <div className="flex items-center gap-2">
-            <Button variant="ghost" asChild>
-              <Link href="/login">Sign in</Link>
-            </Button>
-            <Button asChild>
-              <Link href="/signup/rider">Get started</Link>
-            </Button>
+            <Button variant="ghost" size="sm" asChild><Link href="/plans">Plans</Link></Button>
+            <Button variant="ghost" size="sm" asChild><Link href="/help">Help</Link></Button>
+            <Button variant="ghost" size="sm" asChild><Link href="/login">Sign in</Link></Button>
+            <Button size="sm" asChild><Link href="/signup/rider">Get started</Link></Button>
           </div>
         </div>
-      </header>
+      </nav>
 
-      <main className="flex-1">
-        {/* Hero */}
-        <section className="border-b">
-          <div className="container mx-auto px-4 py-20 md:py-28 max-w-5xl">
-            <div className="flex flex-col items-start gap-6">
-              <Badge variant="outline">Shuttle subscription platform · Addis Ababa</Badge>
-              <h1 className="text-4xl md:text-6xl font-bold tracking-tight">
-                Ride every day.<br />
-                <span className="text-muted-foreground">Pay once a month.</span>
+      {/* Hero */}
+      <section className="relative overflow-hidden border-b">
+        <div className="absolute inset-0 bg-gradient-to-br from-primary/5 via-transparent to-primary/10" />
+        <div className="container mx-auto px-4 py-20 md:py-32 max-w-6xl relative">
+          <div className="grid md:grid-cols-2 gap-12 items-center">
+            <div className="space-y-6">
+              <Badge variant="outline" className="px-3 py-1 text-sm">
+                <MapPin className="h-3 w-3 mr-1" /> Addis Ababa · Shuttle Subscription
+              </Badge>
+              <h1 className="text-4xl md:text-6xl font-bold tracking-tight leading-tight">
+                Your daily commute,<br />
+                <span className="text-primary">simplified.</span>
               </h1>
-              <p className="text-lg md:text-xl text-muted-foreground max-w-2xl">
-                Subscribe to a monthly shuttle plan on routes you actually ride. Pay with Telebirr
-                or CBE Birr. Missed a ride? List your seat on the marketplace and let someone else use it.
+              <p className="text-lg text-muted-foreground max-w-lg leading-relaxed">
+                Subscribe to a monthly shuttle plan on routes you actually ride.
+                Pay with Telebirr. Track your shuttle in real-time. Never wait in
+                line again.
               </p>
               <div className="flex flex-wrap items-center gap-3 pt-2">
                 <Button size="lg" asChild>
-                  <Link href="/signup/rider">Sign up as rider</Link>
+                  <Link href="/signup/rider">Start riding <ArrowRight className="ml-2 h-4 w-4" /></Link>
                 </Button>
                 <Button size="lg" variant="outline" asChild>
-                  <Link href="/signup/contractor">Drive for us</Link>
-                </Button>
-                <Button size="lg" variant="ghost" asChild>
-                  <Link href="/login">Sign in <ChevronRight className="ml-1 h-4 w-4" /></Link>
+                  <Link href="/plans">View plans</Link>
                 </Button>
               </div>
-              <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm text-muted-foreground pt-4">
-                <span className="flex items-center gap-1"><Shield className="h-4 w-4" /> Append-only audit log</span>
-                <span className="flex items-center gap-1"><CreditCard className="h-4 w-4" /> Telebirr + CBE Birr</span>
-                <span className="flex items-center gap-1"><Users className="h-4 w-4" /> Rider / contractor / corporate / admin</span>
+              <div className="flex flex-wrap gap-x-6 gap-y-2 pt-4 text-sm text-muted-foreground">
+                <span className="flex items-center gap-1"><CheckCircle2 className="h-4 w-4 text-green-600" /> No free plan — pay for value</span>
+                <span className="flex items-center gap-1"><CheckCircle2 className="h-4 w-4 text-green-600" /> Telebirr + CBE Birr</span>
+                <span className="flex items-center gap-1"><CheckCircle2 className="h-4 w-4 text-green-600" /> Real-time GPS tracking</span>
+              </div>
+            </div>
+            <div className="hidden md:block">
+              <div className="relative">
+                <div className="absolute inset-0 bg-gradient-to-tr from-primary/20 to-transparent rounded-3xl blur-2xl" />
+                <Card className="relative border-2 shadow-xl">
+                  <CardHeader>
+                    <CardTitle className="flex items-center justify-between">
+                      <span>Monthly 30</span>
+                      <Badge>Most popular</Badge>
+                    </CardTitle>
+                    <CardDescription>30 rides per month on any route</CardDescription>
+                  </CardHeader>
+                  <CardContent className="space-y-4">
+                    <div className="text-4xl font-bold">1,500 <span className="text-lg font-normal text-muted-foreground">ETB/mo</span></div>
+                    <div className="space-y-2">
+                      {['30 rides per month', 'Choose pickup location', 'Book any scheduled trip', 'Seat marketplace access', 'Real-time shuttle tracking'].map(f => (
+                        <div key={f} className="flex items-center gap-2 text-sm">
+                          <CheckCircle2 className="h-4 w-4 text-green-600 flex-shrink-0" /> {f}
+                        </div>
+                      ))}
+                    </div>
+                    <Button className="w-full" asChild><Link href="/plans">Choose this plan</Link></Button>
+                  </CardContent>
+                </Card>
               </div>
             </div>
           </div>
-        </section>
+        </div>
+      </section>
 
-        {/* Demo credentials */}
-        <section className="border-b bg-muted/30">
-          <div className="container mx-auto px-4 py-10 max-w-5xl">
-            <h2 className="text-lg font-semibold mb-4">Demo accounts (already seeded)</h2>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-              <Card>
+      {/* Stats bar */}
+      <section className="border-b bg-muted/30">
+        <div className="container mx-auto px-4 py-8 max-w-6xl">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-6">
+            {[
+              { icon: Users, label: 'User roles', value: '4' },
+              { icon: CreditCard, label: 'Payment methods', value: '3' },
+              { icon: Zap, label: 'API endpoints', value: '158+' },
+              { icon: Shield, label: 'Security layers', value: '8' },
+            ].map(s => (
+              <div key={s.label} className="flex items-center gap-3">
+                <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
+                  <s.icon className="h-5 w-5 text-primary" />
+                </div>
+                <div>
+                  <div className="text-2xl font-bold">{s.value}</div>
+                  <div className="text-xs text-muted-foreground">{s.label}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Features */}
+      <section className="border-b">
+        <div className="container mx-auto px-4 py-20 max-w-6xl">
+          <div className="text-center mb-12">
+            <h2 className="text-3xl md:text-4xl font-bold mb-3">Built for everyone</h2>
+            <p className="text-muted-foreground max-w-2xl mx-auto">Four roles, one platform. Whether you ride, drive, manage a company, or run the system — Addis Ride has you covered.</p>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+            {[
+              { icon: Users, title: 'Riders', desc: 'Subscribe, book rides, choose pickup locations, track shuttles, trade seats on the marketplace.' },
+              { icon: Bus, title: 'Contractors', desc: 'Get assigned monthly routes, upload documents, manage shuttles, board passengers, track GPS.' },
+              { icon: TrendingUp, title: 'Corporate', desc: 'Onboard your company, invite employees, subsidize their rides, track usage.' },
+              { icon: Shield, title: 'Admins', desc: 'Verify contractors, manage plans/routes/shuttles, view audit logs, export data, handle refunds.' },
+            ].map(f => (
+              <Card key={f.title} className="hover:shadow-md transition-shadow">
                 <CardHeader>
-                  <CardTitle className="text-base">Rider</CardTitle>
-                  <CardDescription>For testing subscription + checkout flow</CardDescription>
+                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10 mb-2">
+                    <f.icon className="h-5 w-5 text-primary" />
+                  </div>
+                  <CardTitle className="text-lg">{f.title}</CardTitle>
                 </CardHeader>
-                <CardContent className="text-sm space-y-1 font-mono">
-                  <div>phone: <span className="text-foreground">+251911000002</span></div>
-                  <div>pass: <span className="text-foreground">rider-pass-1234</span></div>
+                <CardContent className="text-sm text-muted-foreground">{f.desc}</CardContent>
+              </Card>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* How it works */}
+      <section className="border-b bg-muted/30">
+        <div className="container mx-auto px-4 py-20 max-w-6xl">
+          <h2 className="text-3xl font-bold mb-12 text-center">How it works</h2>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-8">
+            {[
+              { step: '01', title: 'Choose a plan', desc: 'Pick from 2-Week Trial, Monthly 30, or Monthly Unlimited. Pay via Telebirr or CBE Birr.' },
+              { step: '02', title: 'Browse routes', desc: 'See which contractors are committed to your route this month. Choose your pickup location.' },
+              { step: '03', title: 'Book rides', desc: 'Book any scheduled trip with one tap. Your subscription covers it — no per-ride payment.' },
+              { step: '04', title: 'Track & ride', desc: 'Watch your shuttle approach in real-time. Board, ride, arrive. Can\'t make it? List your seat.' },
+            ].map(s => (
+              <div key={s.step} className="relative">
+                <div className="text-5xl font-bold text-primary/20 mb-2">{s.step}</div>
+                <h3 className="font-semibold text-lg mb-2">{s.title}</h3>
+                <p className="text-sm text-muted-foreground leading-relaxed">{s.desc}</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Security */}
+      <section className="border-b">
+        <div className="container mx-auto px-4 py-20 max-w-4xl">
+          <h2 className="text-3xl font-bold mb-4 text-center">Security baked in</h2>
+          <p className="text-muted-foreground text-center mb-12 max-w-2xl mx-auto">Every transaction is protected. Every action is audited. Every credential is verified.</p>
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+            {[
+              { icon: Shield, title: 'CSRF + JWT', desc: 'Double-submit CSRF + signed JWT cookies' },
+              { icon: CreditCard, title: 'Telebirr signed', desc: 'RSA-PSS-SHA256 webhook verification' },
+              { icon: Clock, title: 'Hash-chained audit', desc: 'Append-only log with integrity verification' },
+              { icon: Users, title: '2FA for admins', desc: 'TOTP required for privileged roles' },
+            ].map(s => (
+              <Card key={s.title}>
+                <CardContent className="py-4 text-center">
+                  <s.icon className="h-8 w-8 mx-auto mb-2 text-primary" />
+                  <div className="font-medium text-sm">{s.title}</div>
+                  <div className="text-xs text-muted-foreground mt-1">{s.desc}</div>
                 </CardContent>
               </Card>
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">Contractor</CardTitle>
-                  <CardDescription>For testing trip + ride operations</CardDescription>
-                </CardHeader>
-                <CardContent className="text-sm space-y-1 font-mono">
-                  <div>phone: <span className="text-foreground">+251911000003</span></div>
-                  <div>pass: <span className="text-foreground">contractor-pass-1234</span></div>
+            ))}
+          </div>
+        </div>
+      </section>
+
+      {/* Demo accounts */}
+      <section className="border-b bg-muted/30">
+        <div className="container mx-auto px-4 py-16 max-w-4xl">
+          <h2 className="text-2xl font-bold mb-6 text-center">Try it now</h2>
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            {[
+              { role: 'Rider', phone: '+251911000002', pass: 'rider-pass-1234', href: '/login' },
+              { role: 'Contractor', phone: '+251911000003', pass: 'contractor-pass-1234', href: '/login' },
+              { role: 'Admin', phone: '+251911000001', pass: 'admin-pass-1234', href: '/login' },
+            ].map(a => (
+              <Card key={a.role}>
+                <CardContent className="py-4">
+                  <div className="font-medium mb-1">{a.role}</div>
+                  <div className="text-xs text-muted-foreground font-mono space-y-0.5">
+                    <div>phone: {a.phone}</div>
+                    <div>pass: {a.pass}</div>
+                  </div>
+                  <Button asChild variant="outline" size="sm" className="mt-2 w-full">
+                    <Link href={a.href}>Sign in as {a.role}</Link>
+                  </Button>
                 </CardContent>
               </Card>
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base">Platform admin</CardTitle>
-                  <CardDescription>For testing admin dashboard</CardDescription>
-                </CardHeader>
-                <CardContent className="text-sm space-y-1 font-mono">
-                  <div>phone: <span className="text-foreground">+251911000001</span></div>
-                  <div>pass: <span className="text-foreground">admin-pass-1234</span></div>
-                </CardContent>
-              </Card>
-            </div>
-            <p className="text-xs text-muted-foreground mt-4">
-              Payments run in <strong>mock mode</strong> by default — Telebirr returns a fake
-              checkout URL pointing at <code>/telebirr-stub</code>, which simulates the redirect
-              and fires the real webhook handler. To use real Telebirr testbed creds, set the
-              <code> TELEBIRR_*</code> env vars.
-            </p>
+            ))}
           </div>
-        </section>
+        </div>
+      </section>
 
-        {/* Feature grid */}
-        <section className="border-b">
-          <div className="container mx-auto px-4 py-16 max-w-5xl">
-            <h2 className="text-2xl font-bold mb-8">What's in the clean rebuild</h2>
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-              <Feature icon={Users} title="Four roles, one auth system" body="Rider, contractor, corporate_admin, platform_admin. JWT-in-cookie (no dual NextAuth + Hono JWT smell)." />
-              <Feature icon={CreditCard} title="Telebirr dedup done right" body="Composite PK (merchOrderId, outRequestNo) baked in from the start — no 3-migration churn." />
-              <Feature icon={Shield} title="Refund row-lock" body="scheduleRefund runs inside a transaction so two concurrent refunds can't over-refund the customer." />
-              <Feature icon={MapPin} title="Seat marketplace" body="Subscribers can release a seat they can't use; other riders claim it for the route fare." />
-              <Feature icon={Ticket} title="Support tickets" body="Per-user tickets with category, priority, and threaded messages. Admin can resolve/close." />
-              <Feature icon={Bell} title="Append-only audit log" body="Hash-chained audit trail. No update/delete path exposed. Admin endpoint verifies the chain." />
-            </div>
+      {/* CTA */}
+      <section className="border-b">
+        <div className="container mx-auto px-4 py-20 max-w-4xl text-center">
+          <h2 className="text-3xl md:text-4xl font-bold mb-4">Ready to ride?</h2>
+          <p className="text-muted-foreground mb-8 max-w-xl mx-auto">Sign up in 30 seconds. Choose a plan. Start riding tomorrow.</p>
+          <div className="flex flex-wrap justify-center gap-3">
+            <Button size="lg" asChild><Link href="/signup/rider">Sign up as rider</Link></Button>
+            <Button size="lg" variant="outline" asChild><Link href="/signup/contractor">Drive for us</Link></Button>
+            <Button size="lg" variant="ghost" asChild><Link href="/corporate/onboard">Onboard a company</Link></Button>
           </div>
-        </section>
-
-        {/* Quick links */}
-        <section>
-          <div className="container mx-auto px-4 py-16 max-w-5xl">
-            <h2 className="text-2xl font-bold mb-8">Jump to a page</h2>
-            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 text-sm">
-              {[
-                ['/login', 'Sign in'],
-                ['/signup/rider', 'Rider signup'],
-                ['/signup/contractor', 'Contractor signup'],
-                ['/signup/corporate', 'Corporate signup'],
-                ['/plans', 'Subscription plans'],
-                ['/dashboard/rider', 'Rider dashboard'],
-                ['/dashboard/contractor', 'Contractor dashboard'],
-                ['/dashboard/admin', 'Admin dashboard'],
-                ['/open-seats', 'Seat marketplace'],
-                ['/tickets', 'Support tickets'],
-                ['/notifications', 'Notifications'],
-                ['/account', 'Account'],
-                ['/telebirr-stub', 'Telebirr mock stub'],
-                ['/help', 'Help & FAQ'],
-                ['/admin/audit-logs', 'Audit logs'],
-                ['/admin/users', 'Admin: users'],
-              ].map(([href, label]) => (
-                <Link key={href} href={href}
-                  className="flex items-center justify-between rounded-md border px-3 py-2 hover:bg-accent transition-colors">
-                  <span>{label}</span>
-                  <ChevronRight className="h-4 w-4 text-muted-foreground" />
-                </Link>
-              ))}
-            </div>
-          </div>
-        </section>
-      </main>
+        </div>
+      </section>
 
       {/* Footer */}
-      <footer className="border-t bg-muted/30">
-        <div className="container mx-auto px-4 py-6 max-w-5xl text-sm text-muted-foreground flex flex-wrap justify-between gap-2">
-          <span>© {new Date().getFullYear()} Addis Ride — clean reimplementation</span>
-          <span>Built from <code>rush</code> @ critical-review-zharden, rewritten from scratch</span>
+      <footer className="border-t bg-muted/30 mt-auto">
+        <div className="container mx-auto px-4 py-8 max-w-6xl">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-6 text-sm">
+            <div>
+              <div className="font-semibold mb-2">Addis Ride</div>
+              <div className="text-muted-foreground">Shuttle subscription platform for Addis Ababa.</div>
+            </div>
+            <div>
+              <div className="font-semibold mb-2">Quick links</div>
+              <div className="space-y-1 text-muted-foreground">
+                <Link href="/plans" className="block hover:text-foreground">Plans</Link>
+                <Link href="/trips" className="block hover:text-foreground">Browse trips</Link>
+                <Link href="/assignments" className="block hover:text-foreground">Routes</Link>
+                <Link href="/open-seats" className="block hover:text-foreground">Marketplace</Link>
+              </div>
+            </div>
+            <div>
+              <div className="font-semibold mb-2">Account</div>
+              <div className="space-y-1 text-muted-foreground">
+                <Link href="/login" className="block hover:text-foreground">Sign in</Link>
+                <Link href="/signup/rider" className="block hover:text-foreground">Sign up</Link>
+                <Link href="/help" className="block hover:text-foreground">Help & FAQ</Link>
+                <Link href="/account" className="block hover:text-foreground">My account</Link>
+              </div>
+            </div>
+            <div>
+              <div className="font-semibold mb-2">Contact</div>
+              <div className="space-y-1 text-muted-foreground">
+                <div>dpo@addisride.et</div>
+                <div>Addis Ababa, Ethiopia</div>
+              </div>
+            </div>
+          </div>
+          <div className="border-t mt-6 pt-4 flex flex-wrap justify-between gap-2 text-xs text-muted-foreground">
+            <span>© {new Date().getFullYear()} Addis Ride</span>
+            <span>Powered by Telebirr · Twilio · Resend</span>
+          </div>
         </div>
       </footer>
     </div>
-  );
-}
-
-function Feature({ icon: Icon, title, body }: { icon: any; title: string; body: string }) {
-  return (
-    <Card>
-      <CardHeader>
-        <div className="flex items-center gap-2">
-          <Icon className="h-5 w-5 text-primary" />
-          <CardTitle className="text-base">{title}</CardTitle>
-        </div>
-      </CardHeader>
-      <CardContent className="text-sm text-muted-foreground">{body}</CardContent>
-    </Card>
   );
 }

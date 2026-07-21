@@ -32,7 +32,14 @@ function computeHash(input: AuditInput, prevHash: string | null): string {
   return h.digest('hex');
 }
 
-export async function audit(input: AuditInput): Promise<void> {
+let auditQueue: Promise<void> = Promise.resolve();
+
+export function audit(input: AuditInput): Promise<void> {
+  auditQueue = auditQueue.then(() => auditInternal(input)).catch(() => {});
+  return auditQueue;
+}
+
+async function auditInternal(input: AuditInput): Promise<void> {
   const latest = await db.auditLog.findFirst({
     orderBy: { createdAt: 'desc' },
     select: { hash: true },

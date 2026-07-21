@@ -5,6 +5,7 @@ import { db } from '@/lib/db';
 import { z } from 'zod';
 import { BadRequestError, NotFoundError, ForbiddenError, ConflictError } from '@/lib/errors';
 import { audit } from '@/lib/audit';
+import { logger } from '@/lib/logger';
 
 
 export async function GET_pickups({ params }: any) {
@@ -199,7 +200,7 @@ export async function generateTripsFromAssignment(assignment: any): Promise<numb
       // Duplicate — skip
     }
   }
-  console.log(`[assignment ${assignment.id}] generated ${created}/${trips.length} trips`);
+  logger.info({ assignmentId: assignment.id, created, total: trips.length }, '[assignment] generated trips');
   return created;
 }
 
