@@ -4,6 +4,7 @@ import { NextResponse } from 'next/server';
 import { getPaymentProvider } from '@/lib/payments';
 import { settlePayment, failPayment } from '@/lib/payment-service';
 import { toErrorEnvelope } from '@/lib/errors';
+import { logger } from '@/lib/logger';
 
 export async function POST_telebirr_notify(ctx: any) {
   const requestId = ctx.requestId;
@@ -24,7 +25,8 @@ export async function POST_telebirr_notify(ctx: any) {
     const event = await provider.parseWebhook(syntheticReq);
 
     if (!event.signatureValid) {
-      console.warn('[telebirr-webhook] invalid signature', event);
+      logger.warn({ type: event.type }, '[telebirr-webhook] invalid signature — rejecting');
+      return NextResponse.json({ error: { code: 'UNAUTHORIZED', message: 'Invalid signature', requestId } }, { status: 401 });
     }
 
     const outRequestNo = (event as any).raw?.out_request_no ?? (event as any).raw?.outRequestNo ?? 'unknown';

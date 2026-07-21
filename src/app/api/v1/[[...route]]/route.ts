@@ -5,7 +5,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { findRoute } from '@/lib/api-routes';
 import { api } from '@/lib/api';
 import { verifySession } from '@/lib/auth';
-import { NotFoundError, toErrorEnvelope } from '@/lib/errors';
+import { NotFoundError, ForbiddenError, toErrorEnvelope } from '@/lib/errors';
+import { createHash, timingSafeEqual } from 'node:crypto';
 
 type Ctx = { params: Promise<{ route?: string[] }> };
 
@@ -76,6 +77,33 @@ async function handleRaw(
     if (found.entry.options.requireRole && session) {
       if (!found.entry.options.requireRole.includes(session.role)) {
         return NextResponse.json({ error: { code: 'FORBIDDEN', message: 'Insufficient role', requestId } }, { status: 403, headers: { 'x-request-id': requestId } });
+      }
+    }
+
+    // CSRF check for raw POST routes (same logic as api.ts csrfCheck)
+    const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
+    if (!SAFE_METHODS.has(req.method)) {
+      const cookieHeader = req.headers.get('cookie') ?? '';
+      const readCookie = (name: string): string | undefined => {
+        for (const part of cookieHeader.split(';')) {
+          const [k, ...v] = part.trim().split('=');
+          if (k === name) return v.join('=');
+        }
+        return undefined;
+      };
+      const sessionToken = readCookie('addis-session');
+      const bearerHeader = req.headers.get('authorization')?.replace(/^Bearer\s+/i, '');
+      if (sessionToken || (!sessionToken && !bearerHeader)) {
+        const csrfCookie = readCookie('addis-csrf');
+        const csrfHeader = req.headers.get('x-csrf-token');
+        if (!csrfCookie || !csrfHeader) {
+          return NextResponse.json({ error: { code: 'FORBIDDEN', message: 'CSRF token missing', requestId } }, { status: 403, headers: { 'x-request-id': requestId } });
+        }
+        const a = createHash('sha256').update(csrfCookie).digest();
+        const b = createHash('sha256').update(csrfHeader).digest();
+        if (a.length !== b.length || !timingSafeEqual(a, b)) {
+          return NextResponse.json({ error: { code: 'FORBIDDEN', message: 'CSRF token mismatch', requestId } }, { status: 403, headers: { 'x-request-id': requestId } });
+        }
       }
     }
 
