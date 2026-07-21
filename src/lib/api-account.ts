@@ -58,3 +58,49 @@ export async function POST_delete({ session, ipAddress, userAgent }: any) {
   });
   return { data: { ok: true } };
 }
+
+// GET /api/v1/account — current user's account details.
+export async function GET_account({ session }: any) {
+  const user = await db.user.findUnique({
+    where: { id: session.id },
+    include: { riderProfile: true, contractorProfile: true },
+  });
+  if (!user) throw new Error('User not found');
+  const { passwordHash: _, twoFactorSecret: __, ...safe } = user;
+  return { data: safe };
+}
+
+// PATCH /api/v1/account — update name + email.
+import { z } from 'zod';
+import { BadRequestError } from '@/lib/errors';
+
+const UpdateAccountInput = z.object({
+  name: z.string().min(2).max(100).optional(),
+  email: z.string().email().optional().nullable(),
+});
+
+export async function PATCH_account({ session, body, ipAddress, userAgent }: any) {
+  const input = UpdateAccountInput.parse(body);
+  const user = await db.user.findUnique({ where: { id: session.id } });
+  if (!user) throw new Error('User not found');
+
+  // If email is changing, validate it's not already taken.
+  if (input.email !== undefined && input.email !== user.email) {
+    if (input.email) {
+      const existing = await db.user.findFirst({ where: { email: input.email, NOT: { id: session.id } } });
+      if (existing) throw new BadRequestError('Email already in use');
+    }
+  }
+
+  const updated = await db.user.update({
+    where: { id: session.id },
+    data: {
+      ...(input.name !== undefined && { name: input.name }),
+      ...(input.email !== undefined && { email: input.email }),
+    },
+    include: { riderProfile: true, contractorProfile: true },
+  });
+  await audit({ actorId: session.id, action: 'account.updated', entityType: 'user', entityId: session.id, after: input, ipAddress, userAgent });
+  const { passwordHash: _, twoFactorSecret: __, ...safe } = updated;
+  return { data: safe };
+}

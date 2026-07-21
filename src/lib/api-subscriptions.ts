@@ -144,3 +144,63 @@ export async function POST_cancel({ session, params, ipAddress, userAgent }: any
   });
   return { data: { id: sub.id, status: 'cancelled' } };
 }
+
+// POST /api/v1/subscriptions/:id/renew — renew a subscription for another period.
+// Creates a new pending payment + checkout URL for the same plan.
+export async function POST_renew({ session, params, body }: any) {
+  const sub = await db.subscription.findUnique({
+    where: { id: params.id },
+    include: { plan: true },
+  });
+  if (!sub) throw new NotFoundError('Subscription not found');
+  if (sub.userId !== session.id && session.role !== 'platform_admin') {
+    throw new NotFoundError('Subscription not found');
+  }
+
+  const { paymentMethod } = z.object({ paymentMethod: z.enum(['telebirr', 'cbe']) }).parse(body);
+  const reference = `PO${createId()}`;
+  const provider = getPaymentProvider(paymentMethod);
+  const env = loadEnv();
+  const checkout = await provider.createCheckout({
+    merchOrderId: reference,
+    amount: Money.fromCents(sub.plan.priceCents),
+    description: `${sub.plan.name} renewal`,
+    notifyUrl: env.TELEBIRR_NOTIFY_URL || `${env.APP_BASE_URL}/api/v1/webhooks/telebirr/notify`,
+    redirectUrl: env.TELEBIRR_REDIRECT_URL || `${env.APP_BASE_URL}/checkout/complete`,
+  });
+
+  // Create a new subscription period.
+  const now = new Date();
+  const endDate = new Date(now.getTime() + sub.plan.durationDays * 24 * 3600_000);
+  const newSub = await db.subscription.create({
+    data: {
+      userId: sub.userId,
+      planId: sub.planId,
+      corporateId: sub.corporateId,
+      status: 'pending_payment',
+      startDate: now,
+      endDate,
+    },
+    include: { plan: true },
+  });
+
+  await db.payment.create({
+    data: {
+      reference,
+      userId: sub.userId,
+      subscriptionId: newSub.id,
+      method: paymentMethod,
+      amountCents: sub.plan.priceCents,
+      status: 'pending',
+    },
+  });
+
+  return {
+    status: 201,
+    data: {
+      subscription: newSub,
+      paymentReference: reference,
+      checkout,
+    },
+  };
+}

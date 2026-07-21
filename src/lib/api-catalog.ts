@@ -40,3 +40,12 @@ export async function GET_faqs() {
   const faqs = await db.faqArticle.findMany({ where: { isActive: true }, orderBy: [{ category: 'asc' }, { sortOrder: 'asc' }] });
   return { data: faqs };
 }
+
+// GET /api/v1/routes/:id — single route detail.
+import { NotFoundError } from '@/lib/errors';
+
+export async function GET_route({ params }: any) {
+  const route = await db.route.findUnique({ where: { id: params.id } });
+  if (!route) throw new NotFoundError('Route not found');
+  return { data: route };
+}

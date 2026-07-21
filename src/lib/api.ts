@@ -72,8 +72,8 @@ type RateRule = {
 };
 
 const RATE_RULES: RateRule[] = [
-  { pattern: /\/api\/v1\/auth\/token$/, limit: 10, windowSec: 60, keyFn: ({ ip }) => ip ? `ip:${ip}` : null },
-  { pattern: /\/api\/v1\/auth\/register$/, limit: 5, windowSec: 3600, keyFn: ({ ip }) => ip ? `ip:${ip}` : null },
+  { pattern: /\/api\/v1\/auth\/token$/, limit: 100, windowSec: 60, keyFn: ({ ip }) => ip ? `ip:${ip}` : null },
+  { pattern: /\/api\/v1\/auth\/register$/, limit: 50, windowSec: 3600, keyFn: ({ ip }) => ip ? `ip:${ip}` : null },
   { pattern: /\/api\/v1\/auth\/otp\/send$/, limit: 3, windowSec: 600, keyFn: ({ ip }) => ip ? `ip:${ip}` : null },
   { pattern: /\/api\/v1\/auth\/otp\/send$/, limit: 3, windowSec: 600, keyFn: ({ body }) => `phone:${body?.phone ?? 'unknown'}` },
   { pattern: /\/api\/v1\/auth\/otp\/verify$/, limit: 10, windowSec: 600, keyFn: ({ body }) => `phone:${body?.phone ?? 'unknown'}` },

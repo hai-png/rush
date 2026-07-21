@@ -175,3 +175,43 @@ export async function handleTicketMessageWithAttachment(req: NextRequest, sessio
     return NextResponse.json(body, { status });
   }
 }
+
+// PATCH /api/v1/tickets/:id — update ticket status (admin or ticket owner).
+import { z as z2 } from 'zod';
+
+const TicketUpdateInput = z2.object({
+  status: z2.enum(['open', 'in_progress', 'resolved', 'closed']).optional(),
+  priority: z2.enum(['low', 'normal', 'high', 'urgent']).optional(),
+  category: z2.enum(['general', 'billing', 'route', 'shuttle', 'account', 'corporate', 'other']).optional(),
+});
+
+export async function PATCH_ticket({ session, params, body, ipAddress, userAgent }: any) {
+  const input = TicketUpdateInput.parse(body);
+  const ticket = await db.supportTicket.findUnique({ where: { id: params.id } });
+  if (!ticket) throw new NotFoundError('Ticket not found');
+  if (ticket.userId !== session.id && session.role !== 'platform_admin') {
+    throw new ForbiddenError('Not your ticket');
+  }
+  // Riders can only close their own tickets; only admin can set in_progress/resolved.
+  if (session.role !== 'platform_admin' && input.status && input.status !== 'closed') {
+    throw new ForbiddenError('Only admin can set that status');
+  }
+  const updated = await db.supportTicket.update({ where: { id: params.id }, data: input });
+  await audit({ actorId: session.id, action: 'ticket.updated', entityType: 'support_ticket', entityId: params.id, after: input, ipAddress, userAgent });
+  return { data: updated };
+}
+
+// GET /api/v1/tickets/:id/messages — list messages for a ticket.
+export async function GET_messages({ session, params }: any) {
+  const ticket = await db.supportTicket.findUnique({ where: { id: params.id } });
+  if (!ticket) throw new NotFoundError('Ticket not found');
+  if (ticket.userId !== session.id && session.role !== 'platform_admin') {
+    throw new ForbiddenError('Not your ticket');
+  }
+  const messages = await db.ticketMessage.findMany({
+    where: { ticketId: params.id },
+    orderBy: { createdAt: 'asc' },
+    include: { author: { select: { id: true, name: true, role: true } }, file: true },
+  });
+  return { data: messages };
+}
