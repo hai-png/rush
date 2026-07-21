@@ -1,0 +1,94 @@
+'use client';
+
+import { useState } from 'react';
+import { useRouter } from 'next/navigation';
+import Link from 'next/link';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
+import { toast } from 'sonner';
+import { api, ApiError } from '@/lib/api-client';
+import { Bus, ChevronLeft } from 'lucide-react';
+
+export default function LoginPage() {
+  const router = useRouter();
+  const [phone, setPhone] = useState('');
+  const [password, setPassword] = useState('');
+  const [code, setCode] = useState('');
+  const [loading, setLoading] = useState(false);
+
+  async function submit(e: React.FormEvent) {
+    e.preventDefault();
+    setLoading(true);
+    try {
+      const res = await api.post<{ user: { id: string; role: string; phone: string }; requiresTosAcceptance: boolean }>('/api/v1/auth/token', { phone, password, code: code || undefined });
+      toast.success('Signed in');
+      if (res.requiresTosAcceptance) {
+        router.push('/tos/accept');
+      } else {
+        routeByRole(res.user.role);
+      }
+    } catch (err) {
+      if (err instanceof ApiError && err.code === 'TWO_FACTOR_REQUIRED') {
+        toast.error('2FA code required — enter it below and sign in again');
+      } else {
+        toast.error(err instanceof Error ? err.message : 'Sign-in failed');
+      }
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function routeByRole(role: string) {
+    switch (role) {
+      case 'rider': router.push('/dashboard/rider'); break;
+      case 'contractor': router.push('/dashboard/contractor'); break;
+      case 'corporate_admin': router.push('/dashboard/corporate'); break;
+      case 'platform_admin': router.push('/dashboard/admin'); break;
+      default: router.push('/dashboard/rider');
+    }
+  }
+
+  return (
+    <div className="min-h-screen flex items-center justify-center p-4 bg-muted/30">
+      <Card className="w-full max-w-md">
+        <CardHeader>
+          <Link href="/" className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground mb-2">
+            <ChevronLeft className="h-4 w-4" /> Back to home
+          </Link>
+          <div className="flex items-center gap-2">
+            <Bus className="h-6 w-6 text-primary" />
+            <CardTitle>Sign in</CardTitle>
+          </div>
+          <CardDescription>Use a demo account from the home page or your own.</CardDescription>
+        </CardHeader>
+        <CardContent>
+          <form onSubmit={submit} className="space-y-3">
+            <div>
+              <Label htmlFor="phone">Phone</Label>
+              <Input id="phone" value={phone} onChange={e => setPhone(e.target.value)} placeholder="+251911000002" required />
+            </div>
+            <div>
+              <Label htmlFor="password">Password</Label>
+              <Input id="password" type="password" value={password} onChange={e => setPassword(e.target.value)} required />
+            </div>
+            <div>
+              <Label htmlFor="code">2FA code (optional)</Label>
+              <Input id="code" value={code} onChange={e => setCode(e.target.value)} maxLength={6} placeholder="Only if 2FA is enabled" />
+            </div>
+            <Button type="submit" disabled={loading} className="w-full">
+              {loading ? 'Signing in…' : 'Sign in'}
+            </Button>
+            <div className="text-sm text-muted-foreground text-center pt-2">
+              No account? <Link href="/signup/rider" className="text-primary hover:underline">Sign up as rider</Link>
+            </div>
+            <div className="text-sm text-muted-foreground text-center">
+              <Link href="/forgot-password" className="hover:underline">Forgot password?</Link>
+            </div>
+          </form>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}

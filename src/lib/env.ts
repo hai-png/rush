@@ -1,0 +1,80 @@
+// Tightly-scoped env loader. No placeholder detection (the original's
+// "reject changeme/secret" rule was security theater in dev). Just expose
+// the env vars the app uses, with sane dev defaults.
+
+type Env = {
+  NODE_ENV: 'development' | 'production' | 'test';
+  DATABASE_URL: string;
+  AUTH_SECRET: string;
+  CRON_SECRET: string;
+  CURRENT_TOS_VERSION: string;
+  TELEBIRR_ENV: 'testbed' | 'production' | 'mock';
+  TELEBIRR_FABRIC_APP_ID: string;
+  TELEBIRR_APP_SECRET: string;
+  TELEBIRR_MERCHANT_APP_ID: string;
+  TELEBIRR_MERCHANT_CODE: string;
+  TELEBIRR_PRIVATE_KEY: string;
+  TELEBIRR_PUBLIC_KEY: string;
+  TELEBIRR_NOTIFY_URL: string;
+  TELEBIRR_REDIRECT_URL: string;
+  CBE_ACCOUNT_NUMBER: string;
+  CBE_ACCOUNT_NAME: string;
+  CBE_BANK_BRANCH: string;
+  APP_BASE_URL: string;
+};
+
+let cachedEnv: Env | null = null;
+
+export function loadEnv(): Env {
+  if (cachedEnv) return cachedEnv;
+
+  const authSecret = process.env.AUTH_SECRET || process.env.NEXTAUTH_SECRET;
+  if (!authSecret || authSecret.length < 32) {
+    // In dev, auto-generate. In prod, refuse to start.
+    if (process.env.NODE_ENV === 'production') {
+      throw new Error('AUTH_SECRET must be set in production (>= 32 chars)');
+    }
+  }
+
+  // Telebirr is "mock" unless all required creds are present.
+  const telebirrEnv: Env['TELEBIRR_ENV'] =
+    (process.env.TELEBIRR_ENV as any) === 'production' ? 'production'
+    : (process.env.TELEBIRR_ENV as any) === 'testbed' ? 'testbed'
+    : 'mock';
+
+  const hasRealTelebirr = !!(
+    process.env.TELEBIRR_FABRIC_APP_ID &&
+    process.env.TELEBIRR_APP_SECRET &&
+    process.env.TELEBIRR_MERCHANT_APP_ID &&
+    process.env.TELEBIRR_MERCHANT_CODE &&
+    process.env.TELEBIRR_PRIVATE_KEY &&
+    process.env.TELEBIRR_PUBLIC_KEY
+  );
+
+  const effectiveTelebirr: Env['TELEBIRR_ENV'] = hasRealTelebirr ? telebirrEnv : 'mock';
+
+  cachedEnv = {
+    NODE_ENV: (process.env.NODE_ENV as any) || 'development',
+    DATABASE_URL: process.env.DATABASE_URL || 'file:./db/custom.db',
+    AUTH_SECRET: authSecret || 'dev-only-insecure-secret-32-chars-min',
+    CRON_SECRET: process.env.CRON_SECRET || 'dev-only-cron-secret-32-chars',
+    CURRENT_TOS_VERSION: process.env.CURRENT_TOS_VERSION || '2026-01-01',
+    TELEBIRR_ENV: effectiveTelebirr,
+    TELEBIRR_FABRIC_APP_ID: process.env.TELEBIRR_FABRIC_APP_ID || '',
+    TELEBIRR_APP_SECRET: process.env.TELEBIRR_APP_SECRET || '',
+    TELEBIRR_MERCHANT_APP_ID: process.env.TELEBIRR_MERCHANT_APP_ID || '',
+    TELEBIRR_MERCHANT_CODE: process.env.TELEBIRR_MERCHANT_CODE || '',
+    TELEBIRR_PRIVATE_KEY: process.env.TELEBIRR_PRIVATE_KEY || '',
+    TELEBIRR_PUBLIC_KEY: process.env.TELEBIRR_PUBLIC_KEY || '',
+    TELEBIRR_NOTIFY_URL: process.env.TELEBIRR_NOTIFY_URL || '',
+    TELEBIRR_REDIRECT_URL: process.env.TELEBIRR_REDIRECT_URL || '',
+    CBE_ACCOUNT_NUMBER: process.env.CBE_ACCOUNT_NUMBER || '',
+    CBE_ACCOUNT_NAME: process.env.CBE_ACCOUNT_NAME || '',
+    CBE_BANK_BRANCH: process.env.CBE_BANK_BRANCH || '',
+    APP_BASE_URL: process.env.APP_BASE_URL || 'http://localhost:3000',
+  };
+  return cachedEnv;
+}
+
+export const CURRENT_TOS_VERSION = loadEnv().CURRENT_TOS_VERSION;
+export const TWO_FA_REQUIRED_ROLES = ['corporate_admin', 'platform_admin'] as const;

@@ -1,0 +1,502 @@
+// Addis Ride — clean reimplementation. Single source of truth.
+// SQLite backend; all invariants enforced in app code (no DB triggers).
+// Money is integer cents (1 ETB = 100 cents) to avoid Decimal/float issues.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Identity ────────────────────────────────────────────────────────────────
+
+model User {
+  id              String   @id @default(cuid())
+  phone           String   @unique
+  email           String?
+  passwordHash    String
+  name            String
+  role            String   @default("rider") // rider | contractor | corporate_admin | platform_admin
+  phoneVerified   Boolean  @default(false)
+  isActive        Boolean  @default(true)
+  deletedAt       DateTime?
+  tokenVersion    Int      @default(0) // bump to invalidate all sessions
+  twoFactorSecret String?
+  twoFactorEnabled Boolean @default(false)
+  tosVersion      String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  riderProfile       RiderProfile?
+  contractorProfile  ContractorProfile?
+  corporate          Corporate?           @relation("CorporateAdmin")
+  corporateMembers   CorporateMember[]
+  sessions           Session[]
+  subscriptions      Subscription[]
+  payments           Payment[]
+  rides              Ride[]
+  seatReleases       SeatRelease[]        @relation("SeatReleaseSeller")
+  seatClaims         SeatClaim[]          @relation("SeatClaimBuyer")
+  tickets            SupportTicket[]
+  ticketMessages     TicketMessage[]
+  notifications      Notification[]
+  auditLogsActor     AuditLog[]           @relation("AuditActor")
+  auditLogsVerifier  ContractorProfile[]  @relation("VerifiedBy")
+  tosAcceptances     TosAcceptance[]
+  drivesTrips        Trip[]               @relation("TripDriver")
+  drivesShuttles     Shuttle[]
+  idempotencyRecords IdempotencyRecord[]
+  otpCodes           OtpCode[]
+
+  @@index([isActive, deletedAt])
+}
+
+model RiderProfile {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  homeArea  String
+  workArea  String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model ContractorProfile {
+  id                  String   @id @default(cuid())
+  userId              String   @unique
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  licenseNumber       String   @unique
+  experienceYears     Int      @default(0)
+  rating              Float    @default(5.0)
+  verificationStatus  String   @default("unverified") // unverified | pending | verified | rejected
+  verificationReason  String?
+  verifiedById        String?
+  verifiedBy          User?    @relation("VerifiedBy", fields: [verifiedById], references: [id], onDelete: SetNull)
+  verifiedAt          DateTime?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+}
+
+model Corporate {
+  id                  String   @id @default(cuid())
+  code                String   @unique
+  name                String
+  contactEmail        String
+  contactPhone        String
+  subsidyPercent      Int      @default(50)
+  monthlySeatAllowance Int     @default(20)
+  adminUserId         String   @unique
+  adminUser           User     @relation("CorporateAdmin", fields: [adminUserId], references: [id], onDelete: Cascade)
+  isActive            Boolean  @default(true)
+  deletedAt           DateTime?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  members      CorporateMember[]
+  subscriptions Subscription[]
+
+}
+
+model CorporateMember {
+  id                  String   @id @default(cuid())
+  corporateId         String
+  corporate           Corporate @relation(fields: [corporateId], references: [id], onDelete: Cascade)
+  userId              String
+  user                User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  employeeId          String
+  approvalStatus      String   @default("pending") // pending | approved | rejected
+  ridesUsedThisMonth  Int      @default(0)
+  lastResetAt         DateTime @default(now())
+  isActive            Boolean  @default(true)
+  deletedAt           DateTime?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  @@unique([corporateId, userId])
+  @@index([userId])
+  @@index([lastResetAt])
+}
+
+model Session {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  jti       String   @unique
+  userAgent String?
+  ipAddress String?
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+  revokedAt DateTime?
+
+  @@index([userId])
+}
+
+model OtpCode {
+  id          String   @id @default(cuid())
+  phone       String
+  purpose     String   // signup_verification | password_reset | phone_change
+  codeHash    String
+  userId      String?
+  user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  attempts    Int      @default(0)
+  maxAttempts Int      @default(5)
+  expiresAt   DateTime
+  verified    Boolean  @default(false)
+  createdAt   DateTime @default(now())
+
+  @@index([phone, purpose])
+}
+
+model TosAcceptance {
+  id         String   @id @default(cuid())
+  userId     String
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  version    String
+  ipAddress  String?
+  userAgent  String?
+  acceptedAt DateTime @default(now())
+
+  @@index([userId])
+}
+
+// ─── Catalog (plans, routes, shuttles, trips) ────────────────────────────────
+
+model SubscriptionPlan {
+  id             String   @id @default(cuid())
+  slug           String   @unique
+  name           String
+  description    String
+  priceCents     Int
+  currency       String   @default("ETB")
+  ridesIncluded  Int      // -1 = unlimited
+  durationDays   Int
+  isTrial        Boolean  @default(false)
+  isActive       Boolean  @default(true)
+  sortOrder      Int      @default(0)
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  subscriptions  Subscription[]
+
+}
+
+model Route {
+  id           String   @id @default(cuid())
+  origin       String
+  destination  String
+  distanceKm   Float
+  durationMin  Int
+  fareCents    Int
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  trips        Trip[]
+
+}
+
+model Shuttle {
+  id            String   @id @default(cuid())
+  contractorId  String
+  contractor    User     @relation(fields: [contractorId], references: [id], onDelete: Cascade)
+  plate         String   @unique
+  model         String
+  vehicleType   String   // coaster | minibus | van | sedan
+  capacity      Int
+  year          Int
+  isActive      Boolean  @default(true)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  trips         Trip[]
+
+}
+
+model Trip {
+  id            String   @id @default(cuid())
+  routeId       String
+  route         Route    @relation(fields: [routeId], references: [id], onDelete: Restrict)
+  shuttleId     String
+  shuttle       Shuttle  @relation(fields: [shuttleId], references: [id], onDelete: Restrict)
+  driverId      String?
+  driver        User?    @relation("TripDriver", fields: [driverId], references: [id], onDelete: SetNull)
+  departureAt   DateTime
+  seatsBooked   Int      @default(0)
+  status        String   @default("scheduled") // scheduled | in_transit | completed | cancelled
+  window        String   // morning | evening
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  rides         Ride[]
+  seatReleases  SeatRelease[]
+
+  @@index([routeId, departureAt])
+  @@index([shuttleId, departureAt])
+}
+
+// ─── Subscriptions + payments ────────────────────────────────────────────────
+
+model Subscription {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  planId       String
+  plan         SubscriptionPlan @relation(fields: [planId], references: [id], onDelete: Restrict)
+  corporateId  String?
+  corporate    Corporate? @relation(fields: [corporateId], references: [id], onDelete: SetNull)
+  status       String   @default("pending_payment") // pending_payment | active | expired | cancelled
+  startDate    DateTime
+  endDate      DateTime
+  ridesUsed    Int      @default(0)
+  cancelledAt  DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  payments     Payment[]
+  rides        Ride[]
+  tickets      SupportTicket[]
+
+  @@index([userId, status])
+  @@index([corporateId])
+}
+
+model Payment {
+  id               String   @id @default(cuid())
+  reference        String   @unique // merchOrderId for Telebirr
+  userId           String
+  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subscriptionId   String?
+  subscription     Subscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+  seatClaimId      String?
+  method           String   // telebirr | cbe
+  amountCents      Int
+  status           String   @default("pending") // pending | completed | failed | refunded | partially_refunded
+  refundAmountCents Int    @default(0)
+  refundedAt       DateTime?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  refundRetries       RefundRetry[]
+  seatClaim           SeatClaim?   @relation("SeatClaimPayment")
+  tickets             SupportTicket[]
+
+  @@index([userId])
+  @@index([subscriptionId])
+  @@index([seatClaimId])
+  @@index([status])
+}
+
+model RefundRetry {
+  id              String   @id @default(cuid())
+  paymentId       String
+  payment         Payment  @relation(fields: [paymentId], references: [id], onDelete: Cascade)
+  merchOrderId    String
+  refundRequestNo String   @unique
+  amountCents     Int
+  reason          String
+  status          String   @default("pending") // pending | processing | succeeded | failed | permanent_failure
+  attempts        Int      @default(0)
+  maxAttempts     Int      @default(5)
+  nextAttemptAt   DateTime @default(now())
+  lastError       String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([paymentId])
+  @@index([status, nextAttemptAt])
+}
+
+// Telebirr webhook dedup — done right the first time.
+// PK is (merchOrderId, outRequestNo) per Telebirr's own dedup semantics.
+// No received_at in the PK (that was the bug that took 3 migrations to fix).
+model TelebirrNotifyEvent {
+  // Pure log table — no FK to Payment so Payment deletion can't ripple here.
+  merchOrderId    String
+  outRequestNo    String
+  tradeStatus     String
+  totalAmount     String?
+  rawPayload      String   // JSON
+  receivedAt      DateTime @default(now())
+
+  @@id([merchOrderId, outRequestNo])
+  @@index([merchOrderId, receivedAt])
+}
+
+// ─── Marketplace (seat release / claim) ──────────────────────────────────────
+
+model SeatRelease {
+  id           String   @id @default(cuid())
+  userId       String
+  user         User     @relation("SeatReleaseSeller", fields: [userId], references: [id], onDelete: Cascade)
+  tripId       String
+  trip         Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  window       String   // morning | evening
+  status       String   @default("open") // open | claimed | expired | cancelled
+  expiresAt    DateTime
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  claims       SeatClaim[]
+
+  @@index([status, expiresAt])
+  @@index([tripId])
+}
+
+model SeatClaim {
+  id            String   @id @default(cuid())
+  seatReleaseId String
+  seatRelease   SeatRelease @relation(fields: [seatReleaseId], references: [id], onDelete: Cascade)
+  claimantUserId String
+  claimant      User     @relation("SeatClaimBuyer", fields: [claimantUserId], references: [id], onDelete: Cascade)
+  paymentId     String   @unique
+  payment       Payment  @relation("SeatClaimPayment", fields: [paymentId], references: [id], onDelete: Restrict)
+  status        String   @default("confirmed") // confirmed | used | no_show | refunded
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  rides         Ride[]
+
+  @@index([claimantUserId])
+  @@index([seatReleaseId])
+}
+
+// ─── Operations (rides) ──────────────────────────────────────────────────────
+
+model Ride {
+  id              String   @id @default(cuid())
+  tripId          String
+  trip            Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subscriptionId  String?
+  subscription    Subscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+  seatClaimId     String?
+  seatClaim       SeatClaim? @relation(fields: [seatClaimId], references: [id], onDelete: SetNull)
+  status          String   @default("booked") // booked | boarded | completed | no_show | cancelled
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  @@index([userId])
+  @@index([tripId])
+  @@index([subscriptionId])
+  @@index([seatClaimId])
+}
+
+// ─── Support ─────────────────────────────────────────────────────────────────
+
+model SupportTicket {
+  id              String   @id @default(cuid())
+  userId          String
+  user            User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subject         String
+  category        String   @default("general") // general | billing | route | shuttle | account | corporate | other
+  priority        String   @default("normal") // low | normal | high | urgent
+  status          String   @default("open") // open | in_progress | resolved | closed
+  subscriptionId  String?
+  subscription    Subscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
+  paymentId       String?
+  payment         Payment?  @relation(fields: [paymentId], references: [id], onDelete: SetNull)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  messages        TicketMessage[]
+
+  @@index([userId])
+  @@index([status])
+}
+
+model TicketMessage {
+  id         String   @id @default(cuid())
+  ticketId   String
+  ticket     SupportTicket @relation(fields: [ticketId], references: [id], onDelete: Cascade)
+  authorId   String
+  author     User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
+  body       String
+  createdAt  DateTime @default(now())
+
+  @@index([ticketId, createdAt])
+}
+
+model FaqArticle {
+  id         String   @id @default(cuid())
+  category   String   // billing | routes | shuttle | account | corporate | general
+  question   String
+  answer     String
+  sortOrder  Int      @default(0)
+  isActive   Boolean  @default(true)
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+}
+
+// ─── Engagement + audit + outbox ─────────────────────────────────────────────
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  type      String   // payment_received | payment_failed | refund_completed | refund_failed | seat_claimed | seat_released | seat_release_expired | subscription_expiring | subscription_expired | subscription_cancelled | trip_departing | support_reply | support_resolved | corporate_member_added | corporate_member_removed | corporate_reset | general
+  title     String
+  body      String
+  link      String?
+  readAt    DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([userId, readAt])
+}
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  actorId    String?
+  actor      User?    @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
+  action     String
+  entityType String
+  entityId   String?
+  before     String?  // JSON
+  after      String?  // JSON
+  ipAddress  String?
+  userAgent  String?
+  prevHash   String?
+  hash       String
+  createdAt  DateTime @default(now())
+
+  @@index([entityType, entityId])
+  @@index([actorId])
+  @@index([createdAt])
+}
+
+model OutboxEvent {
+  id            String   @id @default(cuid())
+  channel       String   // notification | sms | email | refund | audit | webhook
+  payload       String   // JSON
+  status        String   @default("pending") // pending | processing | delivered | failed | dead
+  attempts      Int      @default(0)
+  maxAttempts   Int      @default(5)
+  nextAttemptAt DateTime @default(now())
+  lastError     String?
+  lockedAt      DateTime?
+  lockedBy      String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@index([status, nextAttemptAt])
+  @@index([channel, status])
+}
+
+model IdempotencyRecord {
+  key              String   @id
+  userId           String?
+  user             User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  method           String
+  path             String
+  requestBodyHash  String
+  responseStatus   Int      @default(0) // 0 = processing
+  responseBody     String   @default("{}") // JSON
+  expiresAt        DateTime
+  createdAt        DateTime @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
+}

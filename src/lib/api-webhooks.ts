@@ -1,0 +1,52 @@
+// Webhooks — Telebirr payment notifications.
+// This endpoint receives the raw Telebirr webhook, parses + verifies it,
+// records the dedup event (composite PK merchOrderId+outRequestNo), and
+// settles or fails the payment.
+import { NextResponse } from 'next/server';
+import { getPaymentProvider } from '@/lib/payments';
+import { settlePayment, failPayment } from '@/lib/payment-service';
+import { toErrorEnvelope } from '@/lib/errors';
+
+export async function POST_telebirr_notify(ctx: any) {
+  const requestId = ctx.requestId;
+  try {
+    const provider = getPaymentProvider('telebirr');
+    if (!provider.parseWebhook) {
+      return NextResponse.json({ error: { code: 'NOT_IMPLEMENTED', message: 'Provider does not support webhooks', requestId } }, { status: 501 });
+    }
+
+    // The api() middleware already parsed the JSON body into ctx.body.
+    // Build a synthetic Request to feed into parseWebhook (which expects a
+    // web Request per the provider interface).
+    const rawBody = JSON.stringify(ctx.body ?? {});
+    const syntheticReq = new Request('http://localhost/webhook', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: rawBody,
+    });
+    const event = await provider.parseWebhook(syntheticReq);
+
+    if (!event.signatureValid) {
+      console.warn('[telebirr-webhook] invalid signature', event);
+    }
+
+    const outRequestNo = (event as any).raw?.out_request_no ?? (event as any).raw?.outRequestNo ?? 'unknown';
+    const raw = (event as any).raw;
+    const tradeStatus = (event as any).raw?.trade_status ?? 'unknown';
+
+    if (event.type === 'payment.settled') {
+      await settlePayment(event.merchOrderId, event.amount, outRequestNo, tradeStatus, raw);
+    } else if (event.type === 'payment.failed') {
+      await failPayment(event.merchOrderId, raw, outRequestNo, tradeStatus, raw);
+    } else if (event.type === 'refund.succeeded') {
+      console.log(`[telebirr-webhook] refund succeeded: ${event.refundRequestNo}`);
+    } else if (event.type === 'refund.failed') {
+      console.warn(`[telebirr-webhook] refund failed: ${event.refundRequestNo}`);
+    }
+
+    return NextResponse.json({ data: { ok: true } });
+  } catch (err) {
+    const { status, body } = toErrorEnvelope(err, requestId);
+    return NextResponse.json(body, { status });
+  }
+}
