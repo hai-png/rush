@@ -73,3 +73,14 @@ export async function GET_admin() {
     },
   };
 }
+
+// GET /api/v1/dashboard/rider/active-trip — the rider's current active trip.
+export async function GET_rider_active_trip({ session }: any) {
+  // Find rides that are 'boarded' (in transit) for this rider.
+  const activeRide = await db.ride.findFirst({
+    where: { userId: session.id, status: 'boarded' },
+    include: { trip: { include: { route: true, shuttle: { include: { contractor: { select: { name: true } } } } } } },
+    orderBy: { createdAt: 'desc' },
+  });
+  return { data: activeRide };
+}

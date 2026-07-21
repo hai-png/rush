@@ -244,3 +244,18 @@ export async function POST_2fa_disable({ session, body }: any) {
   await audit({ actorId: user.id, action: 'user.2fa_disabled', entityType: 'user', entityId: user.id });
   return { status: 204 };
 }
+
+// POST /api/v1/auth/2fa/verify — verify a 2FA code without enabling (for
+// login confirmation when 2FA is already enabled).
+export async function POST_2fa_verify({ session, body }: any) {
+  const { code } = z.object({ code: z.string().length(6) }).parse(body);
+  const user = await db.user.findUnique({ where: { id: session!.id } });
+  if (!user) throw new UnauthorizedError();
+  if (!user.twoFactorEnabled || !user.twoFactorSecret) {
+    throw new BadRequestError('2FA is not enabled');
+  }
+  if (!verifySync({ secret: user.twoFactorSecret, token: code })) {
+    throw new BadRequestError('Invalid 2FA code');
+  }
+  return { data: { verified: true } };
+}

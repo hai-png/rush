@@ -333,3 +333,80 @@ export async function POST_validate_invite({ body }: any) {
   if (invite.usesCount >= invite.maxUses) throw new BadRequestError('Invite is full');
   return { data: { corporateName: invite.corporate.name, subsidyPercent: invite.corporate.subsidyPercent, maxUses: invite.maxUses, usesCount: invite.usesCount } };
 }
+
+// GET /api/v1/corporate/me — alias for GET /corporate (current corporate).
+export async function GET_me({ session }: any) {
+  if (session.role !== 'corporate_admin' && session.role !== 'platform_admin') {
+    throw new ForbiddenError('Corporate admin only');
+  }
+  const corp = await db.corporate.findUnique({
+    where: { adminUserId: session.id },
+    include: {
+      _count: { select: { members: true, subscriptions: true, invites: true } },
+    },
+  });
+  if (!corp) throw new NotFoundError('No corporate found');
+  return { data: corp };
+}
+
+// PATCH /api/v1/corporate — update corporate settings.
+const UpdateCorporateInput = z.object({
+  name: z.string().min(2).max(100).optional(),
+  contactEmail: z.string().email().optional(),
+  contactPhone: z.string().min(8).optional(),
+  subsidyPercent: z.number().int().min(0).max(100).optional(),
+  monthlySeatAllowance: z.number().int().min(1).max(1000).optional(),
+});
+
+export async function PATCH_corporate({ session, body, ipAddress, userAgent }: any) {
+  if (session.role !== 'corporate_admin' && session.role !== 'platform_admin') {
+    throw new ForbiddenError('Corporate admin only');
+  }
+  const input = UpdateCorporateInput.parse(body);
+  const corp = await db.corporate.findUnique({ where: { adminUserId: session.id } });
+  if (!corp) throw new NotFoundError('No corporate found');
+
+  const updated = await db.corporate.update({ where: { id: corp.id }, data: input });
+  await audit({ actorId: session.id, action: 'corporate.updated', entityType: 'corporate', entityId: corp.id, after: input, ipAddress, userAgent });
+  return { data: updated };
+}
+
+// DELETE /api/v1/corporate/members/:id — remove a member (soft delete).
+export async function DELETE_member({ session, params, ipAddress, userAgent }: any) {
+  if (session.role !== 'corporate_admin' && session.role !== 'platform_admin') {
+    throw new ForbiddenError('Corporate admin only');
+  }
+  const corp = await db.corporate.findUnique({ where: { adminUserId: session.id } });
+  if (!corp) throw new NotFoundError('No corporate found');
+  const member = await db.corporateMember.findUnique({ where: { id: params.id } });
+  if (!member || member.corporateId !== corp.id) throw new NotFoundError('Member not found');
+
+  await db.corporateMember.update({
+    where: { id: params.id },
+    data: { isActive: false, deletedAt: new Date() },
+  });
+  await audit({ actorId: session.id, action: 'corporate.member_removed', entityType: 'corporate_member', entityId: params.id, ipAddress, userAgent });
+  return { data: { id: params.id, isActive: false } };
+}
+
+// PATCH /api/v1/corporate/members/:id — update member (e.g. reset rides used).
+const UpdateMemberInput = z.object({
+  ridesUsedThisMonth: z.number().int().min(0).optional(),
+  employeeId: z.string().min(1).max(50).optional(),
+  isActive: z.boolean().optional(),
+});
+
+export async function PATCH_member({ session, params, body, ipAddress, userAgent }: any) {
+  if (session.role !== 'corporate_admin' && session.role !== 'platform_admin') {
+    throw new ForbiddenError('Corporate admin only');
+  }
+  const input = UpdateMemberInput.parse(body);
+  const corp = await db.corporate.findUnique({ where: { adminUserId: session.id } });
+  if (!corp) throw new NotFoundError('No corporate found');
+  const member = await db.corporateMember.findUnique({ where: { id: params.id } });
+  if (!member || member.corporateId !== corp.id) throw new NotFoundError('Member not found');
+
+  const updated = await db.corporateMember.update({ where: { id: params.id }, data: input });
+  await audit({ actorId: session.id, action: 'corporate.member_updated', entityType: 'corporate_member', entityId: params.id, after: input, ipAddress, userAgent });
+  return { data: updated };
+}

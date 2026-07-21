@@ -113,3 +113,146 @@ export async function POST_complete({ session, params, ipAddress, userAgent }: a
   }
   return { data: { id: trip.id, status: 'completed' } };
 }
+
+// ─── Trip + Ride updates ────────────────────────────────────────────────────
+import { z as z2 } from 'zod';
+
+const TripUpdateInput = z2.object({
+  status: z2.enum(['scheduled', 'in_transit', 'completed', 'cancelled']).optional(),
+  departureAt: z2.string().datetime().optional(),
+  driverId: z2.string().optional(),
+});
+
+export async function PATCH_trip({ session, params, body, ipAddress, userAgent }: any) {
+  const input = TripUpdateInput.parse(body);
+  const trip = await db.trip.findUnique({ where: { id: params.id } });
+  if (!trip) throw new NotFoundError('Trip not found');
+  // Only the driver or admin can update.
+  if (session.role !== 'platform_admin' && trip.driverId !== session.id) {
+    throw new ForbiddenError('Not your trip');
+  }
+  const updated = await db.trip.update({
+    where: { id: params.id },
+    data: {
+      ...(input.status && { status: input.status }),
+      ...(input.departureAt && { departureAt: new Date(input.departureAt) }),
+      ...(input.driverId && { driverId: input.driverId }),
+    },
+    include: { route: true, shuttle: true },
+  });
+  await audit({ actorId: session.id, action: 'trip.updated', entityType: 'trip', entityId: params.id, after: input, ipAddress, userAgent });
+  return { data: updated };
+}
+
+const RideUpdateInput = z2.object({
+  status: z2.enum(['booked', 'boarded', 'completed', 'no_show', 'cancelled']).optional(),
+});
+
+export async function PATCH_ride({ session, params, body, ipAddress, userAgent }: any) {
+  const input = RideUpdateInput.parse(body);
+  const ride = await db.ride.findUnique({ where: { id: params.id } });
+  if (!ride) throw new NotFoundError('Ride not found');
+  // The rider themselves, the trip's driver, or admin can update.
+  if (session.role !== 'platform_admin' && ride.userId !== session.id) {
+    // Check if session user is the driver of this ride's trip.
+    const trip = await db.trip.findUnique({ where: { id: ride.tripId } });
+    if (!trip || trip.driverId !== session.id) {
+      throw new ForbiddenError('Not your ride');
+    }
+  }
+  const updated = await db.ride.update({ where: { id: params.id }, data: input, include: { trip: { include: { route: true } } } });
+  await audit({ actorId: session.id, action: 'ride.updated', entityType: 'ride', entityId: params.id, after: input, ipAddress, userAgent });
+  return { data: updated };
+}
+
+// POST /api/v1/trips — create a trip (alternative to /admin/trips).
+const TripCreateInput = z2.object({
+  routeId: z2.string().min(1),
+  shuttleId: z2.string().min(1),
+  departureAt: z2.string().datetime(),
+  window: z2.enum(['morning', 'evening']),
+});
+
+export async function POST_trip({ session, body, ipAddress, userAgent }: any) {
+  const input = TripCreateInput.parse(body);
+  const shuttle = await db.shuttle.findUnique({ where: { id: input.shuttleId } });
+  if (!shuttle) throw new NotFoundError('Shuttle not found');
+  if (session.role === 'contractor' && shuttle.contractorId !== session.id) {
+    throw new BadRequestError('You can only create trips on your own shuttles');
+  }
+  const route = await db.route.findUnique({ where: { id: input.routeId } });
+  if (!route || !route.isActive) throw new NotFoundError('Route not found');
+
+  const trip = await db.trip.create({
+    data: {
+      routeId: input.routeId,
+      shuttleId: input.shuttleId,
+      driverId: shuttle.contractorId,
+      departureAt: new Date(input.departureAt),
+      window: input.window,
+      status: 'scheduled',
+    },
+    include: { route: true, shuttle: true },
+  });
+  await audit({ actorId: session.id, action: 'trip.created', entityType: 'trip', entityId: trip.id, after: input, ipAddress, userAgent });
+  return { status: 201, data: trip };
+}
+
+// ─── Shuttle positions (GPS tracking) ───────────────────────────────────────
+// For MVP, we store shuttle positions in-memory (no schema change needed).
+// In production, this would be a ShuttlePosition table + Redis for the live stream.
+
+const positions = new Map<string, { lat: number; lng: number; heading: number; speed: number; updatedAt: number }>();
+
+const PositionInput = z2.object({
+  lat: z2.number().min(-90).max(90),
+  lng: z2.number().min(-180).max(180),
+  heading: z2.number().min(0).max(360).optional(),
+  speed: z2.number().min(0).optional(),
+});
+
+export async function POST_shuttle_position({ session, body }: any) {
+  const input = PositionInput.parse(body);
+  // The contractor's shuttle — find it from their account.
+  if (session.role !== 'contractor' && session.role !== 'platform_admin') {
+    throw new ForbiddenError('Contractor only');
+  }
+  // For MVP, key the position by userId. In production, key by shuttleId.
+  positions.set(session.id, {
+    lat: input.lat,
+    lng: input.lng,
+    heading: input.heading ?? 0,
+    speed: input.speed ?? 0,
+    updatedAt: Date.now(),
+  });
+  return { data: { ok: true } };
+}
+
+export async function GET_shuttle_positions({ session }: any) {
+  // Return all positions (anonymized — no userId).
+  const result: Array<{ lat: number; lng: number; heading: number; speed: number; updatedAt: number }> = [];
+  for (const [, pos] of positions) {
+    // Only include positions updated in the last 5 minutes.
+    if (Date.now() - pos.updatedAt < 5 * 60_000) {
+      result.push(pos);
+    }
+  }
+  return { data: result };
+}
+
+// GET /api/v1/shuttle-positions/stream — Server-Sent Events stream.
+// This is a raw handler (not via api() wrapper) because it returns a stream.
+import { NextRequest, NextResponse } from 'next/server';
+
+export async function handleShuttlePositionStream(req: NextRequest, session: any): Promise<NextResponse> {
+  if (!session) {
+    return NextResponse.json({ error: { code: 'UNAUTHORIZED', message: 'Sign in required' } }, { status: 401 });
+  }
+  // For MVP, return a simple polling response (not a real SSE stream).
+  // A real implementation would use a ReadableStream + text/event-stream.
+  const result: Array<{ lat: number; lng: number; heading: number; speed: number; updatedAt: number }> = [];
+  for (const [, pos] of positions) {
+    if (Date.now() - pos.updatedAt < 5 * 60_000) result.push(pos);
+  }
+  return NextResponse.json({ data: result });
+}

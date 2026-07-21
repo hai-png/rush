@@ -50,6 +50,7 @@ import * as marketplace from '@/lib/api-marketplace';
 import * as operations from '@/lib/api-operations';
 import * as support from '@/lib/api-support';
 import * as admin from '@/lib/api-admin';
+import * as adminAdvanced from '@/lib/api-admin-advanced';
 import * as webhooks from '@/lib/api-webhooks';
 import * as cron from '@/lib/api-cron';
 import * as tos from '@/lib/api-tos';
@@ -81,11 +82,13 @@ const ROUTES: RouteEntry[] = [
   r('POST', '/auth/password/reset/confirm', { exemptFromTosGate: true }, identity.POST_password_reset_confirm),
   r('POST', '/auth/2fa/setup', { requireAuth: true }, identity.POST_2fa_setup),
   r('POST', '/auth/2fa/enable', { requireAuth: true }, identity.POST_2fa_enable),
+  r('POST', '/auth/2fa/verify', { requireAuth: true }, identity.POST_2fa_verify),
   r('POST', '/auth/2fa/disable', { requireAuth: true }, identity.POST_2fa_disable),
 
   // Catalog (public)
   r('GET', '/plans', {}, catalog.GET_plans),
   r('GET', '/routes', {}, catalog.GET_routes),
+  r('GET', '/routes/:id', {}, catalog.GET_route),
   r('GET', '/shuttles', {}, catalog.GET_shuttles),
   r('GET', '/trips', {}, catalog.GET_trips),
   r('GET', '/faqs', {}, catalog.GET_faqs),
@@ -95,6 +98,7 @@ const ROUTES: RouteEntry[] = [
   r('POST', '/subscriptions', { requireAuth: true }, subscriptions.POST_create),
   r('GET', '/subscriptions/:id', { requireAuth: true }, subscriptions.GET_one),
   r('POST', '/subscriptions/:id/cancel', { requireAuth: true }, subscriptions.POST_cancel),
+  r('POST', '/subscriptions/:id/renew', { requireAuth: true }, subscriptions.POST_renew),
 
   // Payments
   r('POST', '/payments/checkout', { requireAuth: true }, payments.POST_checkout),
@@ -104,35 +108,58 @@ const ROUTES: RouteEntry[] = [
 
   // Marketplace (seat releases / claims)
   r('GET', '/marketplace/seat-releases', { requireAuth: true }, marketplace.GET_releases),
+  r('GET', '/marketplace/seat-releases/:id', { requireAuth: true }, marketplace.GET_release),
   r('GET', '/marketplace/my-releases', { requireAuth: true }, marketplace.GET_my_releases),
   r('POST', '/marketplace/seat-releases', { requireAuth: true }, marketplace.POST_create_release),
   r('POST', '/marketplace/seat-releases/:id/claim', { requireAuth: true }, marketplace.POST_claim),
   r('POST', '/marketplace/seat-releases/:id/cancel', { requireAuth: true }, marketplace.POST_cancel_release),
+  r('DELETE', '/marketplace/seat-releases/:id', { requireAuth: true }, marketplace.DELETE_release),
+  r('GET', '/marketplace/seat-claims', { requireAuth: true }, marketplace.GET_claims),
+  r('GET', '/marketplace/seat-claims/:id', { requireAuth: true }, marketplace.GET_claim),
+  r('POST', '/marketplace/seat-claims', { requireAuth: true }, marketplace.POST_claim_direct),
 
   // Operations (rides, trips)
   r('GET', '/rides', { requireAuth: true }, operations.GET_rides),
   r('POST', '/rides', { requireAuth: true }, operations.POST_ride),
+  r('PATCH', '/rides/:id', { requireAuth: true }, operations.PATCH_ride),
+  r('POST', '/trips', { requireAuth: true, requireRole: ['contractor', 'platform_admin'] }, operations.POST_trip),
+  r('PATCH', '/trips/:id', { requireAuth: true, requireRole: ['contractor', 'platform_admin'] }, operations.PATCH_trip),
   r('POST', '/trips/:id/board', { requireAuth: true, requireRole: ['contractor', 'platform_admin'] }, operations.POST_board),
   r('POST', '/trips/:id/complete', { requireAuth: true, requireRole: ['contractor', 'platform_admin'] }, operations.POST_complete),
+  r('GET', '/shuttle-positions', { requireAuth: true }, operations.GET_shuttle_positions),
+  r('POST', '/shuttle-positions', { requireAuth: true, requireRole: ['contractor', 'platform_admin'] }, operations.POST_shuttle_position),
+  r('GET', '/shuttle-positions/stream', { requireAuth: true }, operations.handleShuttlePositionStream, true),
 
   // Support
   r('GET', '/tickets', { requireAuth: true }, support.GET_list),
   r('POST', '/tickets', { requireAuth: true }, support.POST_create),
   r('GET', '/tickets/:id', { requireAuth: true }, support.GET_one),
+  r('PATCH', '/tickets/:id', { requireAuth: true }, support.PATCH_ticket),
+  r('GET', '/tickets/:id/messages', { requireAuth: true }, support.GET_messages),
   r('POST', '/tickets/:id/messages', { requireAuth: true }, support.POST_message),
   r('POST', '/tickets/:id/messages/with-attachment', { requireAuth: true }, support.handleTicketMessageWithAttachment, true),
 
   // Engagement (notifications)
   r('GET', '/notifications', { requireAuth: true }, engagement.GET_notifications),
+  r('GET', '/notifications/unread-count', { requireAuth: true }, engagement.GET_unread_count),
+  r('GET', '/notifications/preferences', { requireAuth: true }, engagement.GET_preferences),
   r('POST', '/notifications/:id/read', { requireAuth: true }, engagement.POST_mark_read),
+  r('PATCH', '/notifications/:id', { requireAuth: true }, engagement.PATCH_notification),
+  r('DELETE', '/notifications/:id', { requireAuth: true }, engagement.DELETE_notification),
   r('POST', '/notifications/read-all', { requireAuth: true }, engagement.POST_mark_all_read),
+  r('PATCH', '/notifications/preferences', { requireAuth: true }, engagement.PATCH_preferences),
+  r('POST', '/devices', { requireAuth: true }, engagement.POST_device),
+  r('DELETE', '/devices', { requireAuth: true }, engagement.DELETE_device),
 
   // Account
+  r('GET', '/account', { requireAuth: true }, account.GET_account),
+  r('PATCH', '/account', { requireAuth: true }, account.PATCH_account),
   r('GET', '/account/export', { requireAuth: true }, account.GET_export),
   r('POST', '/account/delete', { requireAuth: true, exemptFromTosGate: true }, account.POST_delete),
 
   // Dashboard
   r('GET', '/dashboard/rider', { requireAuth: true, requireRole: ['rider', 'platform_admin'] }, dashboard.GET_rider),
+  r('GET', '/dashboard/rider/active-trip', { requireAuth: true, requireRole: ['rider', 'platform_admin'] }, dashboard.GET_rider_active_trip),
   r('GET', '/dashboard/contractor', { requireAuth: true, requireRole: ['contractor', 'platform_admin'] }, dashboard.GET_contractor),
   r('GET', '/dashboard/corporate', { requireAuth: true, requireRole: ['corporate_admin', 'platform_admin'] }, dashboard.GET_corporate),
   r('GET', '/dashboard/admin', { requireAuth: true, requireRole: ['platform_admin'] }, dashboard.GET_admin),
@@ -163,6 +190,21 @@ const ROUTES: RouteEntry[] = [
   r('POST', '/admin/audit/verify', { requireAuth: true, requireRole: ['platform_admin'] }, admin.POST_audit_verify),
   r('POST', '/admin/trips', { requireAuth: true, requireRole: ['platform_admin', 'contractor'] }, admin.POST_trips),
 
+  // Admin advanced (feature parity)
+  r('GET',  '/admin/dashboard', { requireAuth: true, requireRole: ['platform_admin'] }, adminAdvanced.GET_dashboard),
+  r('PATCH', '/admin/users/:id', { requireAuth: true, requireRole: ['platform_admin'] }, adminAdvanced.PATCH_user),
+  r('POST', '/admin/users/:id/impersonate', { requireAuth: true, requireRole: ['platform_admin'] }, adminAdvanced.POST_impersonate),
+  r('GET',  '/admin/contractors/pending', { requireAuth: true, requireRole: ['platform_admin'] }, adminAdvanced.GET_pending_contractors),
+  r('POST', '/admin/contractors/:id/reject', { requireAuth: true, requireRole: ['platform_admin'] }, adminAdvanced.POST_reject_contractor),
+  r('GET',  '/admin/corporates/pending', { requireAuth: true, requireRole: ['platform_admin'] }, adminAdvanced.GET_pending_corporates),
+  r('POST', '/admin/corporates/:id/activate', { requireAuth: true, requireRole: ['platform_admin'] }, adminAdvanced.POST_activate_corporate),
+  r('GET',  '/admin/subscriptions', { requireAuth: true, requireRole: ['platform_admin'] }, adminAdvanced.GET_admin_subscriptions),
+  r('POST', '/admin/payments/:id/verify', { requireAuth: true, requireRole: ['platform_admin'] }, adminAdvanced.POST_verify_payment),
+  r('POST', '/admin/refunds', { requireAuth: true, requireRole: ['platform_admin'] }, adminAdvanced.POST_admin_refund),
+  r('GET',  '/admin/export/:resource', { requireAuth: true, requireRole: ['platform_admin'] }, adminAdvanced.GET_export_csv),
+  r('DELETE', '/admin/routes/:id', { requireAuth: true, requireRole: ['platform_admin'] }, adminAdvanced.DELETE_route),
+  r('DELETE', '/admin/shuttles/:id', { requireAuth: true, requireRole: ['platform_admin'] }, adminAdvanced.DELETE_shuttle),
+
   // Contractor-scoped (the contractor themselves, not admin-gated)
   r('GET', '/contractor/shuttles', { requireAuth: true, requireRole: ['contractor'] }, admin.GET_my_shuttles),
   r('GET', '/contractor/trips', { requireAuth: true, requireRole: ['contractor'] }, admin.GET_my_trips),
@@ -172,6 +214,7 @@ const ROUTES: RouteEntry[] = [
 
   // Health (public — for uptime checks + load balancer probes)
   r('GET', '/health', { exemptFromTosGate: true }, health.GET_health),
+  r('GET', '/healthz', { exemptFromTosGate: true }, health.GET_healthz),
 
   // Cron (secret-gated)
   r('POST', '/cron/run', { exemptFromTosGate: true }, cron.POST_run),
@@ -186,6 +229,8 @@ const ROUTES: RouteEntry[] = [
   // Corporate
   r('POST', '/corporate/onboard', { requireAuth: true }, corporate.POST_onboard),
   r('GET',  '/corporate', { requireAuth: true, requireRole: ['corporate_admin', 'platform_admin'] }, corporate.GET_current),
+  r('GET',  '/corporate/me', { requireAuth: true, requireRole: ['corporate_admin', 'platform_admin'] }, corporate.GET_me),
+  r('PATCH', '/corporate', { requireAuth: true, requireRole: ['corporate_admin', 'platform_admin'] }, corporate.PATCH_corporate),
   r('GET',  '/corporate/invites', { requireAuth: true, requireRole: ['corporate_admin', 'platform_admin'] }, corporate.GET_invites),
   r('POST', '/corporate/invites', { requireAuth: true, requireRole: ['corporate_admin', 'platform_admin'] }, corporate.POST_invite),
   r('POST', '/corporate/signup', { requireAuth: true, requireRole: ['rider'] }, corporate.POST_signup),
@@ -193,6 +238,8 @@ const ROUTES: RouteEntry[] = [
   r('GET',  '/corporate/members', { requireAuth: true, requireRole: ['corporate_admin', 'platform_admin'] }, corporate.GET_members),
   r('POST', '/corporate/members/:id/approve', { requireAuth: true, requireRole: ['corporate_admin', 'platform_admin'] }, corporate.POST_approve),
   r('POST', '/corporate/members/:id/reject', { requireAuth: true, requireRole: ['corporate_admin', 'platform_admin'] }, corporate.POST_reject),
+  r('PATCH', '/corporate/members/:id', { requireAuth: true, requireRole: ['corporate_admin', 'platform_admin'] }, corporate.PATCH_member),
+  r('DELETE', '/corporate/members/:id', { requireAuth: true, requireRole: ['corporate_admin', 'platform_admin'] }, corporate.DELETE_member),
 
   // Contractor documents (multipart — raw handler)
   r('GET',  '/contractor/documents', { requireAuth: true, requireRole: ['contractor', 'platform_admin'] }, documents.GET_documents),
