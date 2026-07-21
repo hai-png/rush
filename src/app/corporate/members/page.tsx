@@ -6,7 +6,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { SignOutButton } from '@/components/sign-out-button';
-import { MemberActions } from '../dashboard/corporate/member-actions';
+import { MemberActions } from '@/app/dashboard/corporate/member-actions';
 
 export default async function CorporateMembersPage() {
   const session = await requireRole('corporate_admin', 'platform_admin');
