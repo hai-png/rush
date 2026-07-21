@@ -404,3 +404,17 @@ export async function recomputeContractorRating(contractorId: string): Promise<v
     data: { rating },
   });
 }
+
+const FaqInput = z.object({
+  category: z.enum(['general', 'billing', 'routes', 'shuttle', 'account', 'corporate']),
+  question: z.string().min(1).max(500),
+  answer: z.string().min(1).max(5000),
+  sortOrder: z.number().int().default(0),
+});
+
+export async function POST_faq({ session, body, ipAddress, userAgent }: any) {
+  const input = FaqInput.parse(body);
+  const faq = await db.faqArticle.create({ data: input });
+  await audit({ actorId: session.id, action: 'faq.created', entityType: 'faq_article', entityId: faq.id, after: input, ipAddress, userAgent });
+  return { status: 201, data: faq };
+}

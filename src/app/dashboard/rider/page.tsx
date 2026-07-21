@@ -130,14 +130,14 @@ export default async function RiderDashboardPage() {
             <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
               <Button asChild variant="outline"><Link href="/assignments"><Calendar className="h-4 w-4 mr-1" /> Browse routes</Link></Button>
               <Button asChild variant="outline"><Link href="/trips"><Calendar className="h-4 w-4 mr-1" /> Browse trips</Link></Button>
+              <Button asChild variant="outline"><Link href="/dashboard/rider/subscriptions">My subscriptions</Link></Button>
+              <Button asChild variant="outline"><Link href="/dashboard/rider/payments">Payment history</Link></Button>
+              <Button asChild variant="outline"><Link href="/dashboard/rider/rides">Ride history</Link></Button>
+              <Button asChild variant="outline"><Link href="/open-seats/new"><Plus className="h-4 w-4 mr-1" /> List a seat</Link></Button>
+              <Button asChild variant="outline"><Link href="/dashboard/rider/listings">My listings</Link></Button>
+              <Button asChild variant="outline"><Link href="/dashboard/rider/security">Security</Link></Button>
               <Button asChild variant="outline"><Link href="/tickets/new"><Ticket className="h-4 w-4 mr-1" /> New ticket</Link></Button>
               <Button asChild variant="outline"><Link href="/notifications"><Bell className="h-4 w-4 mr-1" /> Notifications</Link></Button>
-              <Button asChild variant="outline"><Link href="/open-seats/new"><Plus className="h-4 w-4 mr-1" /> List a seat</Link></Button>
-<<<<<<< HEAD
-=======
-              <Button asChild variant="outline"><Link href="/dashboard/rider/listings">My listings</Link></Button>
-              <Button asChild variant="outline"><Link href="/account/export">Export data</Link></Button>
->>>>>>> main
             </div>
           </section>
         </div>
