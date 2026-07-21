@@ -37,7 +37,7 @@ function uploadDir(): string {
 
 export async function saveFile(
   file: File,
-  namespace: string, // e.g. 'contractor-docs'
+  namespace: string,
 ): Promise<UploadedFileMeta> {
   const env = loadEnv();
   const maxBytes = env.UPLOAD_MAX_BYTES || 10 * 1024 * 1024;
@@ -46,8 +46,6 @@ export async function saveFile(
     throw new FileUploadError(`File too large (max ${maxBytes / 1024 / 1024}MB)`);
   }
 
-  // Validate MIME type from the browser's Content-Type. Trust but verify by
-  // checking the extension too. A real AV scan would inspect the bytes.
   const ext = extname(file.name).toLowerCase();
   if (!ALLOWED_EXTENSIONS.has(ext)) {
     throw new FileUploadError(`File extension "${ext}" not allowed. Allowed: ${[...ALLOWED_EXTENSIONS].join(', ')}`);
@@ -56,17 +54,13 @@ export async function saveFile(
     throw new FileUploadError(`MIME type "${file.type}" not allowed`);
   }
 
-  // Read bytes + compute SHA256.
   const bytes = new Uint8Array(await file.arrayBuffer());
   const checksum = createHash('sha256').update(bytes).digest('hex');
 
-  // Storage key: <namespace>/<random-id>.<ext>
-  // Use a random UUID for the filename so multiple uploads of the same file
-  // don't collide on the storageKey @unique constraint.
-  const id = crypto.randomUUID();
+  // Random UUID filename so multiple uploads of the same file don't collide.
+  const id = randomUUID();
   const storageKey = `${namespace}/${id}${ext}`;
 
-  // Ensure the directory exists, then write.
   const fullPath = join(uploadDir(), storageKey);
   await mkdir(join(fullPath, '..'), { recursive: true });
   await writeFile(fullPath, bytes);
@@ -81,7 +75,6 @@ export async function saveFile(
 }
 
 export async function readFileBytes(storageKey: string): Promise<Buffer> {
-  // Prevent path traversal — storageKey must not contain '..' or start with '/'.
   if (storageKey.includes('..') || storageKey.startsWith('/')) {
     throw new FileUploadError('Invalid storage key');
   }

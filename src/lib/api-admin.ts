@@ -3,9 +3,11 @@
 import { db } from '@/lib/db';
 import { z } from 'zod';
 import { Money } from '@/lib/money';
-import { NotFoundError, BadRequestError } from '@/lib/errors';
+import { NotFoundError, BadRequestError, ForbiddenError } from '@/lib/errors';
 import { audit } from '@/lib/audit';
 import { verifyAuditChain } from '@/lib/audit';
+import { scheduleRefund } from '@/lib/payment-service';
+import { enqueueNotification } from '@/lib/outbox';
 
 export async function GET_users({ session }: any) {
   const users = await db.user.findMany({
@@ -142,6 +144,10 @@ export async function POST_ticket_message({ session, params, body }: any) {
     body: z.string().min(1).max(10_000),
     status: z.enum(['open', 'in_progress', 'resolved', 'closed']).optional(),
   }).parse(body);
+
+  const ticket = await db.supportTicket.findUnique({ where: { id: params.id } });
+  if (!ticket) throw new NotFoundError('Ticket not found');
+
   const msg = await db.$transaction(async (tx) => {
     const m = await tx.ticketMessage.create({ data: { ticketId: params.id, authorId: session.id, body: messageBody } });
     if (status) {
@@ -149,6 +155,18 @@ export async function POST_ticket_message({ session, params, body }: any) {
     }
     return m;
   });
+
+  // Notify the ticket owner (the rider) that admin replied.
+  if (ticket.userId !== session.id) {
+    await enqueueNotification({
+      userId: ticket.userId,
+      type: 'support_reply',
+      title: 'New reply on your ticket',
+      body: messageBody.slice(0, 100),
+      link: `/tickets/${ticket.id}`,
+    });
+  }
+
   return { status: 201, data: msg };
 }
 
@@ -219,3 +237,177 @@ export async function GET_my_trips({ session }: any) {
 
 // Keep Money import for future use (admin endpoints may need it).
 void Money;
+
+// ─── Payment detail + refund ────────────────────────────────────────────────
+
+export async function GET_payment({ params }: any) {
+  const payment = await db.payment.findUnique({
+    where: { id: params.id },
+    include: {
+      user: { select: { id: true, name: true, phone: true, email: true } },
+      subscription: { include: { plan: true } },
+      seatClaim: { include: { seatRelease: { include: { trip: { include: { route: true } } } } } },
+      refundRetries: { orderBy: { createdAt: 'desc' } },
+    },
+  });
+  if (!payment) throw new NotFoundError('Payment not found');
+  return { data: payment };
+}
+
+const RefundInput = z.object({
+  amount: z.number().positive(),
+  reason: z.string().min(1).max(500),
+});
+
+export async function POST_refund({ session, params, body, ipAddress, userAgent }: any) {
+  const input = RefundInput.parse(body);
+  await scheduleRefund(params.id, Money.fromETB(input.amount), input.reason);
+  await audit({
+    actorId: session.id,
+    action: 'refund.admin_triggered',
+    entityType: 'payment',
+    entityId: params.id,
+    after: { amount: input.amount, reason: input.reason },
+    ipAddress, userAgent,
+  });
+  return { status: 202, data: { ok: true, message: 'Refund scheduled' } };
+}
+
+// ─── Plan edit/disable ──────────────────────────────────────────────────────
+
+const PlanUpdateInput = z.object({
+  name: z.string().min(1).optional(),
+  description: z.string().optional(),
+  priceCents: z.number().int().nonnegative().optional(),
+  ridesIncluded: z.number().int().optional(),
+  durationDays: z.number().int().positive().optional(),
+  isActive: z.boolean().optional(),
+  sortOrder: z.number().int().optional(),
+});
+
+export async function PATCH_plan({ session, params, body, ipAddress, userAgent }: any) {
+  const input = PlanUpdateInput.parse(body);
+  const existing = await db.subscriptionPlan.findUnique({ where: { id: params.id } });
+  if (!existing) throw new NotFoundError('Plan not found');
+  if (input.isTrial === true && (input.ridesIncluded ?? existing.ridesIncluded) === -1) {
+    throw new BadRequestError('Trial plans cannot be unlimited');
+  }
+  const updated = await db.subscriptionPlan.update({ where: { id: params.id }, data: input });
+  await audit({ actorId: session.id, action: 'plan.updated', entityType: 'subscription_plan', entityId: params.id, after: input, ipAddress, userAgent });
+  return { data: updated };
+}
+
+// ─── Route edit/disable ─────────────────────────────────────────────────────
+
+const RouteUpdateInput = z.object({
+  origin: z.string().min(1).optional(),
+  destination: z.string().min(1).optional(),
+  distanceKm: z.number().positive().optional(),
+  durationMin: z.number().int().positive().optional(),
+  fareCents: z.number().int().nonnegative().optional(),
+  isActive: z.boolean().optional(),
+});
+
+export async function PATCH_route({ session, params, body, ipAddress, userAgent }: any) {
+  const input = RouteUpdateInput.parse(body);
+  const existing = await db.route.findUnique({ where: { id: params.id } });
+  if (!existing) throw new NotFoundError('Route not found');
+  const updated = await db.route.update({ where: { id: params.id }, data: input });
+  await audit({ actorId: session.id, action: 'route.updated', entityType: 'route', entityId: params.id, after: input, ipAddress, userAgent });
+  return { data: updated };
+}
+
+// ─── Shuttle edit/disable ───────────────────────────────────────────────────
+
+const ShuttleUpdateInput = z.object({
+  model: z.string().min(1).optional(),
+  vehicleType: z.enum(['coaster', 'minibus', 'van', 'sedan']).optional(),
+  capacity: z.number().int().min(1).max(100).optional(),
+  year: z.number().int().min(1990).max(new Date().getFullYear() + 1).optional(),
+  isActive: z.boolean().optional(),
+});
+
+export async function PATCH_shuttle({ session, params, body, ipAddress, userAgent }: any) {
+  const input = ShuttleUpdateInput.parse(body);
+  const existing = await db.shuttle.findUnique({ where: { id: params.id } });
+  if (!existing) throw new NotFoundError('Shuttle not found');
+  const updated = await db.shuttle.update({ where: { id: params.id }, data: input });
+  await audit({ actorId: session.id, action: 'shuttle.updated', entityType: 'shuttle', entityId: params.id, after: input, ipAddress, userAgent });
+  return { data: updated };
+}
+
+// ─── Trips ───────────────────────────────────────────────────────────────────
+// Admin can create a trip on any route+shuttle; contractor can create trips
+// only on their own shuttles.
+
+const TripInput = z.object({
+  routeId: z.string().min(1),
+  shuttleId: z.string().min(1),
+  departureAt: z.string().datetime(),
+  window: z.enum(['morning', 'evening']),
+});
+
+export async function POST_trips({ body, session, ipAddress, userAgent }: any) {
+  const input = TripInput.parse(body);
+
+  const shuttle = await db.shuttle.findUnique({ where: { id: input.shuttleId } });
+  if (!shuttle) throw new NotFoundError('Shuttle not found');
+  if (session.role === 'contractor' && shuttle.contractorId !== session.id) {
+    throw new BadRequestError('You can only create trips on your own shuttles');
+  }
+
+  const route = await db.route.findUnique({ where: { id: input.routeId } });
+  if (!route || !route.isActive) throw new NotFoundError('Route not found');
+
+  const trip = await db.trip.create({
+    data: {
+      routeId: input.routeId,
+      shuttleId: input.shuttleId,
+      driverId: shuttle.contractorId,
+      departureAt: new Date(input.departureAt),
+      window: input.window,
+      status: 'scheduled',
+    },
+    include: { route: true, shuttle: true },
+  });
+  await audit({ actorId: session.id, action: 'trip.created', entityType: 'trip', entityId: trip.id, after: input, ipAddress, userAgent });
+  return { status: 201, data: trip };
+}
+
+// Contractor: list their own shuttles (for the trip-creation form).
+export async function GET_my_shuttles({ session }: any) {
+  if (session.role !== 'contractor') throw new ForbiddenError('Contractor only');
+  const shuttles = await db.shuttle.findMany({ where: { contractorId: session.id }, orderBy: { plate: 'asc' } });
+  return { data: shuttles };
+}
+
+// Contractor: list their trips (past + upcoming).
+export async function GET_my_trips({ session }: any) {
+  if (session.role !== 'contractor') throw new ForbiddenError('Contractor only');
+  const trips = await db.trip.findMany({
+    where: { driverId: session.id },
+    include: { route: true, shuttle: true },
+    orderBy: { departureAt: 'desc' },
+    take: 50,
+  });
+  return { data: trips };
+}
+
+// ─── Contractor rating auto-update ──────────────────────────────────────────
+export async function recomputeContractorRating(contractorId: string): Promise<void> {
+  const completedRides = await db.ride.count({
+    where: { status: 'completed', trip: { driverId: contractorId } },
+  });
+  if (completedRides === 0) return;
+  const cancelledRides = await db.ride.count({
+    where: { status: 'cancelled', trip: { driverId: contractorId } },
+  });
+  const totalRides = completedRides + cancelledRides;
+  if (totalRides === 0) return;
+  const ratio = cancelledRides / totalRides;
+  const rating = Math.max(3.0, Math.min(5.0, 5.0 - ratio * 2));
+  await db.contractorProfile.update({
+    where: { id: contractorId },
+    data: { rating },
+  });
+}

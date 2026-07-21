@@ -45,7 +45,10 @@ export default async function ContractorTripsPage() {
           {shuttles.length === 0 || routes.length === 0 ? (
             <Card><CardContent className="py-4 text-center text-muted-foreground text-sm">
               You need at least one shuttle and one active route before scheduling a trip.
+<<<<<<< HEAD
               {shuttles.length === 0 && <div className="mt-2"><Button asChild size="sm" variant="outline"><Link href="/dashboard/contractor">Register a shuttle (ask admin)</Link></Button></div>}
+=======
+>>>>>>> main
             </CardContent></Card>
           ) : (
             <CreateTripForm shuttles={shuttles} routes={routes} />

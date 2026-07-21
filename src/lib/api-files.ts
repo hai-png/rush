@@ -1,26 +1,11 @@
 // File upload + download endpoints. Used by contractor onboarding documents
-// and any future upload needs (corporate logos, support ticket attachments).
-//
-// Uploads are multipart/form-data; downloads are GET with auth.
+// and support ticket attachments.
 
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { api } from '@/lib/api';
 import { saveFile, readFileBytes, FileUploadError } from '@/lib/file-storage';
-import { BadRequestError, NotFoundError, ForbiddenError, toErrorEnvelope } from '@/lib/errors';
+import { NotFoundError, ForbiddenError, toErrorEnvelope } from '@/lib/errors';
 import { audit } from '@/lib/audit';
-import { z } from 'zod';
-
-// POST /api/v1/files/upload
-// Multipart form-data with field "file" (the bytes).
-// Returns { id, storageKey, originalFilename, mimeType, sizeBytes }.
-export async function POST_upload({ session }: any) {
-  // Note: api() middleware parsed JSON body, but for multipart we need the
-  // raw request. We can't get it here easily, so this handler is wired up
-  // as a raw route handler in the route table — see api-routes.ts which
-  // calls it with the original NextRequest via a special case.
-  throw new Error('POST_upload must be called via the multipart route handler');
-}
 
 // Standalone route handler for multipart upload (not via api() wrapper).
 export async function handleFileUpload(req: NextRequest, session: any): Promise<NextResponse> {
@@ -62,9 +47,7 @@ export async function handleFileUpload(req: NextRequest, session: any): Promise<
   }
 }
 
-// GET /api/v1/files/:id
-// Streams the file content. Auth required; only the uploader (or a platform_admin)
-// can download. Contractor docs are visible to admins too — see documents routes.
+// GET /api/v1/files/:id — streams the file content. Auth required.
 export async function handleFileDownload(req: NextRequest, session: any, params: { id: string }): Promise<NextResponse> {
   const requestId = crypto.randomUUID();
   try {
@@ -75,10 +58,8 @@ export async function handleFileDownload(req: NextRequest, session: any, params:
     const file = await db.uploadedFile.findUnique({ where: { id: fileId } });
     if (!file) throw new NotFoundError('File not found');
 
-    // Permission: uploader, platform_admin, or (for contractor docs) any admin.
     const isOwner = file.uploaderId === session.id;
     const isAdmin = session.role === 'platform_admin';
-    // Check if this file is a contractor document — if so, allow platform_admin.
     const contractorDoc = await db.contractorDocument.findFirst({ where: { fileId: file.id } });
     let canAccess = isOwner || isAdmin;
     if (contractorDoc && session.role === 'platform_admin') canAccess = true;

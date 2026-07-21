@@ -166,9 +166,11 @@ export async function failPayment(reference: string, reasonRaw: unknown, outRequ
 
 // Row-locked refund scheduling — PAY-003 fix baked in.
 export async function scheduleRefund(paymentId: string, amount: Money, reason: string): Promise<void> {
+  // Side effects (audit) collected during the tx and run AFTER the tx commits
+  // — calling audit() inside would deadlock SQLite's single writer.
+  const sideEffects: Array<() => Promise<void>> = [];
+
   await db.$transaction(async (tx) => {
-    // SQLite doesn't support SELECT FOR UPDATE; we rely on $transaction isolation
-    // (SERIALIZABLE by default in our wrapper). For Postgres we'd add .for('update').
     const payment = await tx.payment.findUnique({ where: { id: paymentId } });
     if (!payment) throw new NotFoundError(`Payment ${paymentId} not found`);
     if (payment.status !== 'completed') throw new BadRequestError('Only completed payments can be refunded');
@@ -193,14 +195,22 @@ export async function scheduleRefund(paymentId: string, amount: Money, reason: s
         reason,
       },
     });
-    await audit({
-      actorId: payment.userId,
-      action: 'refund.scheduled',
-      entityType: 'payment',
-      entityId: paymentId,
-      after: { amountCents: amount.cents, refundRequestNo, reason },
+    const userId = payment.userId;
+    sideEffects.push(async () => {
+      await audit({
+        actorId: userId,
+        action: 'refund.scheduled',
+        entityType: 'payment',
+        entityId: paymentId,
+        after: { amountCents: amount.cents, refundRequestNo, reason },
+      });
     });
   });
+
+  // Run side effects after the tx commits.
+  for (const fx of sideEffects) {
+    try { await fx(); } catch (e) { console.error('[scheduleRefund] side effect failed:', e); }
+  }
 }
 
 const BACKOFF_MIN = [1, 5, 15, 60, 240]; // shorter for dev

@@ -31,7 +31,11 @@ function handle(method: string) {
 
     // For raw routes, we need to do auth outside the api() wrapper because
     // api() consumes req.text() for body parsing. We'll do a lightweight auth
+<<<<<<< HEAD
     // pass + CSRF check, then call the raw handler directly.
+=======
+    // pass, then call the raw handler directly.
+>>>>>>> main
     if (found.entry.raw) {
       return handleRaw(req, ctx, found);
     }
@@ -72,8 +76,11 @@ async function handleRaw(
       try {
         session = await verifySession(token);
       } catch (err) {
+<<<<<<< HEAD
         // For downloads, we want to return the auth error to the browser
         // (so it can prompt for sign-in). For uploads, same.
+=======
+>>>>>>> main
         const { status, body } = toErrorEnvelope(err, requestId);
         return NextResponse.json(body, { status, headers: { 'x-request-id': requestId } });
       }
@@ -89,10 +96,14 @@ async function handleRaw(
       }
     }
 
+<<<<<<< HEAD
     // Call the raw handler with (req, session, params).
     // The handler signature varies (handleFileUpload: (req, session);
     // handleFileDownload: (req, session, fileId)). Pass params and let the
     // handler pick what it needs.
+=======
+    // Call the raw handler with (req, session, params, ctx).
+>>>>>>> main
     const result = await found.entry.handler(req, session, found.params, { requestId });
     if (result instanceof NextResponse) {
       result.headers.set('x-request-id', requestId);

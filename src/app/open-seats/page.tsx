@@ -6,6 +6,7 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { SignOutButton } from '@/components/sign-out-button';
+import { Plus } from 'lucide-react';
 import { ClaimButton } from './claim-button';
 import { Plus } from 'lucide-react';
 

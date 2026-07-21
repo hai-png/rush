@@ -101,5 +101,15 @@ export async function POST_complete({ session, params, ipAddress, userAgent }: a
     entityId: trip.id,
     ipAddress, userAgent,
   });
+  // Recompute the contractor's rating after trip completion.
+  if (trip.driverId) {
+    try {
+      const { recomputeContractorRating } = await import('@/lib/api-admin');
+      const profile = await db.contractorProfile.findUnique({ where: { userId: trip.driverId } });
+      if (profile) await recomputeContractorRating(profile.id);
+    } catch (err) {
+      console.error('[trip.complete] recompute rating failed:', err);
+    }
+  }
   return { data: { id: trip.id, status: 'completed' } };
 }

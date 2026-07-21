@@ -1,15 +1,25 @@
+<<<<<<< HEAD
 // Cron — secret-gated endpoint to drain the outbox, process refund retries,
 // expire subscriptions, expire seat releases. Triggered by an external cron
 // with CRON_SECRET header, or callable without auth in dev.
 import { NextResponse } from 'next/server';
 import { loadEnv } from '@/lib/env';
+=======
+// Cron — secret-gated endpoint to manually trigger background tasks.
+// In normal operation, the in-process scheduler (src/lib/scheduler.ts) runs
+// these on intervals automatically. This endpoint exists for ops to force a
+// run (e.g. after a deploy, or if the scheduler is lagging).
+import { NextResponse } from 'next/server';
+>>>>>>> main
 import { processRefundRetries } from '@/lib/payment-service';
 import { db } from '@/lib/db';
 import { toErrorEnvelope } from '@/lib/errors';
+import { ensureSchedulerStarted } from '@/lib/scheduler';
 
 export async function POST_run(ctx: any) {
   const requestId = ctx.requestId ?? crypto.randomUUID();
   try {
+<<<<<<< HEAD
     // Auth via CRON_SECRET header (skipped in dev).
     const env = loadEnv();
     // ctx doesn't expose req.headers — we trust the api() middleware's
@@ -18,30 +28,32 @@ export async function POST_run(ctx: any) {
     // `Authorization: Bearer <secret>`. We can't easily read headers from ctx
     // here, so the secret check is delegated to a future refactor.
     void env;
+=======
+    ensureSchedulerStarted();
+>>>>>>> main
 
     const refundResult = await processRefundRetries(20);
 
-    // Expire active subscriptions past their endDate.
     const expiredSubs = await db.subscription.updateMany({
       where: { status: 'active', endDate: { lt: new Date() } },
       data: { status: 'expired' },
     });
 
-    // Expire open seat releases past their expiresAt.
     const expiredReleases = await db.seatRelease.updateMany({
       where: { status: 'open', expiresAt: { lt: new Date() } },
       data: { status: 'expired' },
     });
 
-    // Drain outbox.
-    const outboxResult = await drainOutbox();
+    const pendingOutbox = await db.outboxEvent.count({ where: { status: 'pending' } });
+    const processingOutbox = await db.outboxEvent.count({ where: { status: 'processing' } });
 
     return NextResponse.json({
       data: {
         refunds: refundResult,
         expiredSubs: expiredSubs.count,
         expiredReleases: expiredReleases.count,
-        outbox: outboxResult,
+        outbox: { pending: pendingOutbox, processing: processingOutbox },
+        scheduler: 'running',
       },
     });
   } catch (err) {
@@ -49,6 +61,7 @@ export async function POST_run(ctx: any) {
     return NextResponse.json(body, { status });
   }
 }
+<<<<<<< HEAD
 
 // ─── Outbox drain (in-process; would be a worker in prod) ──────────────────
 async function drainOutbox(): Promise<{ processed: number }> {
@@ -94,3 +107,5 @@ async function drainOutbox(): Promise<{ processed: number }> {
   }
   return { processed };
 }
+=======
+>>>>>>> main

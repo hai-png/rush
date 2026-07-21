@@ -15,7 +15,10 @@ export function CreateTripForm({ shuttles, routes }: { shuttles: any[]; routes: 
   const [shuttleId, setShuttleId] = useState(shuttles[0]?.id ?? '');
   const [routeId, setRouteId] = useState(routes[0]?.id ?? '');
   const [window, setWindow] = useState<'morning' | 'evening'>('morning');
+<<<<<<< HEAD
   // Default departure = tomorrow 8am
+=======
+>>>>>>> main
   const defaultDate = new Date(Date.now() + 24 * 3600_000);
   defaultDate.setHours(8, 0, 0, 0);
   const [departureAt, setDepartureAt] = useState(defaultDate.toISOString().slice(0, 16));
@@ -25,7 +28,10 @@ export function CreateTripForm({ shuttles, routes }: { shuttles: any[]; routes: 
     e.preventDefault();
     setLoading(true);
     try {
+<<<<<<< HEAD
       // Convert local datetime to ISO
+=======
+>>>>>>> main
       const iso = new Date(departureAt).toISOString();
       await api.post('/api/v1/admin/trips', { shuttleId, routeId, departureAt: iso, window });
       toast.success('Trip scheduled');

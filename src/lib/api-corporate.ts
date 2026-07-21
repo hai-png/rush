@@ -7,18 +7,24 @@
 //   POST /api/v1/corporate/members/:id/approve — approve a pending member
 //   POST /api/v1/corporate/members/:id/reject  — reject a pending member
 //   GET  /api/v1/corporate           — get the current corporate_admin's corporate
+<<<<<<< HEAD
 //
 // Subsidy model: corporate has a subsidy_percent (0-100) + monthly_seat_allowance.
 // When a rider subscribes via corporate code, the corporate pays the subsidized
 // portion; the rider pays the rest. (For MVP, we just record the corporate
 // association on the subscription; the subsidy math is the corporate's problem
 // to reconcile off-platform.)
+=======
+>>>>>>> main
 
 import { db } from '@/lib/db';
 import { z } from 'zod';
 import { BadRequestError, NotFoundError, ForbiddenError, ConflictError } from '@/lib/errors';
 import { audit } from '@/lib/audit';
+<<<<<<< HEAD
 import { createId } from '@/lib/id';
+=======
+>>>>>>> main
 
 const OnboardInput = z.object({
   name: z.string().min(2).max(100),
@@ -34,6 +40,7 @@ export async function POST_onboard({ session, body, ipAddress, userAgent }: any)
   }
   const input = OnboardInput.parse(body);
 
+<<<<<<< HEAD
   // Check the user isn't already a corporate_admin
   const existing = await db.corporate.findUnique({ where: { adminUserId: session.id } });
   if (existing) throw new ConflictError('You already admin a corporate');
@@ -42,6 +49,13 @@ export async function POST_onboard({ session, body, ipAddress, userAgent }: any)
   const code = await generateUniqueCode();
 
   // Promote the user to corporate_admin + create the corporate in one tx
+=======
+  const existing = await db.corporate.findUnique({ where: { adminUserId: session.id } });
+  if (existing) throw new ConflictError('You already admin a corporate');
+
+  const code = await generateUniqueCode();
+
+>>>>>>> main
   const corp = await db.$transaction(async (tx) => {
     await tx.user.update({ where: { id: session.id }, data: { role: 'corporate_admin' } });
     return tx.corporate.create({
@@ -57,7 +71,10 @@ export async function POST_onboard({ session, body, ipAddress, userAgent }: any)
     });
   });
 
+<<<<<<< HEAD
   // Auto-approve the admin as a member so they can subscribe at the subsidized rate too.
+=======
+>>>>>>> main
   await db.corporateMember.create({
     data: {
       corporateId: corp.id,
@@ -83,7 +100,10 @@ export async function POST_onboard({ session, body, ipAddress, userAgent }: any)
 }
 
 async function generateUniqueCode(): Promise<string> {
+<<<<<<< HEAD
   // 8-char alphanumeric, no ambiguous chars (no 0/O/1/I)
+=======
+>>>>>>> main
   const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   for (let attempt = 0; attempt < 10; attempt++) {
     let code = '';
@@ -98,7 +118,11 @@ export async function GET_current({ session }: any) {
   if (session.role !== 'corporate_admin' && session.role !== 'platform_admin') {
     throw new ForbiddenError('Corporate admin only');
   }
+<<<<<<< HEAD
   const corp = await db.corporate.findUnique({
+=======
+  const corp = await db.corporate.findFirst({
+>>>>>>> main
     where: session.role === 'platform_admin' ? {} : { adminUserId: session.id },
     include: {
       members: { include: { user: { select: { id: true, name: true, phone: true, email: true } } }, orderBy: { createdAt: 'desc' } },
@@ -124,7 +148,10 @@ export async function POST_invite({ session, body, ipAddress, userAgent }: any) 
   const corp = await db.corporate.findUnique({ where: { adminUserId: session.id } });
   if (!corp) throw new NotFoundError('No corporate found');
 
+<<<<<<< HEAD
   // Generate a unique invite code (12 chars)
+=======
+>>>>>>> main
   const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let code = '';
   for (let i = 0; i < 12; i++) code += alphabet[Math.floor(Math.random() * alphabet.length)];
@@ -180,7 +207,10 @@ export async function POST_signup({ session, body, ipAddress, userAgent }: any) 
   if (invite.expiresAt && invite.expiresAt < new Date()) throw new BadRequestError('Invite expired');
   if (invite.usesCount >= invite.maxUses) throw new BadRequestError('Invite is full');
 
+<<<<<<< HEAD
   // Check if the user is already a member of this (or any) corporate
+=======
+>>>>>>> main
   const existing = await db.corporateMember.findUnique({
     where: { corporateId_userId: { corporateId: invite.corporateId, userId: session.id } },
   });
@@ -287,8 +317,11 @@ export async function POST_reject({ session, params, ipAddress, userAgent }: any
   return { data: { id: member.id, approvalStatus: 'rejected' } };
 }
 
+<<<<<<< HEAD
 // Public: validate an invite code without joining (used by the signup form
 // to show corporate name before the user commits).
+=======
+>>>>>>> main
 export async function POST_validate_invite({ body }: any) {
   const { inviteCode } = z.object({ inviteCode: z.string() }).parse(body);
   const invite = await db.corporateInvite.findUnique({

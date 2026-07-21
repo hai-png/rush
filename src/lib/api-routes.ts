@@ -59,6 +59,8 @@ import * as engagement from '@/lib/api-engagement';
 import * as corporate from '@/lib/api-corporate';
 import * as documents from '@/lib/api-documents';
 import * as files from '@/lib/api-files';
+import * as telebirr from '@/lib/api-telebirr';
+import * as health from '@/lib/api-health';
 
 // ─── Route table ────────────────────────────────────────────────────────────
 // Note: the catch-all mounts at /api/v1, so paths here are relative to that.
@@ -102,8 +104,10 @@ const ROUTES: RouteEntry[] = [
 
   // Marketplace (seat releases / claims)
   r('GET', '/marketplace/seat-releases', { requireAuth: true }, marketplace.GET_releases),
+  r('GET', '/marketplace/my-releases', { requireAuth: true }, marketplace.GET_my_releases),
   r('POST', '/marketplace/seat-releases', { requireAuth: true }, marketplace.POST_create_release),
   r('POST', '/marketplace/seat-releases/:id/claim', { requireAuth: true }, marketplace.POST_claim),
+  r('POST', '/marketplace/seat-releases/:id/cancel', { requireAuth: true }, marketplace.POST_cancel_release),
 
   // Operations (rides, trips)
   r('GET', '/rides', { requireAuth: true }, operations.GET_rides),
@@ -116,6 +120,7 @@ const ROUTES: RouteEntry[] = [
   r('POST', '/tickets', { requireAuth: true }, support.POST_create),
   r('GET', '/tickets/:id', { requireAuth: true }, support.GET_one),
   r('POST', '/tickets/:id/messages', { requireAuth: true }, support.POST_message),
+  r('POST', '/tickets/:id/messages/with-attachment', { requireAuth: true }, support.handleTicketMessageWithAttachment, true),
 
   // Engagement (notifications)
   r('GET', '/notifications', { requireAuth: true }, engagement.GET_notifications),
@@ -139,15 +144,20 @@ const ROUTES: RouteEntry[] = [
   // Admin
   r('GET', '/admin/users', { requireAuth: true, requireRole: ['platform_admin'] }, admin.GET_users),
   r('GET', '/admin/payments', { requireAuth: true, requireRole: ['platform_admin'] }, admin.GET_payments),
+  r('GET', '/admin/payments/:id', { requireAuth: true, requireRole: ['platform_admin'] }, admin.GET_payment),
+  r('POST', '/admin/payments/:id/refund', { requireAuth: true, requireRole: ['platform_admin'] }, admin.POST_refund),
   r('GET', '/admin/audit-logs', { requireAuth: true, requireRole: ['platform_admin'] }, admin.GET_audit_logs),
   r('GET', '/admin/plans', { requireAuth: true, requireRole: ['platform_admin'] }, admin.GET_plans),
   r('POST', '/admin/plans', { requireAuth: true, requireRole: ['platform_admin'] }, admin.POST_plans),
+  r('PATCH', '/admin/plans/:id', { requireAuth: true, requireRole: ['platform_admin'] }, admin.PATCH_plan),
   r('GET', '/admin/contractors', { requireAuth: true, requireRole: ['platform_admin'] }, admin.GET_contractors),
   r('POST', '/admin/contractors/:id/verify', { requireAuth: true, requireRole: ['platform_admin'] }, admin.POST_verify_contractor),
   r('GET', '/admin/shuttles', { requireAuth: true, requireRole: ['platform_admin'] }, admin.GET_shuttles),
   r('POST', '/admin/shuttles', { requireAuth: true, requireRole: ['platform_admin', 'contractor'] }, admin.POST_shuttles),
+  r('PATCH', '/admin/shuttles/:id', { requireAuth: true, requireRole: ['platform_admin'] }, admin.PATCH_shuttle),
   r('GET', '/admin/routes', { requireAuth: true, requireRole: ['platform_admin'] }, admin.GET_routes),
   r('POST', '/admin/routes', { requireAuth: true, requireRole: ['platform_admin'] }, admin.POST_routes),
+  r('PATCH', '/admin/routes/:id', { requireAuth: true, requireRole: ['platform_admin'] }, admin.PATCH_route),
   r('GET', '/admin/tickets', { requireAuth: true, requireRole: ['platform_admin'] }, admin.GET_tickets),
   r('POST', '/admin/tickets/:id/messages', { requireAuth: true, requireRole: ['platform_admin'] }, admin.POST_ticket_message),
   r('POST', '/admin/audit/verify', { requireAuth: true, requireRole: ['platform_admin'] }, admin.POST_audit_verify),
@@ -160,8 +170,18 @@ const ROUTES: RouteEntry[] = [
   // Webhooks (no auth — but verified via provider signatures / cron secret)
   r('POST', '/webhooks/telebirr/notify', { exemptFromTosGate: true }, webhooks.POST_telebirr_notify),
 
+  // Health (public — for uptime checks + load balancer probes)
+  r('GET', '/health', { exemptFromTosGate: true }, health.GET_health),
+
   // Cron (secret-gated)
   r('POST', '/cron/run', { exemptFromTosGate: true }, cron.POST_run),
+
+  // Telebirr advanced (InApp SDK + Subscription Payment)
+  r('POST', '/payments/telebirr/inapp-checkout', { requireAuth: true }, telebirr.POST_inapp_checkout),
+  r('POST', '/payments/telebirr/mandate/sign-url', { requireAuth: true }, telebirr.POST_mandate_sign_url),
+  r('GET',  '/payments/telebirr/mandate/:mctContractNo', { requireAuth: true }, telebirr.GET_mandate),
+  r('POST', '/payments/telebirr/mandate/:mctContractNo/cancel', { requireAuth: true }, telebirr.POST_mandate_cancel),
+  r('POST', '/payments/telebirr/disburse', { requireAuth: true, requireRole: ['platform_admin'] }, telebirr.POST_disburse),
 
   // Corporate
   r('POST', '/corporate/onboard', { requireAuth: true }, corporate.POST_onboard),
@@ -179,6 +199,6 @@ const ROUTES: RouteEntry[] = [
   r('GET',  '/contractor/documents/:contractorId', { requireAuth: true, requireRole: ['platform_admin'] }, documents.GET_documents_for),
   r('POST', '/contractor/documents', { requireAuth: true, requireRole: ['contractor', 'platform_admin'] }, documents.handleDocumentUpload, true),
 
-  // Files (download is raw so it can stream bytes; upload via contractor/documents)
+  // Files (download is raw so it can stream bytes)
   r('GET',  '/files/:id', { requireAuth: true }, files.handleFileDownload, true),
 ];

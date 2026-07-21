@@ -1,8 +1,4 @@
 // Contractor documents — upload registration / insurance / inspection files.
-// Required before verification_status can move from 'unverified' to 'verified'.
-//
-// Upload flow: POST /api/v1/contractor/documents (multipart) with type + file.
-// Returns the created ContractorDocument with file metadata.
 
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
@@ -36,14 +32,12 @@ export async function handleDocumentUpload(req: NextRequest, session: any): Prom
       return NextResponse.json({ error: { code: 'BAD_REQUEST', message: 'No "file" field in form data', requestId } }, { status: 400 });
     }
 
-    // Check if a doc of this type already exists — if so, replace it.
     const existing = await db.contractorDocument.findUnique({
       where: { contractorId_type: { contractorId: profile.id, type } },
     });
 
     const meta = await saveFile(file, `contractor-docs/${profile.id}`);
 
-    // Wrap file creation + document creation in a transaction.
     const doc = await db.$transaction(async (tx) => {
       const uploaded = await tx.uploadedFile.create({
         data: {
@@ -53,13 +47,11 @@ export async function handleDocumentUpload(req: NextRequest, session: any): Prom
           mimeType: meta.mimeType,
           sizeBytes: meta.sizeBytes,
           checksumSha256: meta.checksumSha256,
-          scanStatus: 'clean', // skip AV scan in MVP — would be 'pending' in prod
+          scanStatus: 'clean',
         },
       });
 
       if (existing) {
-        // Replace: update the existing doc to point at the new file.
-        // The old file is orphaned (left on disk). A cleanup cron would GC it.
         return tx.contractorDocument.update({
           where: { id: existing.id },
           data: { fileId: uploaded.id, uploadedAt: new Date() },
@@ -76,7 +68,6 @@ export async function handleDocumentUpload(req: NextRequest, session: any): Prom
       });
     });
 
-    // Move verification_status to 'pending' if it was 'unverified'.
     if (profile.verificationStatus === 'unverified') {
       await db.contractorProfile.update({
         where: { id: profile.id },
@@ -119,7 +110,7 @@ export async function GET_documents({ session }: any) {
   return { data: profile.documents };
 }
 
-// GET /api/v1/contractor/documents/:contractorId — admin-only: list any contractor's docs.
+// GET /api/v1/contractor/documents/:contractorId — admin-only.
 export async function GET_documents_for({ session, params }: any) {
   if (session.role !== 'platform_admin') throw new ForbiddenError('Admin only');
   const profile = await db.contractorProfile.findUnique({

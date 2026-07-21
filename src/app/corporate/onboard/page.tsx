@@ -70,7 +70,10 @@ export default function CorporateOnboardPage() {
             </div>
             <p className="text-xs text-muted-foreground">
               You'll be promoted to <code>corporate_admin</code> and given an invite code to share with your employees.
+<<<<<<< HEAD
               They sign up as riders, enter the code, and you approve them.
+=======
+>>>>>>> main
             </p>
             <Button type="submit" disabled={loading} className="w-full">{loading ? 'Creating…' : 'Onboard company'}</Button>
           </form>

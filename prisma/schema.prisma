@@ -419,6 +419,8 @@ model TicketMessage {
   authorId   String
   author     User     @relation(fields: [authorId], references: [id], onDelete: Cascade)
   body       String
+  fileId     String?  // optional attachment
+  file       UploadedFile? @relation("TicketMessageFile", fields: [fileId], references: [id], onDelete: SetNull)
   createdAt  DateTime @default(now())
 
   @@index([ticketId, createdAt])
@@ -506,25 +508,41 @@ model IdempotencyRecord {
 }
 
 // ─── File uploads ────────────────────────────────────────────────────────────
+<<<<<<< HEAD
 // Generic uploaded file record. The actual bytes live on disk (UPLOAD_DIR) or
 // S3 in production; this table is the metadata index. Used by contractor
 // documents (registration/insurance/inspection) and any future upload needs.
+=======
+// Generic uploaded file record. Bytes live on disk (UPLOAD_DIR) or S3 in
+// production; this table is the metadata index.
+>>>>>>> main
 
 model UploadedFile {
   id              String   @id @default(cuid())
   uploaderId      String
   uploader        User     @relation("FileUploader", fields: [uploaderId], references: [id], onDelete: Cascade)
   originalFilename String
+<<<<<<< HEAD
   storageKey      String   @unique // path under UPLOAD_DIR (e.g. contractor-docs/<id>.pdf)
   mimeType        String
   sizeBytes       Int
   checksumSha256  String
   // Document scan status — for contractor docs, a real AV scan would set this.
   // 'pending' on upload, 'clean' after scan, 'infected' if a threat is found.
+=======
+  storageKey      String   @unique
+  mimeType        String
+  sizeBytes       Int
+  checksumSha256  String
+>>>>>>> main
   scanStatus      String   @default("pending") // pending | clean | infected | error
   createdAt       DateTime @default(now())
 
   contractorDocuments ContractorDocument[]
+<<<<<<< HEAD
+=======
+  ticketMessages      TicketMessage[]    @relation("TicketMessageFile")
+>>>>>>> main
 
   @@index([uploaderId])
   @@index([scanStatus])
@@ -535,13 +553,18 @@ model UploadedFile {
 // from 'unverified' to 'verified'.
 model ContractorDocument {
   id              String   @id @default(cuid())
+<<<<<<< HEAD
   contractorId    String   // references ContractorProfile.id
+=======
+  contractorId    String
+>>>>>>> main
   contractor      ContractorProfile @relation(fields: [contractorId], references: [id], onDelete: Cascade)
   type            String   // registration | insurance | inspection
   fileId          String
   file            UploadedFile @relation(fields: [fileId], references: [id], onDelete: Restrict)
   uploadedAt      DateTime @default(now())
 
+<<<<<<< HEAD
   @@unique([contractorId, type]) // one of each type per contractor
   @@index([contractorId])
 }
@@ -554,6 +577,12 @@ model ContractorDocument {
 // Extend ContractorProfile with documents relation
 // (similar — linked via @relation on ContractorDocument.contractor)
 
+=======
+  @@unique([contractorId, type])
+  @@index([contractorId])
+}
+
+>>>>>>> main
 // ─── Corporate invites ──────────────────────────────────────────────────────
 // A corporate admin generates an invite code; members use it during signup
 // to associate themselves with the corporate. The admin then approves/rejects.
@@ -564,7 +593,11 @@ model CorporateInvite {
   code        String    @unique
   createdById String
   createdByUser User    @relation("InviteCreator", fields: [createdById], references: [id], onDelete: Cascade)
+<<<<<<< HEAD
   note        String?   // free-form, e.g. "For Engineering team"
+=======
+  note        String?
+>>>>>>> main
   maxUses     Int       @default(50)
   usesCount   Int       @default(0)
   expiresAt   DateTime?

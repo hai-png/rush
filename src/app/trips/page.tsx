@@ -17,8 +17,11 @@ export default async function TripsPage() {
     take: 50,
   });
 
+<<<<<<< HEAD
   // Pre-fetch the rider's active subscriptions so the book button knows what
   // subscription to charge against.
+=======
+>>>>>>> main
   const subs = session.role === 'rider' ? await db.subscription.findMany({
     where: { userId: session.id, status: 'active' },
     include: { plan: true },
