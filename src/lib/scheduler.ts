@@ -18,6 +18,9 @@
 import { db } from '@/lib/db';
 import { processRefundRetries } from '@/lib/payment-service';
 import { enqueueNotification } from '@/lib/outbox';
+import { getSmsProvider } from '@/lib/sms';
+import { getEmailProvider } from '@/lib/email';
+import { logger } from '@/lib/logger';
 
 let started = false;
 
@@ -29,25 +32,25 @@ export function ensureSchedulerStarted(): void {
   const outboxTimer = setInterval(drainOutbox, 30_000);
   outboxTimer.unref?.();
   // Run once immediately so dev doesn't have to wait 30s.
-  drainOutbox().catch(err => console.error('[scheduler] outbox drain failed:', err));
+  drainOutbox().catch(err => logger.error({ err: (err as Error).message }, '[scheduler] outbox drain failed'));
 
   // Process refund retries every 60s.
   const refundTimer = setInterval(() => {
-    processRefundRetries(20).catch(err => console.error('[scheduler] refund processing failed:', err));
+    processRefundRetries(20).catch(err => logger.error({ err: (err as Error).message }, '[scheduler] refund processing failed'));
   }, 60_000);
   refundTimer.unref?.();
 
   // Expire subs + seat releases every 5min.
   const expireTimer = setInterval(expireStale, 5 * 60_000);
   expireTimer.unref?.();
-  expireStale().catch(err => console.error('[scheduler] expire failed:', err));
+  expireStale().catch(err => logger.error({ err: (err as Error).message }, '[scheduler] expire failed'));
 
   // Corporate monthly reset + subscription-expiry warnings every hour.
   const hourlyTimer = setInterval(hourlyJobs, 60 * 60_000);
   hourlyTimer.unref?.();
-  hourlyJobs().catch(err => console.error('[scheduler] hourly failed:', err));
+  hourlyJobs().catch(err => logger.error({ err: (err as Error).message }, '[scheduler] hourly failed'));
 
-  console.log('[scheduler] started: outbox(30s), refunds(60s), expire(5m), hourly(1h)');
+  logger.info('[scheduler] started: outbox(30s), refunds(60s), expire(5m), hourly(1h)');
 }
 
 // ─── Drain outbox ────────────────────────────────────────────────────────────
@@ -76,22 +79,27 @@ async function drainOutbox(): Promise<void> {
         const payload = JSON.parse(evt.payload);
         switch (evt.channel) {
           case 'notification':
-            console.log(`[outbox:notification] -> user ${payload.userId}: ${payload.title}`);
+            // Notification row already written by enqueueNotification; just log.
+            logger.info({ userId: payload.userId, title: payload.title }, '[outbox:notification]');
             break;
           case 'sms':
-            console.log(`[outbox:sms] -> ${payload.phone || 'unknown'}: ${payload.body ?? ''}`);
+            // Send via real SMS provider (Twilio or console fallback).
+            const smsResult = await getSmsProvider().send(payload.phone, payload.body);
+            if (!smsResult.ok) throw new Error(smsResult.error || 'SMS send failed');
             break;
           case 'email':
-            console.log(`[outbox:email] -> ${payload.email || 'unknown'}: ${payload.subject ?? ''}`);
+            // Send via real email provider (Resend or console fallback).
+            const emailResult = await getEmailProvider().send(payload.email, payload.subject, payload.html || payload.body);
+            if (!emailResult.ok) throw new Error(emailResult.error || 'Email send failed');
             break;
           case 'refund':
-            console.log(`[outbox:refund] -> payment ${payload.paymentId}`);
+            logger.info({ paymentId: payload.paymentId }, '[outbox:refund]');
             break;
           case 'audit':
-            console.log(`[outbox:audit] -> ${payload.action}`);
+            logger.info({ action: payload.action }, '[outbox:audit]');
             break;
           case 'webhook':
-            console.log(`[outbox:webhook] -> ${payload.url}`);
+            logger.info({ url: payload.url }, '[outbox:webhook]');
             break;
         }
         await db.outboxEvent.update({
@@ -123,7 +131,7 @@ async function drainOutbox(): Promise<void> {
     }
   }
   if (processed > 0) {
-    console.log(`[scheduler] drained ${processed} outbox events`);
+    logger.info({ processed }, '[scheduler] drained outbox events');
   }
 }
 
@@ -156,7 +164,7 @@ async function expireStale(): Promise<void> {
   }
 
   if (expiredSubs.count > 0 || expiredReleases.count > 0) {
-    console.log(`[scheduler] expired ${expiredSubs.count} subs, ${expiredReleases.count} seat releases`);
+    logger.info({ expiredSubs: expiredSubs.count, expiredReleases: expiredReleases.count }, '[scheduler] expired stale data');
   }
 }
 
@@ -182,7 +190,7 @@ async function resetCorporateMonthlyCounters(): Promise<void> {
     },
   });
   if (result.count > 0) {
-    console.log(`[scheduler] reset monthly counters for ${result.count} corporate members`);
+    logger.info({ count: result.count }, '[scheduler] reset monthly counters');
   }
 }
 
@@ -222,6 +230,6 @@ async function sendSubscriptionExpiryWarnings(): Promise<void> {
     notified++;
   }
   if (notified > 0) {
-    console.log(`[scheduler] sent ${notified} subscription-expiry warnings`);
+    logger.info({ notified }, '[scheduler] sent subscription-expiry warnings');
   }
 }

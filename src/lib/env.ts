@@ -21,6 +21,15 @@ type Env = {
   CBE_ACCOUNT_NAME: string;
   CBE_BANK_BRANCH: string;
   APP_BASE_URL: string;
+  UPLOAD_DIR: string;
+  UPLOAD_MAX_BYTES: number;
+  TWILIO_ACCOUNT_SID: string;
+  TWILIO_AUTH_TOKEN: string;
+  TWILIO_FROM: string;
+  RESEND_API_KEY: string;
+  RESEND_FROM: string;
+  SENTRY_DSN: string;
+  REDIS_URL: string;
 };
 
 let cachedEnv: Env | null = null;
@@ -30,13 +39,11 @@ export function loadEnv(): Env {
 
   const authSecret = process.env.AUTH_SECRET || process.env.NEXTAUTH_SECRET;
   if (!authSecret || authSecret.length < 32) {
-    // In dev, auto-generate. In prod, refuse to start.
     if (process.env.NODE_ENV === 'production') {
       throw new Error('AUTH_SECRET must be set in production (>= 32 chars)');
     }
   }
 
-  // Telebirr is "mock" unless all required creds are present.
   const telebirrEnv: Env['TELEBIRR_ENV'] =
     (process.env.TELEBIRR_ENV as any) === 'production' ? 'production'
     : (process.env.TELEBIRR_ENV as any) === 'testbed' ? 'testbed'
@@ -64,14 +71,23 @@ export function loadEnv(): Env {
     TELEBIRR_APP_SECRET: process.env.TELEBIRR_APP_SECRET || '',
     TELEBIRR_MERCHANT_APP_ID: process.env.TELEBIRR_MERCHANT_APP_ID || '',
     TELEBIRR_MERCHANT_CODE: process.env.TELEBIRR_MERCHANT_CODE || '',
-    TELEBIRR_PRIVATE_KEY: process.env.TELEBIRR_PRIVATE_KEY || '',
-    TELEBIRR_PUBLIC_KEY: process.env.TELEBIRR_PUBLIC_KEY || '',
+    TELEBIRR_PRIVATE_KEY: (process.env.TELEBIRR_PRIVATE_KEY || '').replace(/\\n/g, '\n'),
+    TELEBIRR_PUBLIC_KEY: (process.env.TELEBIRR_PUBLIC_KEY || '').replace(/\\n/g, '\n'),
     TELEBIRR_NOTIFY_URL: process.env.TELEBIRR_NOTIFY_URL || '',
     TELEBIRR_REDIRECT_URL: process.env.TELEBIRR_REDIRECT_URL || '',
     CBE_ACCOUNT_NUMBER: process.env.CBE_ACCOUNT_NUMBER || '',
     CBE_ACCOUNT_NAME: process.env.CBE_ACCOUNT_NAME || '',
     CBE_BANK_BRANCH: process.env.CBE_BANK_BRANCH || '',
     APP_BASE_URL: process.env.APP_BASE_URL || 'http://localhost:3000',
+    UPLOAD_DIR: process.env.UPLOAD_DIR || './db/uploads',
+    UPLOAD_MAX_BYTES: Number(process.env.UPLOAD_MAX_BYTES) || 10 * 1024 * 1024,
+    TWILIO_ACCOUNT_SID: process.env.TWILIO_ACCOUNT_SID || '',
+    TWILIO_AUTH_TOKEN: process.env.TWILIO_AUTH_TOKEN || '',
+    TWILIO_FROM: process.env.TWILIO_FROM || '',
+    RESEND_API_KEY: process.env.RESEND_API_KEY || '',
+    RESEND_FROM: process.env.RESEND_FROM || '',
+    SENTRY_DSN: process.env.SENTRY_DSN || '',
+    REDIS_URL: process.env.REDIS_URL || '',
   };
   return cachedEnv;
 }
