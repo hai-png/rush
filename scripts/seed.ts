@@ -4,10 +4,30 @@ import bcrypt from 'bcryptjs';
 
 const prisma = new PrismaClient();
 
+// P1-2 / SEC-005: refuse to run the seed script in production with hardcoded
+// demo credentials. If an operator runs `bun run db:seed` in production and
+// doesn't manually change the admin password, an attacker logs in as
+// +251911000001 / admin-pass-1234 with full platform_admin access.
+//
+// To run the seed in production (e.g. for a fresh deploy), set
+// SEED_ALLOW_PRODUCTION=1 AND override each password via env vars:
+//   SEED_ADMIN_PASSWORD, SEED_RIDER_PASSWORD, SEED_CONTRACTOR_PASSWORD.
+const isProd = process.env.NODE_ENV === 'production';
+const allowProdSeed = process.env.SEED_ALLOW_PRODUCTION === '1';
+if (isProd && !allowProdSeed) {
+  console.error('Refusing to seed in production with hardcoded demo credentials.');
+  console.error('Set SEED_ALLOW_PRODUCTION=1 AND override SEED_ADMIN_PASSWORD / SEED_RIDER_PASSWORD / SEED_CONTRACTOR_PASSWORD to proceed.');
+  process.exit(1);
+}
+
+const adminPwd = process.env.SEED_ADMIN_PASSWORD ?? 'admin-pass-1234';
+const riderPwd = process.env.SEED_RIDER_PASSWORD ?? 'rider-pass-1234';
+const contractorPwd = process.env.SEED_CONTRACTOR_PASSWORD ?? 'contractor-pass-1234';
+
 async function main() {
   console.log('Seeding...');
 
-  const adminPassword = await bcrypt.hash('admin-pass-1234', 12);
+  const adminPassword = await bcrypt.hash(adminPwd, 12);
   const admin = await prisma.user.upsert({
     where: { phone: '+251911000001' },
     update: {},
@@ -21,9 +41,13 @@ async function main() {
       tosVersion: '2026-01-01',
     },
   });
-  console.log(`  admin: ${admin.phone} / admin-pass-1234`);
+  if (isProd) {
+    console.log(`  admin: ${admin.phone} / (password set from SEED_ADMIN_PASSWORD env var)`);
+  } else {
+    console.log(`  admin: ${admin.phone} / ${adminPwd}`);
+  }
 
-  const riderPassword = await bcrypt.hash('rider-pass-1234', 12);
+  const riderPassword = await bcrypt.hash(riderPwd, 12);
   const rider = await prisma.user.upsert({
     where: { phone: '+251911000002' },
     update: {},
@@ -38,9 +62,13 @@ async function main() {
       riderProfile: { create: { homeArea: 'Bole', workArea: 'Merkato' } },
     },
   });
-  console.log(`  rider: ${rider.phone} / rider-pass-1234`);
+  if (isProd) {
+    console.log(`  rider: ${rider.phone} / (password set from SEED_RIDER_PASSWORD env var)`);
+  } else {
+    console.log(`  rider: ${rider.phone} / ${riderPwd}`);
+  }
 
-  const contractorPassword = await bcrypt.hash('contractor-pass-1234', 12);
+  const contractorPassword = await bcrypt.hash(contractorPwd, 12);
   const contractor = await prisma.user.upsert({
     where: { phone: '+251911000003' },
     update: {},
@@ -61,7 +89,11 @@ async function main() {
       },
     },
   });
-  console.log(`  contractor: ${contractor.phone} / contractor-pass-1234`);
+  if (isProd) {
+    console.log(`  contractor: ${contractor.phone} / (password set from SEED_CONTRACTOR_PASSWORD env var)`);
+  } else {
+    console.log(`  contractor: ${contractor.phone} / ${contractorPwd}`);
+  }
 
   const trialPlan = await prisma.subscriptionPlan.upsert({
     where: { slug: 'trial' },
