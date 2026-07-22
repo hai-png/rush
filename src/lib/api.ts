@@ -53,6 +53,11 @@ type RateRule = {
 
 const RATE_RULES: RateRule[] = [
   { pattern: /\/api\/v1\/auth\/token$/, limit: 100, windowSec: 60, keyFn: ({ ip }) => ip ? `ip:${ip}` : null },
+  // Per-user throttle on 2FA code attempts — the 100/min IP limit above still
+  // allows brute-forcing a 6-digit TOTP across multiple IPs. This 10/min cap
+  // per user (looked up by phone in the body) makes 10^6 codes take ~70 days
+  // even with infinite IPs, and one TOTP window (30s) gets at most 5 tries.
+  { pattern: /\/api\/v1\/auth\/token$/, limit: 10, windowSec: 60, keyFn: ({ body }) => body?.phone ? `phone:${body.phone}` : null },
   { pattern: /\/api\/v1\/auth\/register$/, limit: 50, windowSec: 3600, keyFn: ({ ip }) => ip ? `ip:${ip}` : null },
   { pattern: /\/api\/v1\/auth\/otp\/send$/, limit: 3, windowSec: 600, keyFn: ({ ip }) => ip ? `ip:${ip}` : null },
   { pattern: /\/api\/v1\/auth\/otp\/send$/, limit: 3, windowSec: 600, keyFn: ({ body }) => `phone:${body?.phone ?? 'unknown'}` },
@@ -261,6 +266,7 @@ export function api(options: ApiOptions, handler: Handler) {
       }
     }
 
+    let idem: { replay?: any; scopedKey?: string; bodyHash?: string } | undefined;
     try {
       // ── Auth ────────────────────────────────────────────────────────────
       let session: Session | null = null;
@@ -301,7 +307,7 @@ export function api(options: ApiOptions, handler: Handler) {
 
       if (!options.exemptFromTosGate) tosGate(req.nextUrl.pathname, session);
 
-      const idem = await idempotencyCheck(req, { requestId, ipAddress: ip, userAgent: ua, session } as ApiContext, bodyText);
+      idem = await idempotencyCheck(req, { requestId, ipAddress: ip, userAgent: ua, session } as ApiContext, bodyText);
       if (idem.replay !== undefined) {
         return NextResponse.json(idem.replay);
       }
@@ -327,12 +333,19 @@ export function api(options: ApiOptions, handler: Handler) {
 
       const res = NextResponse.json(data === undefined ? null : { data }, { status });
       if (headers) {
-        for (const [k, v] of Object.entries(headers)) res.headers.set(k, v);
+        for (const [k, v] of Object.entries(headers)) res.headers.set(k, String(v));
       }
       res.headers.set('x-request-id', requestId);
       return res;
     } catch (err) {
       const { status, body } = toErrorEnvelope(err, requestId);
+      // If we reserved an idempotency-record lock and the handler threw,
+      // release it so the client can retry with the same key. ConflictError
+      // (409) is the exception — it's already a "retry" signal so we keep
+      // the row for the existing conflict to surface.
+      if (idem?.scopedKey && !(err instanceof ConflictError)) {
+        await db.idempotencyRecord.delete({ where: { key: idem.scopedKey } }).catch(() => {});
+      }
       const res = NextResponse.json(body, { status });
       res.headers.set('x-request-id', requestId);
       if (err instanceof RateLimitError) {

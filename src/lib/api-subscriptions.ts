@@ -152,7 +152,7 @@ export async function POST_cancel({ session, params, ipAddress, userAgent }: any
   return { data: { id: sub.id, status: 'cancelled' } };
 }
 
-export async function POST_renew({ session, params, body }: any) {
+export async function POST_renew({ session, params, body, ipAddress, userAgent }: any) {
   const sub = await db.subscription.findUnique({
     where: { id: params.id },
     include: { plan: true },
@@ -160,6 +160,15 @@ export async function POST_renew({ session, params, body }: any) {
   if (!sub) throw new NotFoundError('Subscription not found');
   if (sub.userId !== session.id && session.role !== 'platform_admin') {
     throw new NotFoundError('Subscription not found');
+  }
+
+  // Trial-only-once check (matches POST_create). Without this, a user could
+  // renew a trial plan indefinitely since renew creates a new subscription row.
+  if (sub.plan.isTrial) {
+    const priorTrial = await db.subscription.findFirst({
+      where: { userId: sub.userId, plan: { isTrial: true }, id: { not: sub.id } },
+    });
+    if (priorTrial) throw new BadRequestError('You have already used the trial plan');
   }
 
   const { paymentMethod } = z.object({ paymentMethod: z.enum(['telebirr', 'cbe']) }).parse(body);
@@ -205,6 +214,15 @@ export async function POST_renew({ session, params, body }: any) {
       amountCents: riderAmountCents,
       status: 'pending',
     },
+  });
+
+  await audit({
+    actorId: session.id,
+    action: 'subscription.renewed',
+    entityType: 'subscription',
+    entityId: newSub.id,
+    after: { previousSubId: sub.id, planId: sub.planId, paymentRef: reference, method: paymentMethod },
+    ipAddress, userAgent,
   });
 
   return {

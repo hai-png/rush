@@ -9,15 +9,25 @@ import { MemberActions } from '@/app/dashboard/corporate/member-actions';
 
 export default async function CorporateMembersPage() {
   const session = await requireRole('corporate_admin', 'platform_admin');
-  const corp = await db.corporate.findUnique({
-    where: session.role === 'platform_admin' ? undefined : { adminUserId: session.id },
-    include: {
-      members: {
-        include: { user: { select: { id: true, name: true, phone: true, email: true } } },
-        orderBy: [{ approvalStatus: 'asc' }, { createdAt: 'desc' }],
-      },
-    },
-  });
+  // findUnique requires a non-undefined where clause; platform_admin gets findFirst instead.
+  const corp = session.role === 'platform_admin'
+    ? await db.corporate.findFirst({
+        include: {
+          members: {
+            include: { user: { select: { id: true, name: true, phone: true, email: true } } },
+            orderBy: [{ approvalStatus: 'asc' }, { createdAt: 'desc' }],
+          },
+        },
+      })
+    : await db.corporate.findUnique({
+        where: { adminUserId: session.id },
+        include: {
+          members: {
+            include: { user: { select: { id: true, name: true, phone: true, email: true } } },
+            orderBy: [{ approvalStatus: 'asc' }, { createdAt: 'desc' }],
+          },
+        },
+      });
 
   if (!corp) {
     return (

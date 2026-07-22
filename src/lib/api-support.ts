@@ -169,12 +169,11 @@ export async function handleTicketMessageWithAttachment(req: NextRequest, sessio
   }
 }
 
-import { z as z2 } from 'zod';
 
-const TicketUpdateInput = z2.object({
-  status: z2.enum(['open', 'in_progress', 'resolved', 'closed']).optional(),
-  priority: z2.enum(['low', 'normal', 'high', 'urgent']).optional(),
-  category: z2.enum(['general', 'billing', 'route', 'shuttle', 'account', 'corporate', 'other']).optional(),
+const TicketUpdateInput = z.object({
+  status: z.enum(['open', 'in_progress', 'resolved', 'closed']).optional(),
+  priority: z.enum(['low', 'normal', 'high', 'urgent']).optional(),
+  category: z.enum(['general', 'billing', 'route', 'shuttle', 'account', 'corporate', 'other']).optional(),
 });
 
 export async function PATCH_ticket({ session, params, body, ipAddress, userAgent }: any) {

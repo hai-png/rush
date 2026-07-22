@@ -1,4 +1,5 @@
 // Browser-side API client. Handles JSON encoding, CSRF header injection,
+// and error unwrapping.
 
 const CSRF_HEADER = 'x-csrf-token';
 const CSRF_COOKIE = 'addis-csrf';
@@ -35,9 +36,6 @@ export async function apiFetch<T = any>(path: string, opts: RequestInit = {}): P
 
   if (!res.ok) {
     const err = body?.error ?? { code: 'UNKNOWN', message: `HTTP ${res.status}` };
-    if (res.status === 401 && typeof window !== 'undefined' && !window.location.pathname.startsWith('/login')) {
-      // Don't auto-redirect from /login or /signup — let the form show the error.
-    }
     throw new ApiError(res.status, err.code, err.message, err.requestId);
   }
 

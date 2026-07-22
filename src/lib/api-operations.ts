@@ -1,5 +1,6 @@
 import { db } from '@/lib/db';
 import { z } from 'zod';
+import { NextRequest, NextResponse } from 'next/server';
 import { BadRequestError, NotFoundError, ConflictError, ForbiddenError } from '@/lib/errors';
 import { consumeRide } from '@/lib/subscription';
 import { audit } from '@/lib/audit';
@@ -57,6 +58,13 @@ export async function POST_ride({ session, body, ipAddress, userAgent }: any) {
     if (input.subscriptionId) {
       await consumeRide(tx, input.subscriptionId);
     }
+    if (input.seatClaimId) {
+      // Mark the claim as 'used' so it can't be reused for another ride.
+      await tx.seatClaim.update({
+        where: { id: input.seatClaimId },
+        data: { status: 'used' },
+      });
+    }
     return tx.ride.create({
       data: {
         tripId: input.tripId,
@@ -85,6 +93,10 @@ export async function POST_board({ session, params, ipAddress, userAgent }: any)
   const trip = await db.trip.findUnique({ where: { id: params.id } });
   if (!trip) throw new NotFoundError('Trip not found');
   if (trip.status !== 'scheduled') throw new BadRequestError('Trip is not scheduled');
+  // Only the assigned driver (or an admin) can board a trip.
+  if (session.role !== 'platform_admin' && trip.driverId !== session.id) {
+    throw new ForbiddenError('Not your trip');
+  }
 
   await db.trip.update({ where: { id: trip.id }, data: { status: 'in_transit' } });
   await db.ride.updateMany({ where: { tripId: trip.id, status: 'booked' }, data: { status: 'boarded' } });
@@ -102,6 +114,9 @@ export async function POST_complete({ session, params, ipAddress, userAgent }: a
   const trip = await db.trip.findUnique({ where: { id: params.id } });
   if (!trip) throw new NotFoundError('Trip not found');
   if (trip.status !== 'in_transit') throw new BadRequestError('Trip is not in transit');
+  if (session.role !== 'platform_admin' && trip.driverId !== session.id) {
+    throw new ForbiddenError('Not your trip');
+  }
 
   await db.$transaction(async (tx) => {
     await tx.trip.update({ where: { id: trip.id }, data: { status: 'completed' } });
@@ -127,12 +142,11 @@ export async function POST_complete({ session, params, ipAddress, userAgent }: a
   return { data: { id: trip.id, status: 'completed' } };
 }
 
-import { z as z2 } from 'zod';
 
-const TripUpdateInput = z2.object({
-  status: z2.enum(['scheduled', 'in_transit', 'completed', 'cancelled']).optional(),
-  departureAt: z2.string().datetime().optional(),
-  driverId: z2.string().optional(),
+const TripUpdateInput = z.object({
+  status: z.enum(['scheduled', 'in_transit', 'completed', 'cancelled']).optional(),
+  departureAt: z.string().datetime().optional(),
+  driverId: z.string().optional(),
 });
 
 export async function PATCH_trip({ session, params, body, ipAddress, userAgent }: any) {
@@ -156,8 +170,8 @@ export async function PATCH_trip({ session, params, body, ipAddress, userAgent }
   return { data: updated };
 }
 
-const RideUpdateInput = z2.object({
-  status: z2.enum(['booked', 'boarded', 'completed', 'no_show', 'cancelled']).optional(),
+const RideUpdateInput = z.object({
+  status: z.enum(['booked', 'boarded', 'completed', 'no_show', 'cancelled']).optional(),
 });
 
 export async function PATCH_ride({ session, params, body, ipAddress, userAgent }: any) {
@@ -177,17 +191,18 @@ export async function PATCH_ride({ session, params, body, ipAddress, userAgent }
   return { data: updated };
 }
 
-const TripCreateInput = z2.object({
-  routeId: z2.string().min(1),
-  shuttleId: z2.string().min(1),
-  departureAt: z2.string().datetime(),
-  window: z2.enum(['morning', 'evening']),
+const TripCreateInput = z.object({
+  routeId: z.string().min(1),
+  shuttleId: z.string().min(1),
+  departureAt: z.string().datetime(),
+  window: z.enum(['morning', 'evening']),
 });
 
 export async function POST_trip({ session, body, ipAddress, userAgent }: any) {
   const input = TripCreateInput.parse(body);
   const shuttle = await db.shuttle.findUnique({ where: { id: input.shuttleId } });
   if (!shuttle) throw new NotFoundError('Shuttle not found');
+  if (!shuttle.isActive) throw new BadRequestError('Shuttle is not active');
   if (session.role === 'contractor' && shuttle.contractorId !== session.id) {
     throw new BadRequestError('You can only create trips on your own shuttles');
   }
@@ -211,11 +226,11 @@ export async function POST_trip({ session, body, ipAddress, userAgent }: any) {
 
 const positions = new Map<string, { lat: number; lng: number; heading: number; speed: number; updatedAt: number }>();
 
-const PositionInput = z2.object({
-  lat: z2.number().min(-90).max(90),
-  lng: z2.number().min(-180).max(180),
-  heading: z2.number().min(0).max(360).optional(),
-  speed: z2.number().min(0).optional(),
+const PositionInput = z.object({
+  lat: z.number().min(-90).max(90),
+  lng: z.number().min(-180).max(180),
+  heading: z.number().min(0).max(360).optional(),
+  speed: z.number().min(0).optional(),
 });
 
 export async function POST_shuttle_position({ session, body }: any) {
@@ -247,7 +262,6 @@ export async function GET_shuttle_positions({ session }: any) {
   return { data: result };
 }
 
-import { NextRequest, NextResponse } from 'next/server';
 
 export async function handleShuttlePositionStream(req: NextRequest, session: any): Promise<NextResponse> {
   if (!session) {

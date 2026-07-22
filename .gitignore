@@ -1,5 +1,3 @@
-# See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
-
 # dependencies
 node_modules
 /.pnp
@@ -30,12 +28,11 @@ yarn-debug.log*
 yarn-error.log*
 .pnpm-debug.log*
 
-# env files (can opt-in for committing if needed)
+# env files
 .env*
 
 # vercel
 .vercel
-
 
 # typescript
 *.tsbuildinfo
@@ -43,29 +40,13 @@ next-env.d.ts
 local-*
 .claude
 .z-ai-config
+
+# logs
 *.log
-dev.log
-dev.out.log
-test
-prompt
-
-server.log
-# Skills directory
-/skills/
-
-# Sandbox dev script artifacts
-.zscripts/dev.pid
-.zscripts/dev.log
 
 # Local SQLite DB + uploads (never commit user data)
 db/*.db
 db/uploads/
 
-# Examples directory (sandbox boilerplate, not part of the app)
-/examples/
-
-# Mini-services (sandbox boilerplate)
-/mini-services/
-
-# Caddyfile (sandbox gateway config, not part of the app)
-Caddyfile
+# Generated artifacts
+openapi.json

@@ -34,7 +34,7 @@ let cachedEnv: Env | null = null;
 export function loadEnv(): Env {
   if (cachedEnv) return cachedEnv;
 
-  const authSecret = process.env.AUTH_SECRET || process.env.NEXTAUTH_SECRET;
+  const authSecret = process.env.AUTH_SECRET;
   if (!authSecret || authSecret.length < 32) {
     if (process.env.NODE_ENV === 'production') {
       throw new Error('AUTH_SECRET must be set in production (>= 32 chars)');

@@ -6,7 +6,7 @@ Shuttle subscription platform for Addis Ababa. Riders subscribe to monthly plans
 
 - **Framework:** Next.js 16 (App Router) + React 19 + TypeScript 5
 - **DB:** Prisma 6 + SQLite (single source of truth: `prisma/schema.prisma`)
-- **Auth:** JWT-in-cookie (jose + bcryptjs) — single auth system, no dual NextAuth + Hono smell
+- **Auth:** JWT-in-cookie (jose + bcryptjs) — single auth system
 - **Payments:** Real Telebirr H5 C2B Web Payment integration (RSA-PSS-SHA256 signing) + mock fallback for dev + CBE manual bank transfer
 - **2FA:** otplib TOTP for privileged roles (corporate_admin, platform_admin)
 - **Styling:** Tailwind 4 + shadcn/ui (New York) + lucide-react
@@ -48,26 +48,27 @@ The integration uses the H5 C2B Web Payment flow per https://developer.ethiotele
 5. Telebirr POSTs to `notify_url` (signed by their private key, verified with their public key)
 6. Backend dedups via composite PK `(merch_order_id, out_request_no)` + settles the payment
 
-The full Telebirr docs reference (InApp SDK + H5 C2B Web + Subscription) is in `download/telebirr-docs.md`.
-
 ## Architecture
 
 ```
-prisma/schema.prisma         — single source of truth, 25 models
+prisma/schema.prisma         — single source of truth (31 models)
 scripts/seed.ts              — seeds demo data
-scripts/e2e-test.sh          — end-to-end flow test (32 assertions)
-src/lib/                     — primitives:
-  db, auth, api, money, errors, env, audit, outbox, payments,
-  payment-service, otp, phone, id, session-server, api-client,
-  file-storage, subscription
+scripts/e2e-test.sh          — end-to-end flow test (59 assertions)
+src/lib/                     — primitives: db, auth, api, money, errors, env,
+                               audit, outbox, payments, payment-service, otp,
+                               phone, id, session-server, api-client,
+                               file-storage, subscription, scheduler, sms, email
 src/lib/api-*.ts             — per-module handler functions:
-  identity, catalog, subscriptions, payments, marketplace,
-  operations, support, admin, webhooks, cron, tos, account,
-  dashboard, engagement, corporate, documents, files
-src/lib/api-routes.ts        — single route table (METHOD, path-pattern, options, handler)
-src/app/api/v1/[[...route]]/route.ts  — single catch-all dispatcher
-src/app/**/page.tsx          — all web pages (server components)
-src/components/              — client components (sign-out-button, trip-actions, csrf-initializer)
+                               identity, catalog, subscriptions, payments,
+                               marketplace, operations, support, admin,
+                               admin-advanced, webhooks, cron, tos, account,
+                               dashboard, engagement, corporate, documents,
+                               files, telebirr, health, assignments
+src/lib/api-routes.ts        — single route table (158 endpoints)
+src/app/api/v1/[[...route]]/route.ts — single catch-all dispatcher
+src/app/**/page.tsx          — all web pages (57 server components)
+src/components/              — client components (sign-out-button, trip-actions,
+                               route-map, csrf-initializer, ui/*)
 ```
 
 ## Security
@@ -87,10 +88,11 @@ src/components/              — client components (sign-out-button, trip-action
 
 ```bash
 bun run lint                # ESLint
-scripts/e2e-test.sh         # end-to-end API flow test (clears DB, seeds, runs 32 assertions)
+bunx tsc --noEmit           # TypeScript
+bash scripts/e2e-test.sh    # e2e flow test (59 assertions; run while dev server is up)
 ```
 
-The e2e test exercises: public catalog, rider registration + buy plan + Telebirr mock pay + book ride + list seat, contractor document upload + trip creation, admin contractor verification + audit chain verification, corporate onboard + invite + member join + approve, support ticket + admin reply, account data export, cron job.
+The e2e test exercises: public catalog, rider registration + buy plan + Telebirr mock pay + book ride + list seat, contractor document upload + trip creation, admin contractor verification + audit chain verification, corporate onboard (with 2FA gate) + invite + member join + approve, support ticket + admin reply, account data export, cron job, plus feature-parity coverage of 17 additional endpoints.
 
 ## User flows
 

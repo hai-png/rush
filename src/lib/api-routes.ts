@@ -2,7 +2,7 @@
 import { NextRequest } from 'next/server';
 import { api, ApiOptions } from '@/lib/api';
 
-type Handler = (ctx: any) => Promise<any> | any;
+type Handler = (...args: any[]) => Promise<any> | any;
 type RouteEntry = {
   method: string;
   pattern: RegExp;
@@ -104,7 +104,8 @@ const ROUTES: RouteEntry[] = [
   r('POST', '/payments/checkout', { requireAuth: true }, payments.POST_checkout),
   r('GET', '/payments/:id', { requireAuth: true }, payments.GET_one),
   r('GET', '/payments', { requireAuth: true }, payments.GET_list),
-  r('POST', '/payments/:id/refund', { requireAuth: true, requireRole: ['platform_admin'] }, payments.POST_refund),
+  // Refunds: single endpoint at /admin/payments/:id/refund (admin-only).
+  // The previous /payments/:id/refund and /admin/refunds duplicates were removed.
 
   r('GET', '/marketplace/seat-releases', { requireAuth: true }, marketplace.GET_releases),
   r('GET', '/marketplace/seat-releases/:id', { requireAuth: true }, marketplace.GET_release),
@@ -180,7 +181,7 @@ const ROUTES: RouteEntry[] = [
   r('GET', '/admin/tickets', { requireAuth: true, requireRole: ['platform_admin'] }, admin.GET_tickets),
   r('POST', '/admin/tickets/:id/messages', { requireAuth: true, requireRole: ['platform_admin'] }, admin.POST_ticket_message),
   r('POST', '/admin/audit/verify', { requireAuth: true, requireRole: ['platform_admin'] }, admin.POST_audit_verify),
-  r('POST', '/admin/trips', { requireAuth: true, requireRole: ['platform_admin', 'contractor'] }, admin.POST_trips),
+  // Trip creation is at POST /trips (operations) — admin/trips duplicate removed.
 
   r('GET',  '/admin/dashboard', { requireAuth: true, requireRole: ['platform_admin'] }, adminAdvanced.GET_dashboard),
   r('PATCH', '/admin/users/:id', { requireAuth: true, requireRole: ['platform_admin'] }, adminAdvanced.PATCH_user),
@@ -191,7 +192,6 @@ const ROUTES: RouteEntry[] = [
   r('POST', '/admin/corporates/:id/activate', { requireAuth: true, requireRole: ['platform_admin'] }, adminAdvanced.POST_activate_corporate),
   r('GET',  '/admin/subscriptions', { requireAuth: true, requireRole: ['platform_admin'] }, adminAdvanced.GET_admin_subscriptions),
   r('POST', '/admin/payments/:id/verify', { requireAuth: true, requireRole: ['platform_admin'] }, adminAdvanced.POST_verify_payment),
-  r('POST', '/admin/refunds', { requireAuth: true, requireRole: ['platform_admin'] }, adminAdvanced.POST_admin_refund),
   r('GET',  '/admin/export/:resource', { requireAuth: true, requireRole: ['platform_admin'] }, adminAdvanced.GET_export_csv),
   r('DELETE', '/admin/routes/:id', { requireAuth: true, requireRole: ['platform_admin'] }, adminAdvanced.DELETE_route),
   r('DELETE', '/admin/shuttles/:id', { requireAuth: true, requireRole: ['platform_admin'] }, adminAdvanced.DELETE_shuttle),
@@ -205,7 +205,7 @@ const ROUTES: RouteEntry[] = [
   r('GET', '/contractor/shuttles', { requireAuth: true, requireRole: ['contractor'] }, admin.GET_my_shuttles),
   r('GET', '/contractor/trips', { requireAuth: true, requireRole: ['contractor'] }, admin.GET_my_trips),
 
-  r('POST', '/webhooks/telebirr/notify', { exemptFromTosGate: true }, webhooks.POST_telebirr_notify),
+  r('POST', '/webhooks/telebirr/notify', { exemptFromTosGate: true }, webhooks.handleTelebirrNotify, true),
 
   r('GET', '/health', { exemptFromTosGate: true }, health.GET_health),
   r('GET', '/healthz', { exemptFromTosGate: true }, health.GET_healthz),

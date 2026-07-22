@@ -14,11 +14,8 @@ import { api } from '@/lib/api-client';
 export function CreateTripForm({ shuttles, routes }: { shuttles: any[]; routes: any[] }) {
   const [shuttleId, setShuttleId] = useState(shuttles[0]?.id ?? '');
   const [routeId, setRouteId] = useState(routes[0]?.id ?? '');
-  const [window, setWindow] = useState<'morning' | 'evening'>('morning');
-<<<<<<< HEAD
+  const [tripWindow, setTripWindow] = useState<'morning' | 'evening'>('morning');
   // Default departure = tomorrow 8am
-=======
->>>>>>> main
   const defaultDate = new Date(Date.now() + 24 * 3600_000);
   defaultDate.setHours(8, 0, 0, 0);
   const [departureAt, setDepartureAt] = useState(defaultDate.toISOString().slice(0, 16));
@@ -28,12 +25,9 @@ export function CreateTripForm({ shuttles, routes }: { shuttles: any[]; routes: 
     e.preventDefault();
     setLoading(true);
     try {
-<<<<<<< HEAD
       // Convert local datetime to ISO
-=======
->>>>>>> main
       const iso = new Date(departureAt).toISOString();
-      await api.post('/api/v1/admin/trips', { shuttleId, routeId, departureAt: iso, window });
+      await api.post('/api/v1/admin/trips', { shuttleId, routeId, departureAt: iso, window: tripWindow });
       toast.success('Trip scheduled');
       window.location.reload();
     } catch (err) {
@@ -65,7 +59,7 @@ export function CreateTripForm({ shuttles, routes }: { shuttles: any[]; routes: 
           </div>
           <div>
             <Label>Window</Label>
-            <Select value={window} onValueChange={(v) => setWindow(v as any)}>
+            <Select value={tripWindow} onValueChange={(v) => setTripWindow(v as any)}>
               <SelectTrigger><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="morning">morning</SelectItem>

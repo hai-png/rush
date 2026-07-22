@@ -26,9 +26,12 @@ export async function POST_pickup({ session, params, body, ipAddress, userAgent 
   const input = PickupInput.parse(body);
   const route = await db.route.findUnique({ where: { id: params.id } });
   if (!route) throw new NotFoundError('Route not found');
-  const pickup = await db.pickupLocation.create({
-    data: { ...input, routeId: params.id },
-  });
+  // Strip undefined optionals so Prisma doesn't choke on { lat: undefined, lng: undefined }.
+  const data: Record<string, unknown> = { name: input.name, sortOrder: input.sortOrder, routeId: params.id };
+  if (input.lat !== undefined) data.lat = input.lat;
+  if (input.lng !== undefined) data.lng = input.lng;
+  if (input.estimatedPickupTime !== undefined) data.estimatedPickupTime = input.estimatedPickupTime;
+  const pickup = await db.pickupLocation.create({ data: data as any });
   await audit({ actorId: session.id, action: 'pickup.created', entityType: 'pickup_location', entityId: pickup.id, after: input, ipAddress, userAgent });
   return { status: 201, data: pickup };
 }
@@ -185,8 +188,11 @@ export async function generateTripsFromAssignment(assignment: any): Promise<numb
     try {
       await db.trip.create({ data: trip });
       created++;
-    } catch {
-      // Duplicate — skip
+    } catch (e: any) {
+      // Only suppress duplicate-key violations; surface all other errors
+      // (DB connection lost, schema mismatch, etc.) so they don't silently
+      // cause missing trips.
+      if (e?.code !== 'P2002') throw e;
     }
   }
   logger.info({ assignmentId: assignment.id, created, total: trips.length }, '[assignment] generated trips');

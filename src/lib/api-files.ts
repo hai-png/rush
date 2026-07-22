@@ -1,9 +1,8 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { saveFile, readFileBytes, FileUploadError } from '@/lib/file-storage';
+import { readFileBytes } from '@/lib/file-storage';
 import { NotFoundError, ForbiddenError, toErrorEnvelope } from '@/lib/errors';
-import { audit } from '@/lib/audit';
 
 export async function handleFileDownload(req: NextRequest, session: any, params: { id: string }): Promise<NextResponse> {
   const requestId = crypto.randomUUID();
@@ -17,14 +16,12 @@ export async function handleFileDownload(req: NextRequest, session: any, params:
 
     const isOwner = file.uploaderId === session.id;
     const isAdmin = session.role === 'platform_admin';
-    const contractorDoc = await db.contractorDocument.findFirst({ where: { fileId: file.id } });
-    let canAccess = isOwner || isAdmin;
-    if (contractorDoc && session.role === 'platform_admin') canAccess = true;
-
-    if (!canAccess) throw new ForbiddenError('Not allowed to access this file');
+    // Contractors can access their own uploaded docs (covered by isOwner above).
+    // Admins can access any file. No other access is allowed.
+    if (!isOwner && !isAdmin) throw new ForbiddenError('Not allowed to access this file');
 
     const bytes = await readFileBytes(file.storageKey);
-    return new NextResponse(bytes, {
+    return new NextResponse(new Uint8Array(bytes), {
       status: 200,
       headers: {
         'content-type': file.mimeType,

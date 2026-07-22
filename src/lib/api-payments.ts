@@ -2,8 +2,6 @@ import { db } from '@/lib/db';
 import { z } from 'zod';
 import { Money } from '@/lib/money';
 import { NotFoundError, BadRequestError } from '@/lib/errors';
-import { scheduleRefund } from '@/lib/payment-service';
-import { audit } from '@/lib/audit';
 
 export async function GET_one({ session, params }: any) {
   const payment = await db.payment.findUnique({
@@ -25,25 +23,6 @@ export async function GET_list({ session }: any) {
     take: 100,
   });
   return { data: payments };
-}
-
-const RefundInput = z.object({
-  amount: z.number().positive(),
-  reason: z.string().min(1),
-});
-
-export async function POST_refund({ session, params, body, ipAddress, userAgent }: any) {
-  const input = RefundInput.parse(body);
-  await scheduleRefund(params.id, Money.fromETB(input.amount), input.reason);
-  await audit({
-    actorId: session.id,
-    action: 'refund.requested',
-    entityType: 'payment',
-    entityId: params.id,
-    after: { amount: input.amount, reason: input.reason },
-    ipAddress, userAgent,
-  });
-  return { status: 202, data: { ok: true } };
 }
 
 export async function POST_checkout({ session, body }: any) {

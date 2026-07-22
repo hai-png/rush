@@ -1,11 +1,8 @@
 import { db } from '@/lib/db';
 import { z } from 'zod';
-import { Money } from '@/lib/money';
 import { NotFoundError, BadRequestError, ForbiddenError, ConflictError } from '@/lib/errors';
 import { audit } from '@/lib/audit';
-import { scheduleRefund } from '@/lib/payment-service';
-import { enqueueNotification } from '@/lib/outbox';
-import { issueSession } from '@/lib/auth';
+import { issueSession, assertTwoFactorEnabled } from '@/lib/auth';
 import { createId } from '@/lib/id';
 
 export async function GET_dashboard() {
@@ -35,13 +32,20 @@ export async function PATCH_user({ session, params, body, ipAddress, userAgent }
   if (!user) throw new NotFoundError('User not found');
   if (user.id === session.id) throw new BadRequestError('Cannot modify your own account');
   if (input.action === 'suspend') {
-    await db.user.update({ where: { id: params.id }, data: { isActive: false } });
+    await db.user.update({ where: { id: params.id }, data: { isActive: false, tokenVersion: { increment: 1 } } });
+    await db.session.updateMany({ where: { userId: params.id, revokedAt: null }, data: { revokedAt: new Date() } }).catch(() => {});
     await audit({ actorId: session.id, action: 'user.suspended', entityType: 'user', entityId: params.id, ipAddress, userAgent });
   } else if (input.action === 'reactivate') {
     await db.user.update({ where: { id: params.id }, data: { isActive: true, deletedAt: null } });
     await audit({ actorId: session.id, action: 'user.reactivated', entityType: 'user', entityId: params.id, ipAddress, userAgent });
   } else if (input.action === 'change_role') {
     if (!input.role) throw new BadRequestError('role is required for change_role');
+    // Enforce the 2FA + phone-verification gate for privileged roles —
+    // same invariant as POST /corporate/onboard. Without this, an admin
+    // could promote a non-2FA user to platform_admin and bypass the gate.
+    if (input.role === 'corporate_admin' || input.role === 'platform_admin') {
+      await assertTwoFactorEnabled(params.id, input.role);
+    }
     if (input.role !== 'platform_admin') {
       const adminCount = await db.user.count({ where: { role: 'platform_admin', isActive: true } });
       const target = await db.user.findUnique({ where: { id: params.id } });
@@ -49,7 +53,9 @@ export async function PATCH_user({ session, params, body, ipAddress, userAgent }
         throw new BadRequestError('Cannot demote the last platform admin');
       }
     }
-    await db.user.update({ where: { id: params.id }, data: { role: input.role } });
+    await db.user.update({ where: { id: params.id }, data: { role: input.role, tokenVersion: { increment: 1 } } });
+    // Revoke existing sessions — the new role may have different access.
+    await db.session.updateMany({ where: { userId: params.id, revokedAt: null }, data: { revokedAt: new Date() } }).catch(() => {});
     await audit({ actorId: session.id, action: 'user.role_changed', entityType: 'user', entityId: params.id, after: { role: input.role }, ipAddress, userAgent });
   } else {
     throw new BadRequestError('Unknown action');
@@ -110,25 +116,13 @@ export async function POST_verify_payment({ session, params, body, ipAddress, us
     await audit({ actorId: session.id, action: 'payment.amount_mismatch', entityType: 'payment', entityId: params.id, after: { expected: payment.amountCents, verified: verifiedAmountCents }, ipAddress, userAgent });
     throw new ConflictError('Verified amount does not match expected amount; payment marked failed');
   }
-  await db.payment.update({ where: { id: params.id }, data: { status: 'completed' } });
-  if (payment.subscriptionId) {
-    const sub = await db.subscription.findUnique({ where: { id: payment.subscriptionId } });
-    if (sub && sub.status === 'pending_payment') {
-      await db.subscription.update({ where: { id: sub.id }, data: { status: 'active' } });
-      await enqueueNotification({ userId: sub.userId, type: 'subscription_expiring', title: 'Subscription activated', body: `Your subscription is now active until ${new Date(sub.endDate).toLocaleDateString()}.`, link: '/dashboard/rider' });
-    }
-  }
+  // Delegate to settlePayment so seat-claim promotion, subscription activation,
+  // notifications, and audit are all handled consistently with the webhook path.
+  const { settlePayment } = await import('@/lib/payment-service');
+  const { Money } = await import('@/lib/money');
+  await settlePayment(payment.reference, Money.fromCents(verifiedAmountCents), `manual-verify-${Date.now()}`, 'Success', { manual: true, verifiedBy: session.id });
   await audit({ actorId: session.id, action: 'payment.manually_verified', entityType: 'payment', entityId: params.id, ipAddress, userAgent });
   return { data: { id: params.id, status: 'completed' } };
-}
-
-const RefundInput = z.object({ paymentId: z.string().min(1), amount: z.number().positive(), reason: z.string().min(1).max(500) });
-
-export async function POST_admin_refund({ session, body, ipAddress, userAgent }: any) {
-  const input = RefundInput.parse(body);
-  await scheduleRefund(input.paymentId, Money.fromETB(input.amount), input.reason);
-  await audit({ actorId: session.id, action: 'refund.requested', entityType: 'payment', entityId: input.paymentId, after: input, ipAddress, userAgent });
-  return { status: 202, data: { ok: true } };
 }
 
 const EXPORT_TABLES: Record<string, { model: string; label: string }> = {
@@ -149,14 +143,23 @@ export async function GET_export_csv({ session, params }: any) {
   if (rows.length === 0) return { data: { csv: '', rowCount: 0 } };
   const headers = Object.keys(rows[0]);
   const csvLines = [headers.join(',')];
+  const escapeCsv = (s: string): string => {
+    // Prefix dangerous leading chars with a single quote to neutralize
+    // CSV-formula injection (=cmd, +cmd, -cmd, @cmd, |cmd, \tcmd, \rcmd).
+    let safe = s;
+    if (/^[=+\-@\t\r]/.test(safe)) safe = `'${safe}`;
+    if (safe.includes(',') || safe.includes('"') || safe.includes('\n')) {
+      safe = `"${safe.replace(/"/g, '""')}"`;
+    }
+    return safe;
+  };
   for (const row of rows) {
-    csvLines.push(headers.map(h => {
+    csvLines.push(headers.map((h: string) => {
       const v = row[h];
       if (v === null || v === undefined) return '';
       if (v instanceof Date) return v.toISOString();
-      if (typeof v === 'object') return `"${JSON.stringify(v).replace(/"/g, '""')}"`;
-      const s = String(v);
-      return s.includes(',') || s.includes('"') || s.includes('\n') ? `"${s.replace(/"/g, '""')}"` : s;
+      if (typeof v === 'object') return escapeCsv(JSON.stringify(v));
+      return escapeCsv(String(v));
     }).join(','));
   }
   await audit({ actorId: session.id, action: 'admin.csv_export', entityType: 'export', entityId: resource, after: { rowCount: rows.length } });
@@ -185,12 +188,19 @@ const SettingsInput = z.object({
 });
 
 export async function GET_settings() {
-  const settings = await db.auditLog.findFirst({ where: { action: 'system.settings' }, orderBy: { createdAt: 'desc' } });
-  return { data: settings ? JSON.parse(settings.after ?? '{}') : {} };
+  const rows = await db.setting.findMany();
+  const settings: Record<string, string> = {};
+  for (const r of rows) settings[r.key] = r.value;
+  return { data: settings };
 }
 
 export async function PUT_settings({ session, body, ipAddress, userAgent }: any) {
   const input = SettingsInput.parse(body);
+  await db.setting.upsert({
+    where: { key: input.key },
+    update: { value: input.value },
+    create: { key: input.key, value: input.value },
+  });
   await audit({ actorId: session.id, action: 'system.settings', entityType: 'system', entityId: 'settings', after: input, ipAddress, userAgent });
   return { data: input };
 }
@@ -199,7 +209,35 @@ const BulkExpireInput = z.object({ subscriptionIds: z.array(z.string()).min(1).m
 
 export async function POST_bulk_expire({ session, body, ipAddress, userAgent }: any) {
   const input = BulkExpireInput.parse(body);
-  const result = await db.subscription.updateMany({ where: { id: { in: input.subscriptionIds }, status: 'active' }, data: { status: 'expired' } });
+  const sideEffects: Array<() => Promise<void>> = [];
+  const result = await db.subscription.updateMany({
+    where: { id: { in: input.subscriptionIds }, status: 'active' },
+    data: { status: 'expired' },
+  });
+  // Notify affected users + cancel their pending rides on now-expired subs.
+  if (result.count > 0) {
+    const expired = await db.subscription.findMany({
+      where: { id: { in: input.subscriptionIds }, status: 'expired' },
+      select: { id: true, userId: true },
+    });
+    for (const s of expired) {
+      sideEffects.push(async () => {
+        const { enqueueNotification } = await import('@/lib/outbox');
+        await enqueueNotification({
+          userId: s.userId,
+          type: 'subscription_expired',
+          title: 'Subscription expired',
+          body: 'Your subscription has been expired by an admin. Renew to keep riding.',
+          link: '/plans',
+        }).catch(() => {});
+      });
+    }
+    await db.ride.updateMany({
+      where: { subscriptionId: { in: input.subscriptionIds }, status: 'booked' },
+      data: { status: 'cancelled' },
+    }).catch(() => {});
+  }
+  for (const fx of sideEffects) { try { await fx(); } catch {} }
   await audit({ actorId: session.id, action: 'admin.bulk_expire', entityType: 'subscription', after: { count: result.count }, ipAddress, userAgent });
   return { data: { expired: result.count } };
 }
@@ -208,7 +246,18 @@ const BulkSuspendInput = z.object({ userIds: z.array(z.string()).min(1).max(100)
 
 export async function POST_bulk_suspend({ session, body, ipAddress, userAgent }: any) {
   const input = BulkSuspendInput.parse(body);
-  const result = await db.user.updateMany({ where: { id: { in: input.userIds }, role: { not: 'platform_admin' } }, data: { isActive: false } });
+  const result = await db.user.updateMany({
+    where: { id: { in: input.userIds }, role: { not: 'platform_admin' } },
+    data: { isActive: false, tokenVersion: { increment: 1 } },
+  });
+  // Revoke all active sessions for the suspended users — otherwise their
+  // existing JWTs stay valid for up to 30 days.
+  if (result.count > 0) {
+    await db.session.updateMany({
+      where: { userId: { in: input.userIds }, revokedAt: null },
+      data: { revokedAt: new Date() },
+    }).catch(() => {});
+  }
   await audit({ actorId: session.id, action: 'admin.bulk_suspend', entityType: 'user', after: { count: result.count }, ipAddress, userAgent });
   return { data: { suspended: result.count } };
 }

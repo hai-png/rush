@@ -1,5 +1,6 @@
 import { db } from '@/lib/db';
 import { logger } from '@/lib/logger';
+import { z } from 'zod';
 
 export async function GET_notifications({ session }: any) {
   const notifs = await db.notification.findMany({
@@ -46,26 +47,56 @@ export async function DELETE_notification({ session, params }: any) {
   return { data: { ok: true } };
 }
 
-import { z } from 'zod';
+// ─── Notification preferences ─────────────────────────────────────────────
+// Persisted per-user via the Setting model (key: `notif-prefs:<userId>`).
+const DEFAULT_PREFS = {
+  emailEnabled: true,
+  smsEnabled: true,
+  pushEnabled: true,
+  quietHoursStart: null as string | null,
+  quietHoursEnd: null as string | null,
+};
 
 const PreferencesInput = z.object({
   emailEnabled: z.boolean().optional(),
   smsEnabled: z.boolean().optional(),
   pushEnabled: z.boolean().optional(),
-  quietHoursStart: z.string().optional(),
-  quietHoursEnd: z.string().optional(),
+  quietHoursStart: z.string().optional().nullable(),
+  quietHoursEnd: z.string().optional().nullable(),
 });
+
+async function readPrefs(userId: string): Promise<typeof DEFAULT_PREFS> {
+  const row = await db.setting.findUnique({ where: { key: `notif-prefs:${userId}` } });
+  if (!row) return { ...DEFAULT_PREFS };
+  try {
+    return { ...DEFAULT_PREFS, ...JSON.parse(row.value) };
+  } catch {
+    return { ...DEFAULT_PREFS };
+  }
+}
 
 export async function PATCH_preferences({ session, body }: any) {
   const input = PreferencesInput.parse(body);
-  // For MVP, we don't persist preferences server-side (would need a schema
-  return { data: { userId: session.id, ...input } };
+  const current = await readPrefs(session.id);
+  const merged = { ...current, ...input };
+  await db.setting.upsert({
+    where: { key: `notif-prefs:${session.id}` },
+    update: { value: JSON.stringify(merged) },
+    create: { key: `notif-prefs:${session.id}`, value: JSON.stringify(merged) },
+  });
+  return { data: { userId: session.id, ...merged } };
 }
 
 export async function GET_preferences({ session }: any) {
-  return { data: { userId: session.id, emailEnabled: true, smsEnabled: true, pushEnabled: true, quietHoursStart: null, quietHoursEnd: null } };
+  const prefs = await readPrefs(session.id);
+  return { data: { userId: session.id, ...prefs } };
 }
 
+// ─── Device registration (for push notifications) ─────────────────────────
+// Persisted per-user via Setting (key: `device:<userId>:<platform>`).
+// A real implementation would use a dedicated Device table + a push provider
+// (FCM/APNs). This is a working stub that at least survives server restarts,
+// unlike the previous in-memory log.
 const DeviceInput = z.object({
   pushToken: z.string().min(1),
   platform: z.enum(['ios', 'android', 'web']),
@@ -74,13 +105,28 @@ const DeviceInput = z.object({
 
 export async function POST_device({ session, body }: any) {
   const input = DeviceInput.parse(body);
-  // For MVP, we don't have a Device model in the schema. Log it.
-  logger.info({ userId: session.id, platform: input.platform }, '[device] register');
+  const key = `device:${session.id}:${input.platform}`;
+  await db.setting.upsert({
+    where: { key },
+    update: { value: JSON.stringify({ pushToken: input.pushToken, userAgent: input.userAgent, registeredAt: new Date().toISOString() }) },
+    create: { key, value: JSON.stringify({ pushToken: input.pushToken, userAgent: input.userAgent, registeredAt: new Date().toISOString() }) },
+  });
+  logger.info({ userId: session.id, platform: input.platform }, '[device] registered');
   return { status: 201, data: { ok: true } };
 }
 
 export async function DELETE_device({ session, body }: any) {
   const { pushToken } = z.object({ pushToken: z.string() }).parse(body);
-  logger.info({ userId: session.id }, '[device] unregister');
+  // Find the device by token across all platforms for this user.
+  const prefix = `device:${session.id}:`;
+  const rows = await db.setting.findMany({ where: { key: { startsWith: prefix } } });
+  for (const r of rows) {
+    try {
+      const parsed = JSON.parse(r.value);
+      if (parsed.pushToken === pushToken) {
+        await db.setting.delete({ where: { key: r.key } });
+      }
+    } catch {}
+  }
   return { data: { ok: true } };
 }

@@ -7,7 +7,6 @@ import { Badge } from '@/components/ui/badge';
 import { SignOutButton } from '@/components/sign-out-button';
 import { Plus } from 'lucide-react';
 import { ClaimButton } from './claim-button';
-import { Plus } from 'lucide-react';
 
 export default async function OpenSeatsPage() {
   const session = await requireSession();

@@ -29,7 +29,7 @@ const ReleaseInput = z.object({
 
 export async function POST_create_release({ session, body, ipAddress, userAgent }: any) {
   const input = ReleaseInput.parse(body);
-  const trip = await db.trip.findUnique({ where: { id: input.tripId } });
+  const trip = await db.trip.findUnique({ where: { id: input.tripId }, include: { shuttle: true } });
   if (!trip) throw new NotFoundError('Trip not found');
   if (trip.status !== 'scheduled') throw new BadRequestError('Trip is not scheduled');
 
@@ -38,21 +38,31 @@ export async function POST_create_release({ session, body, ipAddress, userAgent 
   });
   if (!ride) throw new BadRequestError('You have no booked ride on this trip');
 
-  const release = await db.seatRelease.create({
-    data: {
-      userId: session.id,
-      tripId: input.tripId,
-      window: input.window,
-      status: 'open',
-      expiresAt: new Date(input.expiresAt),
-    },
+  const release = await db.$transaction(async (tx) => {
+    // Mark the seller's ride as 'released' and decrement trip.seatsBooked
+    // so the freed seat is visible to other riders. The buyer will later
+    // re-occupy it via POST_claim with a fresh Ride row + re-increment.
+    await tx.ride.update({ where: { id: ride.id }, data: { status: 'released' } });
+    await tx.trip.update({
+      where: { id: trip.id },
+      data: { seatsBooked: { decrement: 1 } },
+    });
+    return tx.seatRelease.create({
+      data: {
+        userId: session.id,
+        tripId: input.tripId,
+        window: input.window,
+        status: 'open',
+        expiresAt: new Date(input.expiresAt),
+      },
+    });
   });
   await audit({
     actorId: session.id,
     action: 'seat_released',
     entityType: 'seat_release',
     entityId: release.id,
-    after: { tripId: input.tripId },
+    after: { tripId: input.tripId, rideId: ride.id },
     ipAddress, userAgent,
   });
   return { status: 201, data: release };
@@ -105,7 +115,7 @@ export async function POST_claim({ session, body, params, ipAddress, userAgent }
       },
     });
 
-    return tx.seatClaim.create({
+    const newClaim = await tx.seatClaim.create({
       data: {
         seatReleaseId: release.id,
         claimantUserId: session.id,
@@ -113,6 +123,11 @@ export async function POST_claim({ session, body, params, ipAddress, userAgent }
         status: 'pending',
       },
     });
+    // Link the payment back to the claim so settlePayment() can promote the
+    // claim to 'confirmed' when the webhook arrives. Without this, the payment
+    // settles but the claim stays 'pending' forever.
+    await tx.payment.update({ where: { id: payment.id }, data: { seatClaimId: newClaim.id } });
+    return newClaim;
   });
 
   await audit({
@@ -153,9 +168,23 @@ export async function POST_cancel_release({ session, params, ipAddress, userAgen
   if (release.userId !== session.id) throw new NotFoundError('Seat release not found');
   if (release.status !== 'open') throw new BadRequestError(`Cannot cancel a ${release.status} release`);
 
-  await db.seatRelease.update({
-    where: { id: release.id },
-    data: { status: 'cancelled' },
+  await db.$transaction(async (tx) => {
+    await tx.seatRelease.update({
+      where: { id: release.id },
+      data: { status: 'cancelled' },
+    });
+    // Restore the seller's ride: flip back from 'released' to 'booked'
+    // and re-increment trip.seatsBooked so the seat is occupied again.
+    const sellerRide = await tx.ride.findFirst({
+      where: { tripId: release.tripId, userId: release.userId, status: 'released' },
+    });
+    if (sellerRide) {
+      await tx.ride.update({ where: { id: sellerRide.id }, data: { status: 'booked' } });
+      await tx.trip.update({
+        where: { id: release.tripId },
+        data: { seatsBooked: { increment: 1 } },
+      });
+    }
   });
   await audit({
     actorId: session.id,
@@ -182,13 +211,32 @@ export async function GET_release({ session, params }: any) {
 }
 
 export async function DELETE_release({ session, params, ipAddress, userAgent }: any) {
+  // DELETE mirrors POST_cancel_release but also allows platform_admin to
+  // cancel any release (POST_cancel_release is seller-only).
   const release = await db.seatRelease.findUnique({ where: { id: params.id } });
   if (!release) throw new NotFoundError('Seat release not found');
   if (release.userId !== session.id && session.role !== 'platform_admin') {
     throw new NotFoundError('Seat release not found');
   }
   if (release.status !== 'open') throw new BadRequestError(`Cannot delete a ${release.status} release`);
-  await db.seatRelease.update({ where: { id: release.id }, data: { status: 'cancelled' } });
+
+  await db.$transaction(async (tx) => {
+    await tx.seatRelease.update({
+      where: { id: release.id },
+      data: { status: 'cancelled' },
+    });
+    // Restore the seller's ride (same as POST_cancel_release).
+    const sellerRide = await tx.ride.findFirst({
+      where: { tripId: release.tripId, userId: release.userId, status: 'released' },
+    });
+    if (sellerRide) {
+      await tx.ride.update({ where: { id: sellerRide.id }, data: { status: 'booked' } });
+      await tx.trip.update({
+        where: { id: release.tripId },
+        data: { seatsBooked: { increment: 1 } },
+      });
+    }
+  });
   await audit({ actorId: session.id, action: 'seat_release.deleted', entityType: 'seat_release', entityId: release.id, ipAddress, userAgent });
   return { data: { id: release.id, status: 'cancelled' } };
 }
@@ -227,66 +275,11 @@ const ClaimCreateInput = z.object({
 });
 
 export async function POST_claim_direct({ session, body, ipAddress, userAgent }: any) {
+  // Identical to POST /marketplace/seat-releases/:id/claim — kept as a
+  // convenience for clients that prefer a single endpoint with body params
+  // over a path-param + body. Delegates to POST_claim to avoid drift.
   const input = ClaimCreateInput.parse(body);
-  // Delegate to the existing POST_claim handler by calling it with params.
-  const release = await db.seatRelease.findUnique({
-    where: { id: input.seatReleaseId },
-    include: { trip: { include: { route: true } } },
-  });
-  if (!release) throw new NotFoundError('Seat release not found');
-  if (release.status !== 'open') throw new ConflictError('Seat release no longer available');
-  if (release.expiresAt < new Date()) throw new BadRequestError('Seat release expired');
-  if (release.userId === session.id) throw new BadRequestError('Cannot claim your own release');
-
-  const fare = release.trip.route.fareCents;
-  if (fare <= 0) throw new BadRequestError('Route fare not set');
-
-  const reference = `SC${createId()}`;
-  const provider = getPaymentProvider(input.paymentMethod);
-  const env = loadEnv();
-  const checkout = await provider.createCheckout({
-    merchOrderId: reference,
-    amount: Money.fromCents(fare),
-    description: `Seat claim for ${release.trip.route.origin} → ${release.trip.route.destination}`,
-    notifyUrl: env.TELEBIRR_NOTIFY_URL || `${env.APP_BASE_URL}/api/v1/webhooks/telebirr/notify`,
-    redirectUrl: env.TELEBIRR_REDIRECT_URL || `${env.APP_BASE_URL}/checkout/complete`,
-  });
-
-  const claim = await db.$transaction(async (tx) => {
-    const updated = await tx.seatRelease.updateMany({
-      where: { id: release.id, status: 'open' },
-      data: { status: 'claimed' },
-    });
-    if (updated.count === 0) throw new ConflictError('Seat release was just claimed by someone else');
-
-    const payment = await tx.payment.create({
-      data: {
-        reference,
-        userId: session.id,
-        method: input.paymentMethod,
-        amountCents: fare,
-        status: 'pending',
-      },
-    });
-
-    return tx.seatClaim.create({
-      data: {
-        seatReleaseId: release.id,
-        claimantUserId: session.id,
-        paymentId: payment.id,
-        status: 'pending',
-      },
-    });
-  });
-
-  await audit({
-    actorId: session.id,
-    action: 'seat_claimed',
-    entityType: 'seat_claim',
-    entityId: claim.id,
-    after: { releaseId: release.id, paymentRef: reference },
-    ipAddress, userAgent,
-  });
-
-  return { status: 201, data: { claim, paymentReference: reference, checkout } };
+  return POST_claim(
+    { session, body: { paymentMethod: input.paymentMethod }, params: { id: input.seatReleaseId }, ipAddress, userAgent },
+  );
 }

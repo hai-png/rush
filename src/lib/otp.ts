@@ -57,7 +57,9 @@ export async function verifyOtp(rawPhone: string, purpose: OtpPurpose, code: str
 
   const ok = await verifyPassword(code, otp.codeHash);
   if (!ok) {
-    await db.otpCode.update({ where: { id: otp.id }, data: { attempts: otp.attempts + 1 } });
+    // Atomic increment to avoid a race where two concurrent verify calls
+    // both read attempts=N and both write attempts=N+1.
+    await db.otpCode.update({ where: { id: otp.id }, data: { attempts: { increment: 1 } } });
     throw new BadRequestError('Invalid code');
   }
 

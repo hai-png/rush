@@ -2,8 +2,7 @@ import { db } from '@/lib/db';
 import { z } from 'zod';
 import { Money } from '@/lib/money';
 import { NotFoundError, BadRequestError, ForbiddenError } from '@/lib/errors';
-import { audit } from '@/lib/audit';
-import { verifyAuditChain } from '@/lib/audit';
+import { audit, verifyAuditChain } from '@/lib/audit';
 import { scheduleRefund } from '@/lib/payment-service';
 import { enqueueNotification } from '@/lib/outbox';
 
@@ -212,6 +211,7 @@ const PlanUpdateInput = z.object({
   priceCents: z.number().int().nonnegative().optional(),
   ridesIncluded: z.number().int().optional(),
   durationDays: z.number().int().positive().optional(),
+  isTrial: z.boolean().optional(),
   isActive: z.boolean().optional(),
   sortOrder: z.number().int().optional(),
 });
@@ -263,39 +263,8 @@ export async function PATCH_shuttle({ session, params, body, ipAddress, userAgen
   return { data: updated };
 }
 
-const TripInput = z.object({
-  routeId: z.string().min(1),
-  shuttleId: z.string().min(1),
-  departureAt: z.string().datetime(),
-  window: z.enum(['morning', 'evening']),
-});
-
-export async function POST_trips({ body, session, ipAddress, userAgent }: any) {
-  const input = TripInput.parse(body);
-
-  const shuttle = await db.shuttle.findUnique({ where: { id: input.shuttleId } });
-  if (!shuttle) throw new NotFoundError('Shuttle not found');
-  if (session.role === 'contractor' && shuttle.contractorId !== session.id) {
-    throw new BadRequestError('You can only create trips on your own shuttles');
-  }
-
-  const route = await db.route.findUnique({ where: { id: input.routeId } });
-  if (!route || !route.isActive) throw new NotFoundError('Route not found');
-
-  const trip = await db.trip.create({
-    data: {
-      routeId: input.routeId,
-      shuttleId: input.shuttleId,
-      driverId: shuttle.contractorId,
-      departureAt: new Date(input.departureAt),
-      window: input.window,
-      status: 'scheduled',
-    },
-    include: { route: true, shuttle: true },
-  });
-  await audit({ actorId: session.id, action: 'trip.created', entityType: 'trip', entityId: trip.id, after: input, ipAddress, userAgent });
-  return { status: 201, data: trip };
-}
+// Trip creation is handled by POST /trips in api-operations.ts.
+// The previous POST /admin/trips duplicate was removed.
 
 export async function GET_my_shuttles({ session }: any) {
   if (session.role !== 'contractor') throw new ForbiddenError('Contractor only');

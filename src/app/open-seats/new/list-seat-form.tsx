@@ -10,7 +10,7 @@ import { toast } from 'sonner';
 import { api } from '@/lib/api-client';
 
 export function ListSeatForm({ ride }: { ride: any }) {
-  const [window, setWindow] = useState<'morning' | 'evening'>(ride.trip.window);
+  const [tripWindow, setTripWindow] = useState<'morning' | 'evening'>(ride.trip.window);
   const [hoursUntilExpiry, setHoursUntilExpiry] = useState(24);
   const [loading, setLoading] = useState(false);
 
@@ -20,7 +20,7 @@ export function ListSeatForm({ ride }: { ride: any }) {
       const expiresAt = new Date(Date.now() + hoursUntilExpiry * 3600_000).toISOString();
       await api.post('/api/v1/marketplace/seat-releases', {
         tripId: ride.tripId,
-        window,
+        window: tripWindow,
         expiresAt,
       });
       toast.success('Seat listed on marketplace');
@@ -35,7 +35,7 @@ export function ListSeatForm({ ride }: { ride: any }) {
       <div className="grid grid-cols-2 gap-2">
         <div>
           <Label className="text-xs">Window</Label>
-          <Select value={window} onValueChange={(v) => setWindow(v as any)}>
+          <Select value={tripWindow} onValueChange={(v) => setTripWindow(v as any)}>
             <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="morning">morning</SelectItem>
@@ -45,7 +45,7 @@ export function ListSeatForm({ ride }: { ride: any }) {
         </div>
         <div>
           <Label className="text-xs">Expires in</Label>
-          <Select value={String(hoursUntilExpiry)} onValueChange={(v) => setHoursUntil(Number(v))}>
+          <Select value={String(hoursUntilExpiry)} onValueChange={(v) => setHoursUntilExpiry(Number(v))}>
             <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="1">1 hour</SelectItem>

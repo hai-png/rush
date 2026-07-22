@@ -4,20 +4,59 @@ import { db } from '@/lib/db';
 import { Money } from '@/lib/money';
 import { getPaymentProvider } from '@/lib/payments';
 import { loadEnv } from '@/lib/env';
-import { BadRequestError, NotFoundError } from '@/lib/errors';
+import { BadRequestError, NotFoundError, ForbiddenError } from '@/lib/errors';
 import { createId } from '@/lib/id';
 import { audit } from '@/lib/audit';
 
 const InAppInput = z.object({
-  amountCents: z.number().int().positive(),
-  description: z.string().min(1).max(200),
-  // Optional: link to a subscription or seat claim
   subscriptionId: z.string().optional(),
   seatClaimId: z.string().optional(),
-});
+  description: z.string().min(1).max(200).optional(),
+}).refine(v => v.subscriptionId || v.seatClaimId, 'Either subscriptionId or seatClaimId is required');
 
 export async function POST_inapp_checkout({ session, body }: any) {
   const input = InAppInput.parse(body);
+
+  // Resolve the expected amount from the linked entity and verify ownership.
+  // We never trust a client-supplied amount — it must match the plan price or
+  // route fare exactly, otherwise a 1-cent payment could activate a 1500-ETB
+  // subscription.
+  let amountCents: number;
+  let description: string;
+  let subscriptionId: string | undefined;
+  let seatClaimId: string | undefined;
+
+  if (input.subscriptionId) {
+    const sub = await db.subscription.findUnique({
+      where: { id: input.subscriptionId },
+      include: { plan: true },
+    });
+    if (!sub) throw new NotFoundError('Subscription not found');
+    if (sub.userId !== session.id) throw new ForbiddenError('Not your subscription');
+    let riderAmountCents = sub.plan.priceCents;
+    if (sub.corporateId) {
+      const corp = await db.corporate.findUnique({ where: { id: sub.corporateId } });
+      if (corp) {
+        riderAmountCents = sub.plan.priceCents - Math.round(sub.plan.priceCents * corp.subsidyPercent / 100);
+      }
+    }
+    amountCents = riderAmountCents;
+    description = input.description ?? `${sub.plan.name} subscription (InApp)`;
+    subscriptionId = sub.id;
+  } else {
+    const claim = await db.seatClaim.findUnique({
+      where: { id: input.seatClaimId! },
+      include: { seatRelease: { include: { trip: { include: { route: true } } } } },
+    });
+    if (!claim) throw new NotFoundError('Seat claim not found');
+    if (claim.claimantUserId !== session.id) throw new ForbiddenError('Not your seat claim');
+    amountCents = claim.seatRelease.trip.route.fareCents;
+    description = input.description ?? `Seat claim for ${claim.seatRelease.trip.route.origin} → ${claim.seatRelease.trip.route.destination}`;
+    seatClaimId = claim.id;
+  }
+
+  if (amountCents <= 0) throw new BadRequestError('Resolved amount must be positive');
+
   const provider = getPaymentProvider('telebirr');
   if (!provider.createInAppOrder) {
     throw new BadRequestError('InApp SDK not supported by current provider');
@@ -27,8 +66,8 @@ export async function POST_inapp_checkout({ session, body }: any) {
   const env = loadEnv();
   const intent = {
     merchOrderId: reference,
-    amount: Money.fromCents(input.amountCents),
-    description: input.description,
+    amount: Money.fromCents(amountCents),
+    description,
     notifyUrl: env.TELEBIRR_NOTIFY_URL || `${env.APP_BASE_URL}/api/v1/webhooks/telebirr/notify`,
     redirectUrl: env.TELEBIRR_REDIRECT_URL || `${env.APP_BASE_URL}/checkout/complete`,
   };
@@ -39,10 +78,10 @@ export async function POST_inapp_checkout({ session, body }: any) {
     data: {
       reference,
       userId: session.id,
-      subscriptionId: input.subscriptionId,
-      seatClaimId: input.seatClaimId,
+      subscriptionId,
+      seatClaimId,
       method: 'telebirr',
-      amountCents: input.amountCents,
+      amountCents,
       status: 'pending',
     },
   });
@@ -125,8 +164,10 @@ const DisburseInput = z.object({
 });
 
 export async function POST_disburse({ session, body, ipAddress, userAgent }: any) {
+  // Route is already requireRole: ['platform_admin'] in the route table;
+  // this is a defensive check in case the handler is ever called directly.
   if (session?.role !== 'platform_admin') {
-    throw new BadRequestError('Admin only — disburse is for the scheduler or admin testing');
+    throw new ForbiddenError('Admin only — disburse is for the scheduler or admin testing');
   }
   const input = DisburseInput.parse(body);
   const provider = getPaymentProvider('telebirr');

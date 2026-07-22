@@ -1,6 +1,6 @@
 
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, writeFile, readFile, stat } from 'node:fs/promises';
+import { mkdir, writeFile, readFile, stat, unlink } from 'node:fs/promises';
 import { join, extname } from 'node:path';
 import { loadEnv } from '@/lib/env';
 
@@ -86,5 +86,15 @@ export async function fileExists(storageKey: string): Promise<boolean> {
     return true;
   } catch {
     return false;
+  }
+}
+
+export async function deleteFile(storageKey: string): Promise<void> {
+  if (storageKey.includes('..') || storageKey.startsWith('/')) return;
+  const fullPath = join(uploadDir(), storageKey);
+  try {
+    await unlink(fullPath);
+  } catch {
+    // Already gone — fine.
   }
 }

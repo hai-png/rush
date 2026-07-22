@@ -1,9 +1,10 @@
 
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { saveFile, FileUploadError } from '@/lib/file-storage';
+import { saveFile, deleteFile, FileUploadError } from '@/lib/file-storage';
 import { BadRequestError, NotFoundError, ForbiddenError, ConflictError, toErrorEnvelope } from '@/lib/errors';
 import { audit } from '@/lib/audit';
+import { logger } from '@/lib/logger';
 
 const DOC_TYPES = new Set(['registration', 'insurance', 'inspection']);
 
@@ -51,11 +52,44 @@ export async function handleDocumentUpload(req: NextRequest, session: any): Prom
       });
 
       if (existing) {
-        return tx.contractorDocument.update({
+        // Re-uploading a previously-verified document must reset verification
+        // to 'pending' so an admin re-reviews the new file.
+        const updated = await tx.contractorDocument.update({
           where: { id: existing.id },
           data: { fileId: uploaded.id, uploadedAt: new Date() },
           include: { file: true },
         });
+        if (profile.verificationStatus === 'verified' || profile.verificationStatus === 'rejected') {
+          await tx.contractorProfile.update({
+            where: { id: profile.id },
+            data: {
+              verificationStatus: 'pending',
+              verificationReason: null,
+              verifiedById: null,
+              verifiedAt: null,
+            },
+          });
+        }
+        // Schedule the old file for deletion (after the tx commits so we don't
+        // lose it if the tx rolls back). The UploadedFile row is deleted too;
+        // the FK on ContractorDocument.fileId is Restrict so we null it first
+        // by pointing the doc at the new file (done above).
+        const oldFileId = existing.fileId;
+        const oldStorageKey = await tx.uploadedFile
+          .findUnique({ where: { id: oldFileId }, select: { storageKey: true } })
+          .then((r) => r?.storageKey);
+        if (oldStorageKey) {
+          // Fire-and-forget cleanup outside the tx.
+          queueMicrotask(async () => {
+            try {
+              await deleteFile(oldStorageKey);
+              await db.uploadedFile.delete({ where: { id: oldFileId } }).catch(() => {});
+            } catch (err) {
+              logger.warn({ err: (err as Error).message }, '[doc-upload] old file cleanup failed');
+            }
+          });
+        }
+        return updated;
       }
       return tx.contractorDocument.create({
         data: {

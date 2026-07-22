@@ -32,7 +32,10 @@ function handle(method: string) {
       });
     });
 
-    return wrapped(req, ctx);
+    // Cast ctx to any: api()'s ctx type expects Promise<Record<string,string>>,
+    // but Next's catch-all gives Promise<{ route?: string[] }>. The wrapper only
+    // uses ctx.params inside its own handler, and we override params above.
+    return wrapped(req, ctx as any);
   };
 }
 
@@ -74,9 +77,11 @@ async function handleRaw(
       }
     }
 
-    // CSRF check for raw POST routes (same logic as api.ts csrfCheck)
+    // CSRF check for raw POST routes. Webhooks and cron are exempt (they
+    // don't come from browsers and use their own auth: signature / secret).
     const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
-    if (!SAFE_METHODS.has(req.method)) {
+    const CSRF_EXEMPT_RAW = [/^\/api\/v1\/webhooks\//, /^\/api\/v1\/cron\//];
+    if (!SAFE_METHODS.has(req.method) && !CSRF_EXEMPT_RAW.some((re) => re.test(req.nextUrl.pathname))) {
       const cookieHeader = req.headers.get('cookie') ?? '';
       const readCookie = (name: string): string | undefined => {
         for (const part of cookieHeader.split(';')) {
@@ -86,8 +91,10 @@ async function handleRaw(
         return undefined;
       };
       const sessionToken = readCookie('addis-session');
-      const bearerHeader = req.headers.get('authorization')?.replace(/^Bearer\s+/i, '');
-      if (sessionToken || (!sessionToken && !bearerHeader)) {
+      // Browser-like requests (session cookie present) must pass the
+      // double-submit CSRF check. Bearer-only and anonymous requests are
+      // not subject to CSRF (handled by the api() wrapper for non-raw routes).
+      if (sessionToken) {
         const csrfCookie = readCookie('addis-csrf');
         const csrfHeader = req.headers.get('x-csrf-token');
         if (!csrfCookie || !csrfHeader) {

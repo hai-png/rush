@@ -1,8 +1,12 @@
 
 import { db } from '@/lib/db';
+import { Prisma } from '@prisma/client';
 import { Money } from '@/lib/money';
 import { BadRequestError, ConflictError } from '@/lib/errors';
 import { enqueueNotification } from '@/lib/outbox';
+
+// A transaction client is a narrower PrismaClient that omits $connect/$disconnect/$on/$transaction/$extends.
+type TxClient = Prisma.TransactionClient;
 
 export type SubscriptionStatus = 'pending_payment' | 'active' | 'expired' | 'cancelled';
 export type SubscriptionEvent =
@@ -27,7 +31,7 @@ const TRANSITIONS: Record<SubscriptionStatus, Partial<Record<SubscriptionEvent, 
 };
 
 export async function transitionSubscription(
-  tx: typeof db,
+  tx: TxClient | typeof db,
   subscriptionId: string,
   event: SubscriptionEvent,
 ): Promise<void> {
@@ -55,7 +59,7 @@ export async function transitionSubscription(
   if (next === 'active') {
     await enqueueNotification({
       userId: sub.userId,
-      type: 'subscription_expiring', // re-using this type for "activated"; original had no 'subscription_activated'
+      type: 'subscription_activated',
       title: 'Subscription activated',
       body: `Your subscription is now active until ${sub.endDate.toLocaleDateString()}.`,
       link: '/dashboard/rider',
@@ -80,7 +84,7 @@ export async function transitionSubscription(
 }
 
 export async function consumeRide(
-  tx: typeof db,
+  tx: TxClient | typeof db,
   subscriptionId: string,
 ): Promise<void> {
   const sub = await tx.subscription.findUnique({
@@ -89,11 +93,21 @@ export async function consumeRide(
   });
   if (!sub) throw new BadRequestError('Subscription not found');
   if (sub.status !== 'active') throw new BadRequestError('Subscription not active');
-  if (sub.plan.ridesIncluded !== -1 && sub.ridesUsed >= sub.plan.ridesIncluded) {
-    throw new BadRequestError('No rides remaining in subscription');
+  if (sub.plan.ridesIncluded === -1) {
+    // Unlimited plan — no counter to check, just increment for reporting.
+    await tx.subscription.update({
+      where: { id: subscriptionId },
+      data: { ridesUsed: { increment: 1 } },
+    });
+    return;
   }
-  await tx.subscription.update({
-    where: { id: subscriptionId },
+  // Atomic CAS update: only increment if we haven't hit the cap. Two
+  // concurrent POST /rides with the same sub will see exactly one succeed.
+  const updated = await tx.subscription.updateMany({
+    where: { id: subscriptionId, ridesUsed: { lt: sub.plan.ridesIncluded } },
     data: { ridesUsed: { increment: 1 } },
   });
+  if (updated.count === 0) {
+    throw new BadRequestError('No rides remaining in subscription');
+  }
 }

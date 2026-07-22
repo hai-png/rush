@@ -1,7 +1,8 @@
 
 import { Money } from '@/lib/money';
 import { loadEnv } from '@/lib/env';
-import { createSign, createVerify } from 'node:crypto';
+import { createSign, createVerify, randomUUID, constants as cryptoConstants } from "node:crypto";
+import { logger } from "@/lib/logger";
 
 export type PaymentIntent = {
   merchOrderId: string;
@@ -90,13 +91,11 @@ class MockTelebirrProvider implements PaymentProvider {
     return { status: 'pending' };
   }
   async refund(req: RefundRequest): Promise<RefundResult> {
-    // Mock always succeeds immediately.
-    console.log(`[MockTelebirr] refund ${req.refundRequestNo} for ${req.merchOrderId}: ${req.amount.toString()} — ${req.reason}`);
+    logger.info({ refundRequestNo: req.refundRequestNo, merchOrderId: req.merchOrderId, amount: req.amount.toString(), reason: req.reason }, '[MockTelebirr] refund');
     return { status: 'succeeded' };
   }
   async createInAppOrder(intent: PaymentIntent): Promise<InAppCheckoutResult> {
-    // Mock returns the same shape as H5 checkout but with a receiveCode the
-    console.log(`[MockTelebirr:InApp] createOrder for ${intent.merchOrderId}`);
+    logger.info({ merchOrderId: intent.merchOrderId }, '[MockTelebirr:InApp] createOrder');
     return {
       prepayId: `mock-inapp-${intent.merchOrderId}`,
       receiveCode: `RCV${Date.now()}`,
@@ -115,15 +114,15 @@ class MockTelebirrProvider implements PaymentProvider {
     };
   }
   async queryMandate(mctContractNo: string): Promise<MandateQueryResult> {
-    console.log(`[MockTelebirr:Subscription] queryMandate ${mctContractNo}`);
+    logger.info({ mctContractNo }, '[MockTelebirr:Subscription] queryMandate');
     return { status: 'active' };
   }
   async cancelMandate(mctContractNo: string): Promise<{ ok: boolean }> {
-    console.log(`[MockTelebirr:Subscription] cancelMandate ${mctContractNo}`);
+    logger.info({ mctContractNo }, '[MockTelebirr:Subscription] cancelMandate');
     return { ok: true };
   }
   async disburse(opts: { mctContractNo: string; merchOrderId: string; amount: Money; reason: string }): Promise<DisburseResult> {
-    console.log(`[MockTelebirr:Subscription] disburse ${opts.merchOrderId} for ${opts.mctContractNo}: ${opts.amount.toString()} — ${opts.reason}`);
+    logger.info({ merchOrderId: opts.merchOrderId, mctContractNo: opts.mctContractNo, amount: opts.amount.toString(), reason: opts.reason }, '[MockTelebirr:Subscription] disburse');
     return { status: 'succeeded', paymentOrderId: `mock-disburse-${opts.merchOrderId}` };
   }
   async parseWebhook(req: Request): Promise<WebhookEvent> {
@@ -141,7 +140,13 @@ class MockTelebirrProvider implements PaymentProvider {
     }
 
     const signatureValid = payload.sign === 'mock-signature';
-    const outRequestNo = payload.out_request_no ?? `orno-${Date.now()}`;
+    // Reject payloads missing out_request_no — falling back to a unique value
+    // would defeat the (merch_order_id, out_request_no) dedup PK and allow
+    // the same payment to be settled twice via two deliveries.
+    const outRequestNo = payload.out_request_no;
+    if (!outRequestNo) {
+      throw new Error('Telebirr webhook missing out_request_no — cannot dedup');
+    }
 
     if (payload.refund_request_no) {
       return payload.trade_status === 'Success'
@@ -154,7 +159,8 @@ class MockTelebirrProvider implements PaymentProvider {
   }
 }
 
-//   - Sort keys lexicographically, join as k=v&k=v
+// Real Telebirr H5 C2B provider. Signs requests with RSA-PSS-SHA256, verifies
+// webhook signatures with the Telebirr public key. See README for the flow.
 class TelebirrProvider implements PaymentProvider {
   readonly name = 'telebirr' as const;
   private env = loadEnv();
@@ -206,8 +212,8 @@ class TelebirrProvider implements PaymentProvider {
       .update(data, 'utf8')
       .sign({
         key: this.env.TELEBIRR_PRIVATE_KEY,
-        padding: 1, // RSA_PKCS1_PSS_PADDING
-        saltLength: 0, // RSA_PSS_SALTLEN_DIGEST
+        padding: cryptoConstants.RSA_PKCS1_PSS_PADDING,
+        saltLength: cryptoConstants.RSA_PSS_SALTLEN_DIGEST,
       })
       .toString('base64');
   }
@@ -219,8 +225,8 @@ class TelebirrProvider implements PaymentProvider {
         .update(data, 'utf8')
         .verify({
           key: this.env.TELEBIRR_PUBLIC_KEY,
-          padding: 1, // RSA_PKCS1_PSS_PADDING
-          saltLength: 0,
+          padding: cryptoConstants.RSA_PKCS1_PSS_PADDING,
+          saltLength: cryptoConstants.RSA_PSS_SALTLEN_DIGEST,
         }, signatureBase64, 'base64');
     } catch {
       return false;
@@ -583,7 +589,13 @@ class TelebirrProvider implements PaymentProvider {
       signatureValid = this.verifyTelebirr(payload, payload.sign);
     }
 
-    const outRequestNo = payload.out_request_no ?? payload.trans_id ?? `orno-${Date.now()}`;
+    // Reject payloads missing out_request_no (and trans_id as a fallback for
+    // Telebirr's older payload format). A unique fallback would defeat the
+    // (merch_order_id, out_request_no) dedup PK.
+    const outRequestNo = payload.out_request_no ?? payload.trans_id;
+    if (!outRequestNo) {
+      throw new Error('Telebirr webhook missing out_request_no + trans_id — cannot dedup');
+    }
 
     if (payload.refund_request_no) {
       // Refund notify (rare — refunds usually sync via refund() response)

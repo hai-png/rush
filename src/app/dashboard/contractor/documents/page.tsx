@@ -75,10 +75,7 @@ export default async function ContractorDocumentsPage() {
         <div className="mt-6 rounded-md border border-blue-500/30 bg-blue-500/5 p-4 text-sm">
           <strong>Verification flow:</strong> Once all three documents are uploaded, your status moves to
           <Badge variant="outline" className="mx-1">pending</Badge>. A platform admin reviews and either verifies or rejects with a reason.
-<<<<<<< HEAD
           You'll get a notification either way.
-=======
->>>>>>> main
         </div>
       </main>
     </div>

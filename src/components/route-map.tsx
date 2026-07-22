@@ -26,7 +26,7 @@ export function RouteMap({
   origin?: string;
   destination?: string;
 }) {
-  const center: [number, number] = pickups.length > 0 && pickups[0].lat
+  const center: [number, number] = pickups.length > 0 && pickups[0].lat != null && pickups[0].lng != null
     ? [pickups[0].lat, pickups[0].lng]
     : [9.03, 38.74]; // Addis Ababa center
 

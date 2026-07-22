@@ -70,7 +70,7 @@ export async function settlePayment(reference: string, reportedAmount: Money | u
         sideEffects.push(async () => {
           await enqueueNotification({
             userId: sub.userId,
-            type: 'subscription_expiring',
+            type: 'subscription_activated',
             title: 'Subscription activated',
             body: `Your subscription is now active until ${new Date(sub.endDate).toLocaleDateString()}.`,
             link: '/dashboard/rider',
@@ -134,10 +134,25 @@ export async function failPayment(reference: string, reasonRaw: unknown, outRequ
     if (!p) return false;
 
     if (p.seatClaimId) {
-      await tx.seatClaim.update({ where: { id: p.seatClaimId }, data: { status: 'refunded' } });
       const claim = await tx.seatClaim.findUnique({ where: { id: p.seatClaimId } });
       if (claim) {
+        const release = await tx.seatRelease.findUnique({ where: { id: claim.seatReleaseId } });
+        // Mark the failed claim as 'refunded' and reopen the release.
+        await tx.seatClaim.update({ where: { id: p.seatClaimId }, data: { status: 'refunded' } });
         await tx.seatRelease.update({ where: { id: claim.seatReleaseId }, data: { status: 'open' } });
+        // Restore the seller's ride + trip capacity — without this, the
+        // seller's seat stays 'released' (decremented from seatsBooked) but
+        // the release is now 'open' with no buyer, so the seller permanently
+        // loses their seat AND the trip shows a phantom free seat.
+        if (release) {
+          const sellerRide = await tx.ride.findFirst({
+            where: { tripId: release.tripId, userId: release.userId, status: 'released' },
+          });
+          if (sellerRide) {
+            await tx.ride.update({ where: { id: sellerRide.id }, data: { status: 'booked' } });
+            await tx.trip.update({ where: { id: release.tripId }, data: { seatsBooked: { increment: 1 } } });
+          }
+        }
       }
     }
 

@@ -58,7 +58,7 @@ export default async function TripManifestPage({ params }: { params: Promise<{ t
                     <Badge variant={r.status === 'completed' ? 'default' : r.status === 'boarded' ? 'secondary' : 'outline'}>{r.status}</Badge>
                     {trip.status === 'in_transit' && r.status === 'booked' && <MarkRideStatus rideId={r.id} action="boarded" />}
                     {trip.status === 'in_transit' && r.status === 'boarded' && <MarkRideStatus rideId={r.id} action="completed" />}
-                    {r.status === 'booked' && <MarkRideStatus rideId={r.id} action="no_show" />}
+                    {trip.status === 'in_transit' && r.status === 'booked' && <MarkRideStatus rideId={r.id} action="no_show" />}
                   </div>
                 </div>
               ))}

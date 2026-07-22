@@ -1,5 +1,6 @@
 'use client';
 
+import { Suspense } from 'react';
 import { useEffect, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
@@ -8,7 +9,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { toast } from 'sonner';
 import { Bus, CheckCircle2, XCircle } from 'lucide-react';
 
-export default function TelebirrStubPage() {
+function TelebirrStubInner() {
   const router = useRouter();
   const sp = useSearchParams();
   const order = sp.get('order') ?? '';
@@ -92,5 +93,15 @@ export default function TelebirrStubPage() {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+export default function TelebirrStubPage() {
+  // useSearchParams() must be wrapped in a Suspense boundary so that
+  // Next.js 16 can statically prerender the page shell.
+  return (
+    <Suspense fallback={<div className="min-h-screen flex items-center justify-center">Loading…</div>}>
+      <TelebirrStubInner />
+    </Suspense>
   );
 }

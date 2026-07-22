@@ -129,7 +129,7 @@ curl -s -b $CONTRACTOR -o $TMP/downloaded.pdf -w "%{http_code}" $BASE/api/v1/fil
 ROUTE_ID=$(python3 -c 'import json;print(json.load(open("/tmp/addis-ride-e2e/routes.json"))["data"][0]["id"])')
 SHUTTLE_ID=$(curl -s -b $CONTRACTOR $BASE/api/v1/contractor/shuttles | python3 -c 'import sys,json;print(json.load(sys.stdin)["data"][0]["id"])' 2>/dev/null)
 NEWTIME=$(date -u -d '+2 days' +'%Y-%m-%dT08:00:00.000Z')
-TRIPCREATE=$(spost $CONTRACTOR /api/v1/admin/trips '{"routeId":"'$ROUTE_ID'","shuttleId":"'$SHUTTLE_ID'","departureAt":"'$NEWTIME'","window":"morning"}')
+TRIPCREATE=$(spost $CONTRACTOR /api/v1/trips '{"routeId":"'$ROUTE_ID'","shuttleId":"'$SHUTTLE_ID'","departureAt":"'$NEWTIME'","window":"morning"}')
 echo "$TRIPCREATE" | python3 -c 'import sys,json;d=json.load(sys.stdin);exit(0 if d.get("data",{}).get("id") else 1)' 2>/dev/null && ok "contractor created trip" || bad "trip create"
 
 # ─── 4. Admin flow ───────────────────────────────────────────────────────────
@@ -162,6 +162,20 @@ curl -s -c $CORPADMIN -X POST $BASE/api/v1/auth/token -H 'content-type: applicat
 curl -s -b $CORPADMIN -c $CORPADMIN $BASE/api/v1/plans > /dev/null
 CORPCSRF=$(get_csrf $CORPADMIN)
 spost $CORPADMIN /api/v1/tos/accept '{}' > /dev/null
+
+# corporate_admin is a privileged role — the API requires phone verification
+# + 2FA before promotion. Set both up so the e2e test exercises the real flow.
+OTP_RES=$(spost $CORPADMIN /api/v1/auth/otp/send '{"phone":"'$CORPADMIN_PHONE'","purpose":"signup_verification"}')
+OTP_CODE=$(echo "$OTP_RES" | python3 -c 'import sys,json;print(json.load(sys.stdin)["data"]["devCode"])' 2>/dev/null)
+spost $CORPADMIN /api/v1/auth/phone/verify '{"code":"'$OTP_CODE'"}' > /dev/null && ok "corp admin phone verified" || bad "phone verify"
+SETUP=$(spost $CORPADMIN /api/v1/auth/2fa/setup '{"password":"corp-pass-1234"}')
+SECRET=$(echo "$SETUP" | python3 -c 'import sys,json;print(json.load(sys.stdin)["data"]["secret"])' 2>/dev/null)
+# Generate a TOTP code from the secret using otplib (v13 functional API).
+TWOFA_CODE=$(bun -e "
+import { generateSync } from 'otplib';
+console.log(generateSync({ secret: '$SECRET' }));
+" 2>/dev/null)
+spost $CORPADMIN /api/v1/auth/2fa/enable '{"secret":"'$SECRET'","code":"'$TWOFA_CODE'"}' > /dev/null && ok "corp admin 2FA enabled" || bad "2fa enable"
 
 ONBOARD=$(spost $CORPADMIN /api/v1/corporate/onboard '{"name":"Acme Corp","contactEmail":"admin@acme.et","contactPhone":"+251922000099","subsidyPercent":75,"monthlySeatAllowance":30}')
 echo "$ONBOARD" | python3 -c 'import sys,json;d=json.load(sys.stdin);exit(0 if d.get("data",{}).get("corporate",{}).get("id") else 1)' 2>/dev/null && ok "corporate onboarded" || bad "onboard"
@@ -315,90 +329,3 @@ echo "  Result: $PASS passed, $FAIL failed"
 echo "════════════════════════════════════════════════════════════════"
 exit $FAIL
 
-# ─── 11. Feature parity: new endpoints ───────────────────────────────────────
-echo ""
-echo "── 11. Feature parity: new endpoints ──"
-
-# Healthz
-curl -s $BASE/api/v1/healthz | python3 -c 'import sys,json;d=json.load(sys.stdin);exit(0 if d["data"]["status"]=="alive" else 1)' && ok "GET /healthz" || bad "healthz"
-
-# Account GET + PATCH
-ACCT=$(curl -s -b $RIDER $BASE/api/v1/account)
-echo "$ACCT" | python3 -c 'import sys,json;d=json.load(sys.stdin);exit(0 if d["data"]["phone"]=="'$NEWRIDER_PHONE'" else 1)' && ok "GET /account" || bad "GET account"
-
-PATCHED=$(spost $RIDER /api/v1/account '{"name":"Updated Rider"}' 2>/dev/null || curl -s -b $RIDER -X PATCH $BASE/api/v1/account -H 'content-type: application/json' -H "x-csrf-token: $(get_csrf $RIDER)" -d '{"name":"Updated Rider"}')
-echo "$PATCHED" | python3 -c 'import sys,json;d=json.load(sys.stdin);exit(0 if d["data"]["name"]=="Updated Rider" else 1)' && ok "PATCH /account" || bad "PATCH account"
-
-# Notifications unread-count
-UC=$(curl -s -b $RIDER $BASE/api/v1/notifications/unread-count)
-echo "$UC" | python3 -c 'import sys,json;d=json.load(sys.stdin);exit(0 if "count" in d["data"] else 1)' && ok "GET /notifications/unread-count" || bad "unread-count"
-
-# Notification delete
-NID=$(curl -s -b $RIDER $BASE/api/v1/notifications | python3 -c 'import sys,json;print(json.load(sys.stdin)["data"][0]["id"])')
-curl -s -b $RIDER -X DELETE $BASE/api/v1/notifications/$NID -H "x-csrf-token: $(get_csrf $RIDER)" | python3 -c 'import sys,json;d=json.load(sys.stdin);exit(0 if d["data"]["ok"] else 1)' && ok "DELETE /notifications/:id" || bad "delete notif"
-
-# Admin dashboard stats
-DASH=$(curl -s -b $ADMIN $BASE/api/v1/admin/dashboard)
-echo "$DASH" | python3 -c 'import sys,json;d=json.load(sys.stdin);exit(0 if "counts" in d["data"] and "revenueCents" in d["data"] else 1)' && ok "GET /admin/dashboard" || bad "admin dashboard"
-
-# Admin pending contractors
-curl -s -b $ADMIN $BASE/api/v1/admin/contractors/pending | python3 -c 'import sys,json;d=json.load(sys.stdin);exit(0 if isinstance(d["data"],list) else 1)' && ok "GET /admin/contractors/pending" || bad "pending contractors"
-
-# Admin all subscriptions
-curl -s -b $ADMIN $BASE/api/v1/admin/subscriptions | python3 -c 'import sys,json;d=json.load(sys.stdin);exit(0 if isinstance(d["data"],list) else 1)' && ok "GET /admin/subscriptions" || bad "admin subscriptions"
-
-# Admin CSV export
-CSV=$(curl -s -b $ADMIN "$BASE/api/v1/admin/export/users")
-echo "$CSV" | python3 -c 'import sys,json;d=json.load(sys.stdin);exit(0 if "csv" in d["data"] and d["data"]["rowCount"]>=0 else 1)' && ok "GET /admin/export/users (CSV)" || bad "csv export"
-
-# Catalog route detail
-ROUTE_ID=$(python3 -c 'import json;print(json.load(open("/tmp/addis-ride-e2e/routes.json"))["data"][0]["id"])')
-curl -s -b $RIDER $BASE/api/v1/routes/$ROUTE_ID | python3 -c 'import sys,json;d=json.load(sys.stdin);exit(0 if d["data"]["id"]=="'$ROUTE_ID'" else 1)' && ok "GET /routes/:id" || bad "route detail"
-
-# Marketplace seat-release detail
-REL_ID=$(curl -s -b $RIDER $BASE/api/v1/marketplace/my-releases | python3 -c 'import sys,json;d=json.load(sys.stdin);print(d["data"][0]["id"] if d["data"] else "")' 2>/dev/null)
-if [ -n "$REL_ID" ]; then
-  curl -s -b $RIDER $BASE/api/v1/marketplace/seat-releases/$REL_ID | python3 -c 'import sys,json;d=json.load(sys.stdin);exit(0 if d["data"]["id"]=="'$REL_ID'" else 1)' && ok "GET /marketplace/seat-releases/:id" || bad "release detail"
-  # Seat claims list
-  curl -s -b $RIDER $BASE/api/v1/marketplace/seat-claims | python3 -c 'import sys,json;d=json.load(sys.stdin);exit(0 if isinstance(d["data"],list) else 1)' && ok "GET /marketplace/seat-claims" || bad "claims list"
-else
-  bad "no seat release to test detail"
-fi
-
-# Operations: shuttle positions
-POS=$(spost $CONTRACTOR /api/v1/shuttle-positions '{"lat":9.03,"lng":38.74,"heading":180,"speed":45}' 2>/dev/null || curl -s -b $CONTRACTOR -X POST $BASE/api/v1/shuttle-positions -H 'content-type: application/json' -H "x-csrf-token: $CCSRF" -d '{"lat":9.03,"lng":38.74,"heading":180,"speed":45}')
-echo "$POS" | python3 -c 'import sys,json;d=json.load(sys.stdin);exit(0 if d["data"]["ok"] else 1)' && ok "POST /shuttle-positions" || bad "post position"
-
-curl -s -b $RIDER $BASE/api/v1/shuttle-positions | python3 -c 'import sys,json;d=json.load(sys.stdin);exit(0 if isinstance(d["data"],list) and len(d["data"])>=1 else 1)' && ok "GET /shuttle-positions" || bad "get positions"
-
-# Dashboard active-trip
-curl -s -b $RIDER $BASE/api/v1/dashboard/rider/active-trip | python3 -c 'import sys,json;d=json.load(sys.stdin);exit(0 if "data" in d else 1)' && ok "GET /dashboard/rider/active-trip" || bad "active-trip"
-
-# Subscription renew
-SUB_ID=$(python3 -c 'import json;print(json.load(open("/tmp/addis-ride-e2e/dash2.json"))["data"]["activeSubs"][0]["id"])' 2>/dev/null)
-if [ -n "$SUB_ID" ]; then
-  RENEW=$(spost $RIDER /api/v1/subscriptions/$SUB_ID/renew '{"paymentMethod":"telebirr"}' 2>/dev/null)
-  echo "$RENEW" | python3 -c 'import sys,json;d=json.load(sys.stdin);exit(0 if d.get("data",{}).get("paymentReference") else 1)' && ok "POST /subscriptions/:id/renew" || bad "renew"
-fi
-
-# Support ticket PATCH (close ticket)
-TPATCH=$(curl -s -b $RIDER -X PATCH $BASE/api/v1/tickets/$TICKET_ID -H 'content-type: application/json' -H "x-csrf-token: $(get_csrf $RIDER)" -d '{"status":"closed"}')
-echo "$TPATCH" | python3 -c 'import sys,json;d=json.load(sys.stdin);exit(0 if d["data"]["status"]=="closed" else 1)' && ok "PATCH /tickets/:id (close)" || bad "patch ticket"
-
-# Ticket messages list
-curl -s -b $RIDER $BASE/api/v1/tickets/$TICKET_ID/messages | python3 -c 'import sys,json;d=json.load(sys.stdin);exit(0 if isinstance(d["data"],list) and len(d["data"])>=1 else 1)' && ok "GET /tickets/:id/messages" || bad "messages list"
-
-# Corporate PATCH (update subsidy)
-CORP_PATCH=$(curl -s -b $CORPADMIN -X PATCH $BASE/api/v1/corporate -H 'content-type: application/json' -H "x-csrf-token: $(get_csrf $CORPADMIN)" -d '{"subsidyPercent":80}')
-echo "$CORP_PATCH" | python3 -c 'import sys,json;d=json.load(sys.stdin);exit(0 if d["data"]["subsidyPercent"]==80 else 1)' && ok "PATCH /corporate" || bad "patch corporate"
-
-# 2FA verify
-TFA=$(spost $RIDER /api/v1/auth/2fa/verify '{"code":"123456"}' 2>/dev/null)
-echo "$TFA" | python3 -c 'import sys,json;d=json.load(sys.stdin);exit(0 if d.get("error",{}).get("code")=="BAD_REQUEST" or d.get("data",{}).get("verified")==True else 1)' && ok "POST /auth/2fa/verify (rejected — 2FA not enabled)" || bad "2fa verify"
-
-# ─── Summary ─────────────────────────────────────────────────────────────────
-echo ""
-echo "════════════════════════════════════════════════════════════════"
-echo "  Result: $PASS passed, $FAIL failed"
-echo "════════════════════════════════════════════════════════════════"
-exit $FAIL

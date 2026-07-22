@@ -10,26 +10,12 @@ import { MemberActions } from './member-actions';
 
 export default async function CorporateDashboardPage() {
   const session = await requireRole('corporate_admin', 'platform_admin');
-<<<<<<< HEAD
-  const corp = await db.corporate.findUnique({
-    where: session.role === 'platform_admin' ? undefined : { adminUserId: session.id },
-    include: {
-      members: {
-        include: { user: { select: { id: true, name: true, phone: true, email: true } } },
-        orderBy: { createdAt: 'desc' },
-        take: 100,
-      },
-      invites: { orderBy: { createdAt: 'desc' }, take: 20 },
-      _count: { select: { subscriptions: true } },
-    },
-  });
-=======
   const corp = session.role === 'platform_admin'
     ? await db.corporate.findFirst({
         include: {
           members: { include: { user: { select: { id: true, name: true, phone: true, email: true } } }, orderBy: { createdAt: 'desc' }, take: 100 },
           invites: { orderBy: { createdAt: 'desc' }, take: 20 },
-          _count: { select: { subscriptions: true } },
+          _count: { select: { subscriptions: true, members: true } },
         },
       })
     : await db.corporate.findUnique({
@@ -37,10 +23,9 @@ export default async function CorporateDashboardPage() {
         include: {
           members: { include: { user: { select: { id: true, name: true, phone: true, email: true } } }, orderBy: { createdAt: 'desc' }, take: 100 },
           invites: { orderBy: { createdAt: 'desc' }, take: 20 },
-          _count: { select: { subscriptions: true } },
+          _count: { select: { subscriptions: true, members: true } },
         },
       });
->>>>>>> main
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -68,7 +53,7 @@ export default async function CorporateDashboardPage() {
                 <div><div className="text-xs text-muted-foreground">Code</div><div className="font-mono text-base">{corp.code}</div></div>
                 <div><div className="text-xs text-muted-foreground">Subsidy</div><div>{corp.subsidyPercent}%</div></div>
                 <div><div className="text-xs text-muted-foreground">Monthly allowance</div><div>{corp.monthlySeatAllowance}</div></div>
-                <div><div className="text-xs text-muted-foreground">Members</div><div>{corp.members.length}</div></div>
+                <div><div className="text-xs text-muted-foreground">Members</div><div>{corp._count.members}</div></div>
               </CardContent>
             </Card>
 

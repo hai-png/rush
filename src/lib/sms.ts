@@ -51,7 +51,6 @@ class TwilioSmsProvider implements SmsProvider {
 class ConsoleSmsProvider implements SmsProvider {
   async send(to: string, body: string): Promise<{ ok: boolean; messageId?: string }> {
     logger.info({ to, body: body.slice(0, 80) }, '[SMS:console]');
-    console.log(`[SMS] -> ${to}: ${body}`);
     return { ok: true, messageId: `console-${Date.now()}` };
   }
 }

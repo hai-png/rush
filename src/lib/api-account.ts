@@ -1,6 +1,7 @@
 import { db } from '@/lib/db';
+import { z } from 'zod';
 import { audit } from '@/lib/audit';
-import { enqueueNotification } from '@/lib/outbox';
+import { BadRequestError, NotFoundError } from '@/lib/errors';
 
 export async function GET_export({ session }: any) {
   const [user, subs, payments, rides, tickets, notifications, sessions] = await Promise.all([
@@ -48,12 +49,7 @@ export async function POST_delete({ session, ipAddress, userAgent }: any) {
     entityId: session.id,
     ipAddress, userAgent,
   });
-  await enqueueNotification({
-    userId: session.id,
-    type: 'general',
-    title: 'Account scheduled for deletion',
-    body: 'Your account has been deactivated. Data will be anonymized after 30 days.',
-  });
+  // No notification enqueued — the user can no longer log in to see it.
   return { data: { ok: true } };
 }
 
@@ -67,8 +63,6 @@ export async function GET_account({ session }: any) {
   return { data: safe };
 }
 
-import { z } from 'zod';
-import { BadRequestError, NotFoundError } from '@/lib/errors';
 
 const UpdateAccountInput = z.object({
   name: z.string().min(2).max(100).optional(),

@@ -464,7 +464,7 @@ model Ride {
   // Link to the monthly assignment (for reporting — which assignment generated this ride).
   assignmentId   String?
   assignment     RouteAssignment? @relation(fields: [assignmentId], references: [id], onDelete: SetNull)
-  status          String   @default("booked") // booked | boarded | completed | no_show | cancelled
+  status          String   @default("booked") // booked | boarded | completed | no_show | cancelled | released
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
@@ -530,7 +530,7 @@ model Notification {
   id        String   @id @default(cuid())
   userId    String
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  type      String   // payment_received | payment_failed | refund_completed | refund_failed | seat_claimed | seat_released | seat_release_expired | subscription_expiring | subscription_expired | subscription_cancelled | trip_departing | support_reply | support_resolved | corporate_member_added | corporate_member_removed | corporate_reset | general
+  type      String   // payment_received | payment_failed | refund_completed | refund_failed | seat_claimed | seat_released | seat_release_expired | subscription_activated | subscription_expiring | subscription_expired | subscription_cancelled | trip_departing | support_reply | support_resolved | corporate_member_added | corporate_member_removed | corporate_reset | general
   title     String
   body      String
   link      String?
@@ -595,41 +595,35 @@ model IdempotencyRecord {
 }
 
 // ─── File uploads ────────────────────────────────────────────────────────────
-<<<<<<< HEAD
 // Generic uploaded file record. The actual bytes live on disk (UPLOAD_DIR) or
 // S3 in production; this table is the metadata index. Used by contractor
-// documents (registration/insurance/inspection) and any future upload needs.
-=======
-// Generic uploaded file record. Bytes live on disk (UPLOAD_DIR) or S3 in
-// production; this table is the metadata index.
->>>>>>> main
+// documents (registration/insurance/inspection), ticket-message attachments,
+// and any future upload needs.
+
+// Key-value admin settings (single source of truth — do NOT stuff these into
+// the audit log, the previous implementation only kept the latest key).
+model Setting {
+  key       String   @id
+  value     String
+  updatedAt DateTime @updatedAt
+}
 
 model UploadedFile {
   id              String   @id @default(cuid())
   uploaderId      String
   uploader        User     @relation("FileUploader", fields: [uploaderId], references: [id], onDelete: Cascade)
   originalFilename String
-<<<<<<< HEAD
   storageKey      String   @unique // path under UPLOAD_DIR (e.g. contractor-docs/<id>.pdf)
   mimeType        String
   sizeBytes       Int
   checksumSha256  String
   // Document scan status — for contractor docs, a real AV scan would set this.
   // 'pending' on upload, 'clean' after scan, 'infected' if a threat is found.
-=======
-  storageKey      String   @unique
-  mimeType        String
-  sizeBytes       Int
-  checksumSha256  String
->>>>>>> main
   scanStatus      String   @default("pending") // pending | clean | infected | error
   createdAt       DateTime @default(now())
 
   contractorDocuments ContractorDocument[]
-<<<<<<< HEAD
-=======
   ticketMessages      TicketMessage[]    @relation("TicketMessageFile")
->>>>>>> main
 
   @@index([uploaderId])
   @@index([scanStatus])
@@ -640,36 +634,17 @@ model UploadedFile {
 // from 'unverified' to 'verified'.
 model ContractorDocument {
   id              String   @id @default(cuid())
-<<<<<<< HEAD
   contractorId    String   // references ContractorProfile.id
-=======
-  contractorId    String
->>>>>>> main
   contractor      ContractorProfile @relation(fields: [contractorId], references: [id], onDelete: Cascade)
   type            String   // registration | insurance | inspection
   fileId          String
   file            UploadedFile @relation(fields: [fileId], references: [id], onDelete: Restrict)
   uploadedAt      DateTime @default(now())
 
-<<<<<<< HEAD
   @@unique([contractorId, type]) // one of each type per contractor
   @@index([contractorId])
 }
 
-// Extend User with UploadedFile relation
-// (added at the User model below — would normally be inside User, but
-//  Prisma doesn't allow editing inline; we declare the relation here and
-//  Prisma links it via the @relation attribute on UploadedFile.uploader).
-
-// Extend ContractorProfile with documents relation
-// (similar — linked via @relation on ContractorDocument.contractor)
-
-=======
-  @@unique([contractorId, type])
-  @@index([contractorId])
-}
-
->>>>>>> main
 // ─── Corporate invites ──────────────────────────────────────────────────────
 // A corporate admin generates an invite code; members use it during signup
 // to associate themselves with the corporate. The admin then approves/rejects.
@@ -680,11 +655,7 @@ model CorporateInvite {
   code        String    @unique
   createdById String
   createdByUser User    @relation("InviteCreator", fields: [createdById], references: [id], onDelete: Cascade)
-<<<<<<< HEAD
   note        String?   // free-form, e.g. "For Engineering team"
-=======
-  note        String?
->>>>>>> main
   maxUses     Int       @default(50)
   usesCount   Int       @default(0)
   expiresAt   DateTime?

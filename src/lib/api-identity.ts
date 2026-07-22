@@ -1,5 +1,3 @@
-// in src/app/api/v1/[[...route]]/route.ts applies the security middleware.
-
 import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { db } from '@/lib/db';

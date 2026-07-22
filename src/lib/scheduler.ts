@@ -119,10 +119,39 @@ async function expireStale(): Promise<void> {
     where: { status: 'active', endDate: { lt: new Date() } },
     data: { status: 'expired' },
   });
+
+  // Before marking releases as expired, collect them so we can restore
+  // each seller's ride + trip capacity. A release that expired without a
+  // buyer means the seller gets their seat back.
+  const expiringReleases = await db.seatRelease.findMany({
+    where: { status: 'open', expiresAt: { lt: new Date() } },
+    select: { id: true, tripId: true, userId: true },
+  });
   const expiredReleases = await db.seatRelease.updateMany({
     where: { status: 'open', expiresAt: { lt: new Date() } },
     data: { status: 'expired' },
   });
+  if (expiringReleases.length > 0) {
+    for (const r of expiringReleases) {
+      await db.$transaction(async (tx) => {
+        const sellerRide = await tx.ride.findFirst({
+          where: { tripId: r.tripId, userId: r.userId, status: 'released' },
+        });
+        if (sellerRide) {
+          await tx.ride.update({ where: { id: sellerRide.id }, data: { status: 'booked' } });
+          await tx.trip.update({ where: { id: r.tripId }, data: { seatsBooked: { increment: 1 } } });
+        }
+      }).catch((err) => logger.error({ err: (err as Error).message }, '[scheduler] restore expired release failed'));
+      // Notify the seller their release expired and seat was restored.
+      await enqueueNotification({
+        userId: r.userId,
+        type: 'seat_release_expired',
+        title: 'Seat release expired',
+        body: 'Your marketplace seat release expired without a buyer. Your seat has been restored.',
+        link: '/dashboard/rider',
+      }).catch(() => {});
+    }
+  }
 
   if (expiredSubs.count > 0) {
     const expired = await db.subscription.findMany({

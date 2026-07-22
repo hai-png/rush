@@ -49,7 +49,6 @@ class ResendEmailProvider implements EmailProvider {
 class ConsoleEmailProvider implements EmailProvider {
   async send(to: string, subject: string, html: string): Promise<{ ok: boolean; messageId?: string }> {
     logger.info({ to, subject }, '[EMAIL:console]');
-    console.log(`[EMAIL] -> ${to}: ${subject}`);
     return { ok: true, messageId: `console-${Date.now()}` };
   }
 }

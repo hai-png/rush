@@ -1,11 +1,10 @@
 #!/usr/bin/env bun
 // Generate an OpenAPI 3.1 spec from the route table.
-// Output: download/openapi.json
+// Output: openapi.json (in repo root)
 
-import { writeFileSync } from 'node:fs';
+import { writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-import { readFileSync } from 'node:fs';
 const source = readFileSync(join(process.cwd(), 'src/lib/api-routes.ts'), 'utf-8');
 const routeRegex = /r\('(GET|POST|PUT|PATCH|DELETE)',\s*'([^']+)'/g;
 const routes: Array<{ method: string; path: string }> = [];
@@ -34,7 +33,6 @@ const spec: any = {
 };
 
 for (const entry of routes) {
-  // Convert :param to {param}
   const path = entry.path.replace(/:([a-zA-Z_]+)/g, '{$1}');
   if (!spec.paths[path]) spec.paths[path] = {};
   const method = entry.method.toLowerCase();
@@ -50,7 +48,7 @@ for (const entry of routes) {
   };
 }
 
-const outputPath = join(process.cwd(), 'download', 'openapi.json');
+const outputPath = join(process.cwd(), 'openapi.json');
 writeFileSync(outputPath, JSON.stringify(spec, null, 2));
 console.log(`OpenAPI spec written to ${outputPath}`);
 console.log(`  ${Object.keys(spec.paths).length} paths, ${routes.length} operations`);
