@@ -530,7 +530,7 @@ model Notification {
   id        String   @id @default(cuid())
   userId    String
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
-  type      String   // payment_received | payment_failed | refund_completed | refund_failed | seat_claimed | seat_released | seat_release_expired | subscription_activated | subscription_expiring | subscription_expired | subscription_cancelled | trip_departing | support_reply | support_resolved | corporate_member_added | corporate_member_removed | corporate_reset | general
+  type      String   // payment_received | payment_failed | refund_completed | refund_failed | seat_claimed | seat_released | seat_release_expired | subscription_activated | subscription_expiring | subscription_expired | subscription_cancelled | trip_cancelled | trip_departing | support_reply | support_resolved | corporate_member_added | corporate_member_removed | corporate_reset | general
   title     String
   body      String
   link      String?
