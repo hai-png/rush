@@ -3,10 +3,19 @@
 // Also handles graceful shutdown on SIGTERM/SIGINT — without this, k8s
 // rolling deploys aborted in-flight requests, abandoned mid-transaction DB
 // writes, and never called db.\$disconnect().
-import { db } from '@/lib/db';
 import { logger } from '@/lib/logger';
 
+// Guard against the Edge Runtime, which doesn't support process.on() or
+// the Node.js process event API. Next.js loads instrumentation.ts in both
+// the Node.js runtime and the Edge Runtime — we only want to register
+// shutdown handlers in the Node.js runtime.
+const isNodeRuntime = typeof process !== 'undefined' && typeof process.on === 'function' && process.versions?.node != null;
+
 export async function register() {
+  if (!isNodeRuntime) return; // Edge Runtime — no-op
+  // Lazy-import db only in the Node runtime so Edge doesn't try to load Prisma.
+  const { db } = await import('@/lib/db');
+
   // Startup
   logger.info('[instrumentation] server starting');
 
