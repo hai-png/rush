@@ -18,6 +18,15 @@ function TelebirrStubInner() {
 
   const [status, setStatus] = useState<'idle' | 'paying' | 'success' | 'failed'>('idle');
 
+  // P3-14 / SEC-031: in production with real Telebirr configured, this mock
+  // stub page shouldn't be reachable. Redirect to home if the user lands here
+  // in a production build.
+  useEffect(() => {
+    if (process.env.NODE_ENV === 'production') {
+      router.replace('/');
+    }
+  }, [router]);
+
   async function pay(result: 'Success' | 'Fail') {
     setStatus('paying');
     try {

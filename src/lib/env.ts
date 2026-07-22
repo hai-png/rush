@@ -60,7 +60,7 @@ export function loadEnv(): Env {
     process.env.TELEBIRR_PUBLIC_KEY
   );
 
-  let effectiveTelebirr: Env['TELEBIRR_ENV'] = hasRealTelebirr ? telebirrEnv : 'mock';
+  const effectiveTelebirr: Env['TELEBIRR_ENV'] = hasRealTelebirr ? telebirrEnv : 'mock';
   if (process.env.NODE_ENV === 'production' && telebirrEnv !== 'mock' && !hasRealTelebirr) {
     throw new Error(
       `TELEBIRR_ENV=${telebirrEnv} but required Telebirr credentials are missing. ` +
