@@ -125,8 +125,16 @@ export async function POST_verify_payment({ session, params, body, ipAddress, us
   return { data: { id: params.id, status: 'completed' } };
 }
 
-const EXPORT_TABLES: Record<string, { model: string; label: string }> = {
-  users: { model: 'user', label: 'Users' },
+// P0-11 / SEC-003: per-resource allow-list of safe columns. Excludes passwordHash,
+// twoFactorSecret, and any other sensitive fields. Without this, `findMany()`
+// returned ALL columns including the bcrypt password hashes and plaintext TOTP
+// secrets — a CSV download gave an admin every user's credentials.
+const EXPORT_TABLES: Record<string, { model: string; label: string; select?: string[] }> = {
+  users: {
+    model: 'user',
+    label: 'Users',
+    select: ['id', 'phone', 'email', 'name', 'role', 'phoneVerified', 'isActive', 'deletedAt', 'tokenVersion', 'twoFactorEnabled', 'tosVersion', 'createdAt', 'updatedAt'],
+  },
   payments: { model: 'payment', label: 'Payments' },
   subscriptions: { model: 'subscription', label: 'Subscriptions' },
   rides: { model: 'ride', label: 'Rides' },
@@ -139,9 +147,12 @@ export async function GET_export_csv({ session, params }: any) {
   const config = EXPORT_TABLES[resource];
   if (!config) throw new BadRequestError('Unknown export resource');
   const model = (db as any)[config.model];
-  const rows = await model.findMany({ take: 10000 });
+  const findManyArgs: any = { take: 10000 };
+  if (config.select) findManyArgs.select = Object.fromEntries(config.select.map((k: string) => [k, true]));
+  const rows = await model.findMany(findManyArgs);
   if (rows.length === 0) return { data: { csv: '', rowCount: 0 } };
-  const headers = Object.keys(rows[0]);
+  // Use the explicit select list if provided; otherwise fall back to Object.keys.
+  const headers = config.select ?? Object.keys(rows[0]);
   const csvLines = [headers.join(',')];
   const escapeCsv = (s: string): string => {
     // Prefix dangerous leading chars with a single quote to neutralize

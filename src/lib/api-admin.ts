@@ -193,6 +193,13 @@ const RefundInput = z.object({
 
 export async function POST_refund({ session, params, body, ipAddress, userAgent }: any) {
   const input = RefundInput.parse(body);
+  // P0-18 / BIZ-013: admins cannot refund their own payments — conflict of interest
+  // and a direct self-enrichment vector if the admin has a personal subscription.
+  const payment = await db.payment.findUnique({ where: { id: params.id }, select: { userId: true } });
+  if (!payment) throw new NotFoundError('Payment not found');
+  if (payment.userId === session.id) {
+    throw new ForbiddenError('Cannot refund your own payment');
+  }
   await scheduleRefund(params.id, Money.fromETB(input.amount), input.reason);
   await audit({
     actorId: session.id,

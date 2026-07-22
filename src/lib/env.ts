@@ -41,6 +41,11 @@ export function loadEnv(): Env {
     }
   }
 
+  // P0-7 / SEC-001: in production, if TELEBIRR_ENV is set to 'production' or
+  // 'testbed' but the required Telebirr credentials are missing, fail loudly
+  // instead of silently falling back to the mock provider. The mock provider
+  // accepts 'sign: mock-signature' on webhooks — silently using it in prod
+  // would let any attacker forge payment-settlement webhooks for free.
   const telebirrEnv: Env['TELEBIRR_ENV'] =
     (process.env.TELEBIRR_ENV as any) === 'production' ? 'production'
     : (process.env.TELEBIRR_ENV as any) === 'testbed' ? 'testbed'
@@ -55,13 +60,37 @@ export function loadEnv(): Env {
     process.env.TELEBIRR_PUBLIC_KEY
   );
 
-  const effectiveTelebirr: Env['TELEBIRR_ENV'] = hasRealTelebirr ? telebirrEnv : 'mock';
+  let effectiveTelebirr: Env['TELEBIRR_ENV'] = hasRealTelebirr ? telebirrEnv : 'mock';
+  if (process.env.NODE_ENV === 'production' && telebirrEnv !== 'mock' && !hasRealTelebirr) {
+    throw new Error(
+      `TELEBIRR_ENV=${telebirrEnv} but required Telebirr credentials are missing. ` +
+      `Either set all TELEBIRR_* credentials (FABRIC_APP_ID, APP_SECRET, MERCHANT_APP_ID, ` +
+      `MERCHANT_CODE, PRIVATE_KEY, PUBLIC_KEY) or explicitly set TELEBIRR_ENV=mock for a ` +
+      `non-payment-receiving deployment. Refusing to start with mock provider in production.`
+    );
+  }
+
+  // P1-1 / SEC-004: in production, CRON_SECRET must be set and must NOT equal
+  // the dev fallback string. The cron endpoint is CSRF-exempt, TOS-exempt,
+  // idempotency-exempt, and requires no session — accepting the dev secret
+  // in production would let any attacker trigger refund storms and mass
+  // subscription expirations.
+  const cronSecret = process.env.CRON_SECRET;
+  const DEV_CRON_FALLBACK = 'dev-only-cron-secret-32-chars';
+  if (process.env.NODE_ENV === 'production') {
+    if (!cronSecret || cronSecret.length < 32) {
+      throw new Error('CRON_SECRET must be set in production (>= 32 chars)');
+    }
+    if (cronSecret === DEV_CRON_FALLBACK) {
+      throw new Error('CRON_SECRET must not equal the dev fallback string in production');
+    }
+  }
 
   cachedEnv = {
     NODE_ENV: (process.env.NODE_ENV as any) || 'development',
     DATABASE_URL: process.env.DATABASE_URL || 'file:./db/custom.db',
     AUTH_SECRET: authSecret || 'dev-only-insecure-secret-32-chars-min',
-    CRON_SECRET: process.env.CRON_SECRET || 'dev-only-cron-secret-32-chars',
+    CRON_SECRET: cronSecret || DEV_CRON_FALLBACK,
     CURRENT_TOS_VERSION: process.env.CURRENT_TOS_VERSION || '2026-01-01',
     TELEBIRR_ENV: effectiveTelebirr,
     TELEBIRR_FABRIC_APP_ID: process.env.TELEBIRR_FABRIC_APP_ID || '',
