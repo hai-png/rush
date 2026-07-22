@@ -305,14 +305,19 @@ export async function GET_me({ session }: any) {
   if (session.role !== 'corporate_admin' && session.role !== 'platform_admin') {
     throw new ForbiddenError('Corporate admin only');
   }
-  const corp = await db.corporate.findUnique({
-    where: { adminUserId: session.id },
+  // P1-33 / API-002: use resolveCorporate so platform_admin can fetch a corporate
+  // (was hardcoded to findUnique by adminUserId, which always 404'd for admins).
+  const corp = await resolveCorporate(session);
+  if (!corp) throw new NotFoundError('No corporate found');
+  // resolveCorporate returns a minimal corp object; re-fetch with counts.
+  const full = await db.corporate.findUnique({
+    where: { id: corp.id },
     include: {
       _count: { select: { members: true, subscriptions: true, invites: true } },
     },
   });
-  if (!corp) throw new NotFoundError('No corporate found');
-  return { data: corp };
+  if (!full) throw new NotFoundError('No corporate found');
+  return { data: full };
 }
 
 const UpdateCorporateInput = z.object({

@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import dynamicImport from 'next/dynamic';
 import { notFound } from 'next/navigation';
 import { requireSession } from '@/lib/session-server';
 import { db } from '@/lib/db';
@@ -6,7 +7,13 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { SignOutButton } from '@/components/sign-out-button';
-import { RouteMap } from '@/components/route-map';
+import { Skeleton } from '@/components/ui/skeleton';
+
+// P2-26: lazy-load RouteMap (leaflet is ~150KB).
+const RouteMap = dynamicImport(() => import('@/components/route-map').then(m => m.RouteMap), {
+  ssr: false,
+  loading: () => <Skeleton className="h-64 w-full" />,
+});
 
 export const dynamic = 'force-dynamic';
 

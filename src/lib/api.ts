@@ -289,7 +289,23 @@ export function api(options: ApiOptions, handler: Handler) {
       let body: any = undefined;
       let bodyText = '';
       if (req.method !== 'GET' && req.method !== 'HEAD') {
+        // P2-64 / API-053: enforce a max body size to prevent memory-exhaustion
+        // DoS (a 1GB JSON body would be buffered entirely in memory).
+        // 1MB is generous for all current endpoints (file uploads bypass this
+        // via the raw handler path). Override via MAX_BODY_BYTES env var.
+        const contentLength = parseInt(req.headers.get('content-length') ?? '0', 10);
+        const maxBodyBytes = parseInt(process.env.MAX_BODY_BYTES ?? '1048576', 10); // 1MB default
+        if (contentLength > maxBodyBytes) {
+          const res = NextResponse.json({ error: { code: 'PAYLOAD_TOO_LARGE', message: `Body exceeds ${maxBodyBytes} bytes`, requestId } }, { status: 413 });
+          res.headers.set('x-request-id', requestId);
+          return res;
+        }
         bodyText = await req.text();
+        if (bodyText.length > maxBodyBytes) {
+          const res = NextResponse.json({ error: { code: 'PAYLOAD_TOO_LARGE', message: `Body exceeds ${maxBodyBytes} bytes`, requestId } }, { status: 413 });
+          res.headers.set('x-request-id', requestId);
+          return res;
+        }
         if (bodyText && bodyText.length > 0) {
           try { body = JSON.parse(bodyText); } catch { /* leave body undefined */ }
         }

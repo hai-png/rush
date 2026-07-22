@@ -4,12 +4,15 @@ import { MapContainer, TileLayer, Marker, Popup, Polyline } from 'react-leaflet'
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
-// Fix default marker icons (Leaflet + bundler issue)
+// P2-27 / OPS-023: self-host leaflet marker icons instead of loading from
+// Cloudflare CDN. The CDN is blocked in Ethiopia (common internet restriction),
+// which made markers disappear. Copy the images to /public/leaflet/ during
+// the build — they ship with the leaflet npm package.
 delete (L.Icon.Default.prototype as any)._getIconUrl;
 L.Icon.Default.mergeOptions({
-  iconRetinaUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon-2x.png',
-  iconUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-icon.png',
-  shadowUrl: 'https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/images/marker-shadow.png',
+  iconRetinaUrl: '/leaflet/marker-icon-2x.png',
+  iconUrl: '/leaflet/marker-icon.png',
+  shadowUrl: '/leaflet/marker-shadow.png',
 });
 
 type Pickup = { id: string; name: string; lat: number | null; lng: number | null; estimatedPickupTime: string };

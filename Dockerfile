@@ -32,6 +32,10 @@ ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 ENV PORT=3000
 ENV HOSTNAME=0.0.0.0
+# P2 / DB-050: set the server timezone to Africa/Addis_Ababa so date
+# boundaries (subscription expiry, trip departure, monthly reset) align
+# with the business timezone. Ethiopia is UTC+3 with no DST.
+ENV TZ=Africa/Addis_Ababa
 
 # Run as non-root user for security.
 RUN addgroup --system --gid 1001 nodejs && \

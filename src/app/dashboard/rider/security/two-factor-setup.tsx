@@ -1,6 +1,7 @@
 'use client';
 import { useRouter } from 'next/navigation';
 import { useState } from 'react';
+import { QRCodeSVG } from 'qrcode.react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
@@ -61,16 +62,24 @@ export function TwoFactorSetup({ enabled }: { enabled: boolean }) {
         <DialogHeader><DialogTitle>Set up 2FA</DialogTitle></DialogHeader>
         {!secret ? (
           <div className="space-y-2">
-            <Label>Confirm your password</Label>
-            <Input type="password" value={password} onChange={e => setPassword(e.target.value)} />
+            <Label htmlFor="2fa-password">Confirm your password</Label>
+            <Input id="2fa-password" type="password" autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} />
             <Button onClick={setup} disabled={loading || !password}>{loading ? '…' : 'Generate secret'}</Button>
           </div>
         ) : (
-          <div className="space-y-2">
-            <p className="text-sm">Add this secret to your authenticator app (Google Authenticator, Authy, etc.):</p>
-            <code className="text-xs bg-muted p-2 rounded block break-all">{secret}</code>
-            <Label>Enter the 6-digit code from your app</Label>
-            <Input value={code} onChange={e => setCode(e.target.value)} maxLength={6} />
+          <div className="space-y-3">
+            {/* P2-25 / FE-046: render a QR code so users can scan with their
+                authenticator app instead of typing the 32-char base32 secret. */}
+            <p className="text-sm">Scan this QR code with your authenticator app (Google Authenticator, Authy, 1Password, etc.):</p>
+            <div className="flex justify-center p-4 bg-white rounded-lg">
+              <QRCodeSVG value={otpauth} size={200} level="M" />
+            </div>
+            <details className="text-xs">
+              <summary className="cursor-pointer text-muted-foreground">Can&apos;t scan? Enter the secret manually</summary>
+              <code className="text-xs bg-muted p-2 rounded block break-all mt-2">{secret}</code>
+            </details>
+            <Label htmlFor="2fa-code">Enter the 6-digit code from your app</Label>
+            <Input id="2fa-code" autoComplete="one-time-code" inputMode="numeric" pattern="[0-9]*" value={code} onChange={e => setCode(e.target.value)} maxLength={6} />
             <Button onClick={enable} disabled={loading || code.length !== 6}>{loading ? '…' : 'Verify & enable'}</Button>
           </div>
         )}
