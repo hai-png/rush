@@ -34,6 +34,23 @@ export function ensureSchedulerStarted(): void {
 }
 
 async function drainOutbox(): Promise<void> {
+  // P0-9: reaper — reset events that have been stuck in 'processing' for >15min.
+  // Without this, a process crash mid-drain leaves events stranded forever.
+  try {
+    const reaped = await db.outboxEvent.updateMany({
+      where: {
+        status: 'processing',
+        lockedAt: { lt: new Date(Date.now() - 15 * 60_000) },
+      },
+      data: { status: 'pending', lockedAt: null, lockedBy: null },
+    });
+    if (reaped.count > 0) {
+      logger.warn({ reaped: reaped.count }, '[outbox] reset stuck processing events');
+    }
+  } catch (err) {
+    logger.error({ err: (err as Error).message }, '[outbox] reaper failed');
+  }
+
   let processed = 0;
   // Loop until the queue is empty (or we hit a safety cap).
   for (let i = 0; i < 5; i++) {
@@ -44,8 +61,10 @@ async function drainOutbox(): Promise<void> {
         take: 20,
       });
       if (rows.length === 0) return [];
+      // P2-73: re-check status:'pending' in the updateMany where-clause so concurrent
+      // drainers (multi-instance) can't both claim the same rows.
       await tx.outboxEvent.updateMany({
-        where: { id: { in: rows.map(r => r.id) } },
+        where: { id: { in: rows.map(r => r.id) }, status: 'pending' },
         data: { status: 'processing', lockedAt: new Date() },
       });
       return rows;

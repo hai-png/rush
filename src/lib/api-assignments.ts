@@ -214,17 +214,27 @@ export async function POST_accept_assignment({ session, params, ipAddress, userA
     where: { id: params.id },
     data: { status: 'accepted', acceptedAt: new Date() },
   });
-  // Generate trips immediately and mark as active.
-  await generateTripsFromAssignment(assignment.id).catch((err) => {
-    // Trip generation is best-effort — the assignment is still accepted.
-  });
+  // P0-10 / BIZ-012: pass the FULL assignment object (re-fetched with the new status),
+  // not the ID string. generateTripsFromAssignment reads assignment.schedulePattern,
+  // assignment.monthStart, etc. — passing assignment.id made all those undefined and
+  // JSON.parse(undefined) threw silently inside the .catch() swallower.
+  const freshAssignment = await db.routeAssignment.findUnique({ where: { id: params.id } });
+  if (freshAssignment) {
+    await generateTripsFromAssignment(freshAssignment).catch((err) => {
+      // Don't silently swallow — log loudly. Trip generation failing is a real problem.
+      logger.error({ err: (err as Error).message, assignmentId: params.id }, '[assignment.accept] trip generation failed');
+    });
+  }
   await db.routeAssignment.update({ where: { id: params.id }, data: { status: 'active' } });
   await audit({ actorId: session.id, action: 'assignment.accepted', entityType: 'route_assignment', entityId: params.id, ipAddress, userAgent });
   return { data: { id: params.id, status: 'active' } };
 }
 
 export async function POST_reject_assignment({ session, params, body, ipAddress, userAgent }: any) {
-  const assignment = await db.routeAssignment.findUnique({ where: { id: params.id } });
+  const assignment = await db.routeAssignment.findUnique({
+    where: { id: params.id },
+    include: { route: true },
+  });
   if (!assignment) throw new NotFoundError('Assignment not found');
   if (assignment.contractorId !== session.id && session.role !== 'platform_admin') {
     throw new ForbiddenError('Not your assignment');
@@ -236,13 +246,42 @@ export async function POST_reject_assignment({ session, params, body, ipAddress,
     where: { id: params.id },
     data: { status: 'cancelled' },
   });
-  // Cancel all generated trips
-  await db.trip.updateMany({
+  // Cancel all generated trips AND their booked rides (P0 / BIZ-011).
+  // Notify affected riders.
+  const tripsToCancel = await db.trip.findMany({
     where: { assignmentId: params.id, status: 'scheduled' },
-    data: { status: 'cancelled' },
+    select: { id: true },
   });
-  await audit({ actorId: session.id, action: 'assignment.rejected', entityType: 'route_assignment', entityId: params.id, after: { reason }, ipAddress, userAgent });
-  return { data: { id: params.id, status: 'cancelled' } };
+  if (tripsToCancel.length > 0) {
+    const tripIds = tripsToCancel.map(t => t.id);
+    const ridesToCancel = await db.ride.findMany({
+      where: { tripId: { in: tripIds }, status: { in: ['booked', 'boarded'] } },
+      select: { id: true, userId: true, tripId: true, subscriptionId: true },
+    });
+    await db.$transaction(async (tx) => {
+      await tx.ride.updateMany({
+        where: { id: { in: ridesToCancel.map(r => r.id) } },
+        data: { status: 'cancelled' },
+      });
+      await tx.trip.updateMany({
+        where: { id: { in: tripIds } },
+        data: { status: 'cancelled', seatsBooked: 0 },
+      });
+    });
+    // Notify each affected rider (best-effort).
+    const { enqueueNotification } = await import('@/lib/outbox');
+    for (const r of ridesToCancel) {
+      enqueueNotification({
+        userId: r.userId,
+        type: 'trip_cancelled',
+        title: 'Trip cancelled',
+        body: `Your trip on ${assignment.route?.origin ?? 'route'} → ${assignment.route?.destination ?? ''} was cancelled. ${reason}`,
+        link: '/dashboard/rider',
+      }).catch(() => {});
+    }
+  }
+  await audit({ actorId: session.id, action: 'assignment.rejected', entityType: 'route_assignment', entityId: params.id, after: { reason, cancelledTrips: tripsToCancel.length }, ipAddress, userAgent });
+  return { data: { id: params.id, status: 'cancelled', cancelledTrips: tripsToCancel.length } };
 }
 
 export async function GET_my_assignments({ session }: any) {
