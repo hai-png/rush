@@ -7,6 +7,8 @@ import { Badge } from '@/components/ui/badge';
 import { SignOutButton } from '@/components/sign-out-button';
 import { NotificationActions } from './notification-actions';
 
+export const dynamic = 'force-dynamic';
+
 export default async function NotificationsPage() {
   const session = await requireSession();
   const notifs = await db.notification.findMany({

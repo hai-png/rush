@@ -5,6 +5,8 @@ import { Card, CardContent } from '@/components/ui/card';
 import { SignOutButton } from '@/components/sign-out-button';
 import { NewPlanForm } from './new-plan-form';
 
+export const dynamic = 'force-dynamic';
+
 export default async function AdminPlansPage() {
   await requireRole('platform_admin');
   const plans = await db.subscriptionPlan.findMany({ orderBy: { sortOrder: 'asc' } });

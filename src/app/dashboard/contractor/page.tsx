@@ -7,6 +7,8 @@ import { Badge } from '@/components/ui/badge';
 import { SignOutButton } from '@/components/sign-out-button';
 import { TripActions } from '@/components/trip-actions';
 
+export const dynamic = 'force-dynamic';
+
 export default async function ContractorDashboardPage() {
   const session = await requireRole('contractor', 'platform_admin');
 

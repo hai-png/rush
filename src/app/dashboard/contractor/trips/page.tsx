@@ -9,6 +9,8 @@ import { Plus, Calendar } from 'lucide-react';
 import { TripActions } from '@/components/trip-actions';
 import { CreateTripForm } from './create-trip-form';
 
+export const dynamic = 'force-dynamic';
+
 export default async function ContractorTripsPage() {
   const session = await requireRole('contractor', 'platform_admin');
   const [trips, shuttles, routes] = await Promise.all([

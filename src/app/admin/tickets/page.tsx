@@ -5,6 +5,8 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { SignOutButton } from '@/components/sign-out-button';
 
+export const dynamic = 'force-dynamic';
+
 export default async function AdminTicketsPage() {
   await requireRole('platform_admin');
   const tickets = await db.supportTicket.findMany({

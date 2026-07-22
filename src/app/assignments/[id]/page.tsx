@@ -8,6 +8,8 @@ import { Badge } from '@/components/ui/badge';
 import { SignOutButton } from '@/components/sign-out-button';
 import { RouteMap } from '@/components/route-map';
 
+export const dynamic = 'force-dynamic';
+
 export default async function AssignmentDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
   const { id } = await params;

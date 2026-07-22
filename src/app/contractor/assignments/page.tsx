@@ -7,6 +7,8 @@ import { Badge } from '@/components/ui/badge';
 import { SignOutButton } from '@/components/sign-out-button';
 import { AssignmentActions } from './assignment-actions';
 
+export const dynamic = 'force-dynamic';
+
 export default async function ContractorAssignmentsPage() {
   const session = await requireRole('contractor', 'platform_admin');
   const assignments = await db.routeAssignment.findMany({

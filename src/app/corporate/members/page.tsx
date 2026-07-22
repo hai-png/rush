@@ -7,6 +7,8 @@ import { Badge } from '@/components/ui/badge';
 import { SignOutButton } from '@/components/sign-out-button';
 import { MemberActions } from '@/app/dashboard/corporate/member-actions';
 
+export const dynamic = 'force-dynamic';
+
 export default async function CorporateMembersPage() {
   const session = await requireRole('corporate_admin', 'platform_admin');
   // findUnique requires a non-undefined where clause; platform_admin gets findFirst instead.

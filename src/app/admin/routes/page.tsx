@@ -5,6 +5,8 @@ import { Card, CardContent } from '@/components/ui/card';
 import { SignOutButton } from '@/components/sign-out-button';
 import { NewRouteForm } from './new-route-form';
 
+export const dynamic = 'force-dynamic';
+
 export default async function AdminRoutesPage() {
   await requireRole('platform_admin');
   const routes = await db.route.findMany({ orderBy: { origin: 'asc' } });

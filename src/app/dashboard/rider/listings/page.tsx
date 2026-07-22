@@ -7,6 +7,8 @@ import { Badge } from '@/components/ui/badge';
 import { SignOutButton } from '@/components/sign-out-button';
 import { CancelReleaseButton } from './cancel-release-button';
 
+export const dynamic = 'force-dynamic';
+
 export default async function RiderListingsPage() {
   const session = await requireRole('rider', 'platform_admin');
   const releases = await db.seatRelease.findMany({

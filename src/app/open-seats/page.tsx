@@ -8,6 +8,8 @@ import { SignOutButton } from '@/components/sign-out-button';
 import { Plus } from 'lucide-react';
 import { ClaimButton } from './claim-button';
 
+export const dynamic = 'force-dynamic';
+
 export default async function OpenSeatsPage() {
   const session = await requireSession();
   const releases = await db.seatRelease.findMany({

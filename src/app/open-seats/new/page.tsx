@@ -7,6 +7,8 @@ import { Badge } from '@/components/ui/badge';
 import { SignOutButton } from '@/components/sign-out-button';
 import { ListSeatForm } from './list-seat-form';
 
+export const dynamic = 'force-dynamic';
+
 export default async function ListSeatPage() {
   const session = await requireRole('rider', 'platform_admin');
 

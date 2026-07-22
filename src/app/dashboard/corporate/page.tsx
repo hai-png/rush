@@ -8,6 +8,8 @@ import { SignOutButton } from '@/components/sign-out-button';
 import { CreateInviteButton } from './create-invite-button';
 import { MemberActions } from './member-actions';
 
+export const dynamic = 'force-dynamic';
+
 export default async function CorporateDashboardPage() {
   const session = await requireRole('corporate_admin', 'platform_admin');
   const corp = session.role === 'platform_admin'

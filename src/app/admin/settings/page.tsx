@@ -5,6 +5,8 @@ import { Button } from '@/components/ui/button';
 import { SignOutButton } from '@/components/sign-out-button';
 import { SettingsForm } from './settings-form';
 
+export const dynamic = 'force-dynamic';
+
 export default async function AdminSettingsPage() {
   await requireRole('platform_admin');
   return (

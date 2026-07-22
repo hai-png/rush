@@ -8,6 +8,8 @@ import { SignOutButton } from '@/components/sign-out-button';
 import { TwoFactorSetup } from './two-factor-setup';
 import { ChangePasswordForm } from './change-password-form';
 
+export const dynamic = 'force-dynamic';
+
 export default async function RiderSecurityPage() {
   const session = await requireRole('rider', 'platform_admin');
   const user = await db.user.findUnique({ where: { id: session.id } });

@@ -7,6 +7,8 @@ import { Badge } from '@/components/ui/badge';
 import { SignOutButton } from '@/components/sign-out-button';
 import { FaqForm } from './faq-form';
 
+export const dynamic = 'force-dynamic';
+
 export default async function AdminFaqsPage() {
   await requireRole('platform_admin');
   const faqs = await db.faqArticle.findMany({ orderBy: [{ category: 'asc' }, { sortOrder: 'asc' }] });

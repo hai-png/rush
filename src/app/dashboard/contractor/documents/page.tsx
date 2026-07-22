@@ -7,6 +7,8 @@ import { Badge } from '@/components/ui/badge';
 import { SignOutButton } from '@/components/sign-out-button';
 import { DocumentUpload } from './document-upload';
 
+export const dynamic = 'force-dynamic';
+
 const DOC_TYPES = [
   { type: 'registration', label: 'Business registration', description: 'Trade license or business registration certificate' },
   { type: 'insurance', label: 'Vehicle insurance', description: 'Current insurance policy for the shuttle' },

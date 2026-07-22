@@ -8,6 +8,8 @@ import { Badge } from '@/components/ui/badge';
 import { SignOutButton } from '@/components/sign-out-button';
 import { MarkRideStatus } from './mark-ride-status';
 
+export const dynamic = 'force-dynamic';
+
 export default async function TripManifestPage({ params }: { params: Promise<{ tripId: string }> }) {
   const session = await requireRole('contractor', 'platform_admin');
   const { tripId } = await params;

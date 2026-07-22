@@ -5,6 +5,8 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { SignOutButton } from '@/components/sign-out-button';
 
+export const dynamic = 'force-dynamic';
+
 export default async function AccountPage() {
   const session = await requireSession();
   const user = await db.user.findUnique({

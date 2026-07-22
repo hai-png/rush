@@ -7,6 +7,8 @@ import { Badge } from '@/components/ui/badge';
 import { SignOutButton } from '@/components/sign-out-button';
 import { BookRideButton } from './book-ride-button';
 
+export const dynamic = 'force-dynamic';
+
 export default async function TripsPage({ searchParams }: { searchParams: Promise<{ assignment?: string }> }) {
   const session = await requireSession();
   const sp = await searchParams;

@@ -4,6 +4,8 @@ import { db } from '@/lib/db';
 import { redirect } from 'next/navigation';
 import { AcceptTosForm } from './accept-tos-form';
 
+export const dynamic = 'force-dynamic';
+
 export default async function TosAcceptPage() {
   const session = await requireSession();
   const user = await db.user.findUnique({ where: { id: session.id } });

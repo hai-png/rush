@@ -7,6 +7,8 @@ import { Badge } from '@/components/ui/badge';
 import { SignOutButton } from '@/components/sign-out-button';
 import { CreateAssignmentButton } from './create-assignment-button';
 
+export const dynamic = 'force-dynamic';
+
 export default async function AdminAssignmentsPage() {
   await requireRole('platform_admin');
   const assignments = await db.routeAssignment.findMany({

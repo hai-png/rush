@@ -4,6 +4,8 @@ import { db } from '@/lib/db';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 
+export const dynamic = 'force-dynamic';
+
 export default async function AccountExportPage() {
   const session = await requireSession();
   const [user, subs, payments, rides, tickets, notifications, sessions] = await Promise.all([

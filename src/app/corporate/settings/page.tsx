@@ -6,6 +6,8 @@ import { Button } from '@/components/ui/button';
 import { SignOutButton } from '@/components/sign-out-button';
 import { CorporateSettingsForm } from './settings-form';
 
+export const dynamic = 'force-dynamic';
+
 export default async function CorporateSettingsPage() {
   const session = await requireRole('corporate_admin', 'platform_admin');
   const corp = await db.corporate.findUnique({ where: { adminUserId: session.id } });

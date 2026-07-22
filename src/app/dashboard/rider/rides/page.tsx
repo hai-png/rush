@@ -6,6 +6,8 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { SignOutButton } from '@/components/sign-out-button';
 
+export const dynamic = 'force-dynamic';
+
 export default async function RiderRidesPage() {
   const session = await requireRole('rider', 'platform_admin');
   const rides = await db.ride.findMany({

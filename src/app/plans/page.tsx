@@ -6,6 +6,8 @@ import { Badge } from '@/components/ui/badge';
 import { getSession } from '@/lib/session-server';
 import { CheckoutButton } from './checkout-button';
 
+export const dynamic = 'force-dynamic';
+
 export default async function PlansPage() {
   const plans = await db.subscriptionPlan.findMany({ where: { isActive: true }, orderBy: { sortOrder: 'asc' } });
   const session = await getSession();

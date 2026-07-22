@@ -6,6 +6,8 @@ import { Badge } from '@/components/ui/badge';
 import { SignOutButton } from '@/components/sign-out-button';
 import { UserActions } from './user-actions';
 
+export const dynamic = 'force-dynamic';
+
 export default async function AdminUsersPage() {
   await requireRole('platform_admin');
   const users = await db.user.findMany({

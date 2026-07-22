@@ -8,6 +8,8 @@ import { CreditCard, Bell, Ticket, Calendar, Plus } from 'lucide-react';
 import { CancelSubscriptionButton } from './cancel-button';
 import { SignOutButton } from '@/components/sign-out-button';
 
+export const dynamic = 'force-dynamic';
+
 export default async function RiderDashboardPage() {
   const session = await requireRole('rider', 'platform_admin');
 

@@ -7,6 +7,8 @@ import { Badge } from '@/components/ui/badge';
 import { SignOutButton } from '@/components/sign-out-button';
 import { RegisterShuttleForm } from './register-shuttle-form';
 
+export const dynamic = 'force-dynamic';
+
 export default async function ContractorShuttlesPage() {
   const session = await requireRole('contractor', 'platform_admin');
   const shuttles = await db.shuttle.findMany({

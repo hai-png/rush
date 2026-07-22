@@ -5,6 +5,8 @@ import { Card, CardContent } from '@/components/ui/card';
 import { SignOutButton } from '@/components/sign-out-button';
 import { NewShuttleForm } from './new-shuttle-form';
 
+export const dynamic = 'force-dynamic';
+
 export default async function AdminShuttlesPage() {
   await requireRole('platform_admin');
   const shuttles = await db.shuttle.findMany({

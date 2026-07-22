@@ -7,6 +7,8 @@ import { Badge } from '@/components/ui/badge';
 import { SignOutButton } from '@/components/sign-out-button';
 import { Plus } from 'lucide-react';
 
+export const dynamic = 'force-dynamic';
+
 export default async function TicketsPage() {
   const session = await requireSession();
   const tickets = await db.supportTicket.findMany({
