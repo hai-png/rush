@@ -169,12 +169,20 @@ export async function POST_renew({ session, params, body }: any) {
   }
 
   const { paymentMethod } = z.object({ paymentMethod: z.enum(['telebirr', 'cbe']) }).parse(body);
+  let riderAmountCents = sub.plan.priceCents;
+  if (sub.corporateId) {
+    const corp = await db.corporate.findUnique({ where: { id: sub.corporateId } });
+    if (corp) {
+      riderAmountCents = sub.plan.priceCents - Math.round(sub.plan.priceCents * corp.subsidyPercent / 100);
+    }
+  }
+
   const reference = `PO${createId()}`;
   const provider = getPaymentProvider(paymentMethod);
   const env = loadEnv();
   const checkout = await provider.createCheckout({
     merchOrderId: reference,
-    amount: Money.fromCents(sub.plan.priceCents),
+    amount: Money.fromCents(riderAmountCents),
     description: `${sub.plan.name} renewal`,
     notifyUrl: env.TELEBIRR_NOTIFY_URL || `${env.APP_BASE_URL}/api/v1/webhooks/telebirr/notify`,
     redirectUrl: env.TELEBIRR_REDIRECT_URL || `${env.APP_BASE_URL}/checkout/complete`,
@@ -201,7 +209,7 @@ export async function POST_renew({ session, params, body }: any) {
       userId: sub.userId,
       subscriptionId: newSub.id,
       method: paymentMethod,
-      amountCents: sub.plan.priceCents,
+      amountCents: riderAmountCents,
       status: 'pending',
     },
   });

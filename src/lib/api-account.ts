@@ -13,7 +13,7 @@ export async function GET_export({ session }: any) {
     db.notification.findMany({ where: { userId: session.id } }),
     db.session.findMany({ where: { userId: session.id } }),
   ]);
-  if (!user) throw new Error('User not found');
+  if (!user) throw new NotFoundError('User not found');
   const { passwordHash: _, twoFactorSecret: __, ...safeUser } = user;
   return {
     data: {
@@ -64,13 +64,13 @@ export async function GET_account({ session }: any) {
     where: { id: session.id },
     include: { riderProfile: true, contractorProfile: true },
   });
-  if (!user) throw new Error('User not found');
+  if (!user) throw new NotFoundError('User not found');
   const { passwordHash: _, twoFactorSecret: __, ...safe } = user;
   return { data: safe };
 }
 
 import { z } from 'zod';
-import { BadRequestError } from '@/lib/errors';
+import { BadRequestError, NotFoundError } from '@/lib/errors';
 
 const UpdateAccountInput = z.object({
   name: z.string().min(2).max(100).optional(),
@@ -80,7 +80,7 @@ const UpdateAccountInput = z.object({
 export async function PATCH_account({ session, body, ipAddress, userAgent }: any) {
   const input = UpdateAccountInput.parse(body);
   const user = await db.user.findUnique({ where: { id: session.id } });
-  if (!user) throw new Error('User not found');
+  if (!user) throw new NotFoundError('User not found');
 
   // If email is changing, validate it's not already taken.
   if (input.email !== undefined && input.email !== user.email) {

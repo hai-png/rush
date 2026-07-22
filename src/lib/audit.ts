@@ -35,7 +35,9 @@ function computeHash(input: AuditInput, prevHash: string | null): string {
 let auditQueue: Promise<void> = Promise.resolve();
 
 export function audit(input: AuditInput): Promise<void> {
-  auditQueue = auditQueue.then(() => auditInternal(input)).catch(() => {});
+  auditQueue = auditQueue.then(() => auditInternal(input)).catch((err) => {
+    console.error('[audit] write failed:', err);
+  });
   return auditQueue;
 }
 
