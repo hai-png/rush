@@ -1,5 +1,3 @@
-// Tightly-scoped env loader. No placeholder detection (the original's
-// the env vars the app uses, with sane dev defaults.
 
 type Env = {
   NODE_ENV: 'development' | 'production' | 'test';

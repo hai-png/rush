@@ -1,5 +1,3 @@
-// Single API entry point. All /api/v1/* requests dispatch via the route table
-// handler with the raw NextRequest.
 
 import { NextRequest, NextResponse } from 'next/server';
 import { findRoute } from '@/lib/api-routes';
@@ -23,13 +21,10 @@ function handle(method: string) {
       return NextResponse.json(body, { status, headers: { 'x-request-id': requestId } });
     }
 
-    // For raw routes, we need to do auth outside the api() wrapper because
-    // pass, then call the raw handler directly.
     if (found.entry.raw) {
       return handleRaw(req, ctx, found);
     }
 
-    // Standard JSON route — apply the matched entry's options via api().
     const wrapped = api(found.entry.options, async (innerCtx) => {
       return found.entry.handler({
         ...innerCtx,
@@ -70,7 +65,6 @@ async function handleRaw(
       }
     }
 
-    // Auth gate.
     if (found.entry.options.requireAuth && !session) {
       return NextResponse.json({ error: { code: 'UNAUTHORIZED', message: 'Sign in required', requestId } }, { status: 401, headers: { 'x-request-id': requestId } });
     }
@@ -107,7 +101,6 @@ async function handleRaw(
       }
     }
 
-    // Call the raw handler with (req, session, params, ctx).
     const result = await found.entry.handler(req, session, found.params, { requestId });
     if (result instanceof NextResponse) {
       result.headers.set('x-request-id', requestId);

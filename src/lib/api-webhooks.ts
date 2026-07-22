@@ -1,5 +1,3 @@
-// Webhooks — Telebirr payment notifications.
-// settles or fails the payment.
 import { NextResponse } from 'next/server';
 import { getPaymentProvider } from '@/lib/payments';
 import { settlePayment, failPayment } from '@/lib/payment-service';
@@ -14,8 +12,6 @@ export async function POST_telebirr_notify(ctx: any) {
       return NextResponse.json({ error: { code: 'NOT_IMPLEMENTED', message: 'Provider does not support webhooks', requestId } }, { status: 501 });
     }
 
-    // The api() middleware already parsed the JSON body into ctx.body.
-    // web Request per the provider interface).
     const rawBody = JSON.stringify(ctx.body ?? {});
     const syntheticReq = new Request('http://localhost/webhook', {
       method: 'POST',

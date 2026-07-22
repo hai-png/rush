@@ -1,4 +1,3 @@
-// Engagement — notifications.
 import { db } from '@/lib/db';
 import { logger } from '@/lib/logger';
 
@@ -47,7 +46,6 @@ export async function DELETE_notification({ session, params }: any) {
   return { data: { ok: true } };
 }
 
-// on the client. The server just returns the default preferences.
 import { z } from 'zod';
 
 const PreferencesInput = z.object({
@@ -61,7 +59,6 @@ const PreferencesInput = z.object({
 export async function PATCH_preferences({ session, body }: any) {
   const input = PreferencesInput.parse(body);
   // For MVP, we don't persist preferences server-side (would need a schema
-  // the client can store in localStorage.
   return { data: { userId: session.id, ...input } };
 }
 

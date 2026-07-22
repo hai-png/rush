@@ -1,5 +1,3 @@
-// Subscription state machine — single source of truth for status transitions.
-// All transitions go through here so audit + notification fanout is consistent.
 
 import { db } from '@/lib/db';
 import { Money } from '@/lib/money';
@@ -81,7 +79,6 @@ export async function transitionSubscription(
   }
 }
 
-// Consume a ride against the subscription. Throws if no rides remaining.
 export async function consumeRide(
   tx: typeof db,
   subscriptionId: string,

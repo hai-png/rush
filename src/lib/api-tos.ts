@@ -1,4 +1,3 @@
-// ToS — current version + accept.
 import { CURRENT_TOS_VERSION } from '@/lib/env';
 import { db } from '@/lib/db';
 import { audit } from '@/lib/audit';

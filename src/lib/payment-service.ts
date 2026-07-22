@@ -1,5 +1,3 @@
-// Payment service — settlement, failure, refunds.
-// for dedup — done right the first time (PAY-002 / DB-001 fix baked in).
 
 import { db } from '@/lib/db';
 import { Money } from '@/lib/money';
@@ -157,7 +155,6 @@ export async function failPayment(reference: string, reasonRaw: unknown, outRequ
   return result;
 }
 
-// Row-locked refund scheduling — PAY-003 fix baked in.
 export async function scheduleRefund(paymentId: string, amount: Money, reason: string): Promise<void> {
   // Side effects (audit) collected during the tx and run AFTER the tx commits
   // — calling audit() inside would deadlock SQLite's single writer.

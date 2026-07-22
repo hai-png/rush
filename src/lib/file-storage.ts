@@ -1,5 +1,3 @@
-// File storage — saves uploaded files to local disk under UPLOAD_DIR.
-// In production, swap saveFile/readFile for S3-compatible storage.
 
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, writeFile, readFile, stat } from 'node:fs/promises';
@@ -56,7 +54,6 @@ export async function saveFile(
   const bytes = new Uint8Array(await file.arrayBuffer());
   const checksum = createHash('sha256').update(bytes).digest('hex');
 
-  // Random UUID filename so multiple uploads of the same file don't collide.
   const id = randomUUID();
   const storageKey = `${namespace}/${id}${ext}`;
 

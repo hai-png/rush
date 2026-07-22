@@ -1,5 +1,3 @@
-// Ethiopian phone validation — `+2519XXXXXXXX` or `+2517XXXXXXXX`.
-// Stored canonical: `+2519XXXXXXXX`.
 const ET_PHONE_RE = /^\+251(9|7)\d{8}$/;
 
 export const EthiopianPhone = {

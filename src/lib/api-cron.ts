@@ -1,5 +1,3 @@
-// Cron — secret-gated endpoint to manually trigger background tasks.
-// run (e.g. after a deploy, or if the scheduler is lagging).
 import { NextResponse } from 'next/server';
 import { processRefundRetries } from '@/lib/payment-service';
 import { db } from '@/lib/db';

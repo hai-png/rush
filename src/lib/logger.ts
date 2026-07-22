@@ -1,5 +1,3 @@
-// Structured logging with pino. In dev, pretty-prints to console. In prod,
-// outputs JSON for log aggregation (Datadog, Loki, etc.).
 
 import pino from 'pino';
 import { loadEnv } from '@/lib/env';

@@ -1,4 +1,3 @@
-// ToS accept gate — shown after signup or when session.tosVersion is stale.
 import { requireSession } from '@/lib/session-server';
 import { CURRENT_TOS_VERSION } from '@/lib/env';
 import { db } from '@/lib/db';

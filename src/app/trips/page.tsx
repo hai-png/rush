@@ -1,4 +1,3 @@
-// Trip browser — list upcoming trips; riders can book a ride.
 import Link from 'next/link';
 import { requireSession } from '@/lib/session-server';
 import { db } from '@/lib/db';

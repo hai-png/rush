@@ -1,5 +1,3 @@
-// SMS provider — real Twilio integration when creds are set, console.log fallback.
-// Replaces the original's Africa's Talking (user explicitly said don't use AT).
 
 import { loadEnv } from '@/lib/env';
 import { logger } from '@/lib/logger';

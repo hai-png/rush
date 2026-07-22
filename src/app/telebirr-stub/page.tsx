@@ -1,7 +1,3 @@
-// Telebirr mock stub — simulates the Telebirr checkout page.
-// In real mode (TELEBIRR_ENV=testbed/production), the user is redirected to
-// the real Telebirr URL and never sees this page. In mock mode, this page
-// shows the order details and lets the user "pay" by firing the webhook.
 'use client';
 
 import { useEffect, useState } from 'react';

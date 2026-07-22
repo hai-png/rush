@@ -1,5 +1,3 @@
-// Rider: browse route assignments — see which routes are available this month,
-// against the trips generated from the assignment.
 import Link from 'next/link';
 import { requireSession } from '@/lib/session-server';
 import { db } from '@/lib/db';

@@ -1,4 +1,3 @@
-// Ticket detail — show messages + reply box.
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { requireSession } from '@/lib/session-server';
@@ -24,7 +23,6 @@ export default async function TicketDetailPage({ params }: { params: Promise<{ i
   if (!ticket) notFound();
   if (ticket.userId !== session.id && session.role !== 'platform_admin') notFound();
 
-  // Mark support_reply notifications pointing at this ticket as read.
   try {
     await db.notification.updateMany({
       where: {

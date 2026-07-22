@@ -1,8 +1,3 @@
-// List a seat for sale on the marketplace.
-<<<<<<< HEAD
-// Rider picks a trip they have a booked ride on + sets an expiry time.
-=======
->>>>>>> main
 import Link from 'next/link';
 import { requireRole } from '@/lib/session-server';
 import { db } from '@/lib/db';
@@ -15,10 +10,6 @@ import { ListSeatForm } from './list-seat-form';
 export default async function ListSeatPage() {
   const session = await requireRole('rider', 'platform_admin');
 
-<<<<<<< HEAD
-  // Find the rider's booked rides for upcoming trips.
-=======
->>>>>>> main
   const rides = await db.ride.findMany({
     where: {
       userId: session.id,
@@ -44,10 +35,6 @@ export default async function ListSeatPage() {
         <h1 className="text-2xl font-bold mb-2">List a seat for sale</h1>
         <p className="text-muted-foreground mb-6 text-sm">
           Can't make a trip you're booked on? List your seat for another rider to claim.
-<<<<<<< HEAD
-          They pay the route fare; you keep your subscription ride credit.
-=======
->>>>>>> main
         </p>
 
         {rides.length === 0 ? (

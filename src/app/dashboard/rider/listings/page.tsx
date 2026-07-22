@@ -1,4 +1,3 @@
-// Rider's seat-release listings — view + cancel.
 import Link from 'next/link';
 import { requireRole } from '@/lib/session-server';
 import { db } from '@/lib/db';

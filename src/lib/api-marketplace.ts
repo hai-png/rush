@@ -1,5 +1,3 @@
-// Marketplace — seat releases (riders with active subscriptions can release a
-// seat they can't use; other riders can claim it for a discount).
 import { db } from '@/lib/db';
 import { z } from 'zod';
 import { Money } from '@/lib/money';
@@ -35,7 +33,6 @@ export async function POST_create_release({ session, body, ipAddress, userAgent 
   if (!trip) throw new NotFoundError('Trip not found');
   if (trip.status !== 'scheduled') throw new BadRequestError('Trip is not scheduled');
 
-  // Verify the user has an active subscription or ride on this trip.
   const ride = await db.ride.findFirst({
     where: { tripId: input.tripId, userId: session.id, status: 'booked' },
   });
@@ -76,7 +73,6 @@ export async function POST_claim({ session, body, params, ipAddress, userAgent }
   if (release.expiresAt < new Date()) throw new BadRequestError('Seat release expired');
   if (release.userId === session.id) throw new BadRequestError('Cannot claim your own release');
 
-  // Price = the route fare (simplified; original had a discount model).
   const fare = release.trip.route.fareCents;
   if (fare <= 0) throw new BadRequestError('Route fare not set');
 
@@ -91,7 +87,6 @@ export async function POST_claim({ session, body, params, ipAddress, userAgent }
     redirectUrl: env.TELEBIRR_REDIRECT_URL || `${env.APP_BASE_URL}/checkout/complete`,
   });
 
-  // Create payment + seat claim in pending state.
   const claim = await db.$transaction(async (tx) => {
     // Mark release as claimed (atomic — only if still open).
     const updated = await tx.seatRelease.updateMany({
@@ -152,7 +147,6 @@ export async function GET_my_releases({ session }: any) {
   return { data: releases };
 }
 
-// Only the seller can cancel; only open releases can be cancelled.
 export async function POST_cancel_release({ session, params, ipAddress, userAgent }: any) {
   const release = await db.seatRelease.findUnique({ where: { id: params.id } });
   if (!release) throw new NotFoundError('Seat release not found');
@@ -227,7 +221,6 @@ export async function GET_claim({ session, params }: any) {
   return { data: claim };
 }
 
-// to POST /seat-releases/:id/claim). Takes a seatReleaseId + paymentMethod.
 const ClaimCreateInput = z.object({
   seatReleaseId: z.string().min(1),
   paymentMethod: z.enum(['telebirr', 'cbe']),
@@ -236,7 +229,6 @@ const ClaimCreateInput = z.object({
 export async function POST_claim_direct({ session, body, ipAddress, userAgent }: any) {
   const input = ClaimCreateInput.parse(body);
   // Delegate to the existing POST_claim handler by calling it with params.
-  // Actually, let's just inline the logic.
   const release = await db.seatRelease.findUnique({
     where: { id: input.seatReleaseId },
     include: { trip: { include: { route: true } } },

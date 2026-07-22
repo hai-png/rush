@@ -1,4 +1,3 @@
-// Contractor trips page — list + create trips.
 import Link from 'next/link';
 import { requireRole } from '@/lib/session-server';
 import { db } from '@/lib/db';

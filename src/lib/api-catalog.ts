@@ -1,4 +1,3 @@
-// Catalog — public read endpoints for plans, routes, shuttles, trips, FAQs.
 import { db } from '@/lib/db';
 
 export async function GET_plans() {

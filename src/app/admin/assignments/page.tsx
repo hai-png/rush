@@ -1,4 +1,3 @@
-// Admin: route assignments — assign routes to contractors for the month.
 import Link from 'next/link';
 import { requireRole } from '@/lib/session-server';
 import { db } from '@/lib/db';

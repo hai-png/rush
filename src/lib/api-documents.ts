@@ -1,4 +1,3 @@
-// Contractor documents — upload registration / insurance / inspection files.
 
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';

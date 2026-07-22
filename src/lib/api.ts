@@ -1,4 +1,3 @@
-// API handler composition — replaces the original's Hono middleware stack.
 // All security invariants baked in from the start. No patches.
 
 import { NextRequest, NextResponse } from 'next/server';
@@ -41,7 +40,6 @@ function clientIp(req: NextRequest): string | undefined {
   return req.headers.get('x-real-ip') ?? undefined;
 }
 
-// production multi-instance, swap this for Redis.
 type RateBucket = { count: number; expiresAt: number };
 const rateBuckets = new Map<string, RateBucket>();
 
@@ -116,7 +114,6 @@ function rateLimitCheck(
   }
 }
 
-// Periodic cleanup of expired rate-limit buckets (every 5 min).
 setInterval(() => {
   const now = Date.now();
   for (const [k, v] of rateBuckets) {
@@ -194,13 +191,11 @@ async function idempotencyCheck(req: NextRequest, ctx: ApiContext, bodyText: str
   if (!key) return {};
   if (key.length > 256) throw new Error('Idempotency-Key too long (max 256 chars)');
 
-  // Anon requests: skip (fixes SEC-011 — anon keys never deduped anyway).
   if (!ctx.session) return {};
 
   const scopedKey = `${ctx.session.id}:${key}`;
   const bodyHash = createHash('sha256').update(bodyText).digest('hex');
 
-  // Try to claim.
   try {
     await db.idempotencyRecord.create({
       data: {
@@ -271,7 +266,6 @@ export function api(options: ApiOptions, handler: Handler) {
       let session: Session | null = null;
       const bearer = req.headers.get('authorization')?.replace(/^Bearer\s+/i, '');
       // Read the session cookie from the request's Cookie header directly —
-      // more reliable across Next.js runtimes than next/headers cookies().
       const cookieHeader = req.headers.get('cookie') ?? '';
       let cookieToken: string | undefined;
       for (const part of cookieHeader.split(';')) {
@@ -281,14 +275,12 @@ export function api(options: ApiOptions, handler: Handler) {
       const token = bearer ?? cookieToken;
       if (token) {
         // Failed credential verification MUST propagate as 401 — never silently
-        // downgrade to anonymous (fixes SEC-001).
         session = await verifySession(token);
       }
 
       // ── CSRF ────────────────────────────────────────────────────────────
       await csrfCheck(req);
 
-      // ── Parse body (for rate-limit keyFn + idempotency hash) ────────────
       let body: any = undefined;
       let bodyText = '';
       if (req.method !== 'GET' && req.method !== 'HEAD') {
@@ -298,10 +290,8 @@ export function api(options: ApiOptions, handler: Handler) {
         }
       }
 
-      // ── Rate limit ──────────────────────────────────────────────────────
       rateLimitCheck(req.nextUrl.pathname, req.method, { session, body, ip });
 
-      // ── Auth gate ───────────────────────────────────────────────────────
       if (options.requireAuth && !session) throw new UnauthorizedError();
       if (options.requireRole && session) {
         if (!options.requireRole.includes(session.role as any)) {
@@ -309,21 +299,16 @@ export function api(options: ApiOptions, handler: Handler) {
         }
       }
 
-      // ── ToS gate ────────────────────────────────────────────────────────
       if (!options.exemptFromTosGate) tosGate(req.nextUrl.pathname, session);
 
-      // ── Idempotency ─────────────────────────────────────────────────────
       const idem = await idempotencyCheck(req, { requestId, ipAddress: ip, userAgent: ua, session } as ApiContext, bodyText);
       if (idem.replay !== undefined) {
         return NextResponse.json(idem.replay);
       }
 
-      // ── Handler ─────────────────────────────────────────────────────────
       const params = await ctx.params;
       const result = await handler({ requestId, ipAddress: ip, userAgent: ua, session, body, params });
 
-      // If the handler returned a NextResponse directly (e.g. to set cookies),
-      // pass it through with just the request-id header.
       if (result instanceof NextResponse) {
         if (idem.scopedKey) {
           await persistIdempotency(idem.scopedKey, result.status, await result.json().catch(() => null));
@@ -358,7 +343,6 @@ export function api(options: ApiOptions, handler: Handler) {
   };
 }
 
-// Helper: set the session cookie on a response.
 export async function setSessionCookie(res: NextResponse, token: string): Promise<void> {
   res.cookies.set(SESSION_COOKIE, token, {
     httpOnly: true,

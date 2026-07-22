@@ -1,5 +1,3 @@
-// Plans page — public, lists subscription plans and lets signed-in users
-// start a checkout.
 import Link from 'next/link';
 import { db } from '@/lib/db';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';

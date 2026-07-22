@@ -1,5 +1,3 @@
-// File upload + download endpoints. Used by contractor onboarding documents
-// and support ticket attachments.
 
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';

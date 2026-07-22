@@ -1,4 +1,3 @@
-// Seat marketplace — list open seat releases, claim button.
 import Link from 'next/link';
 import { requireSession } from '@/lib/session-server';
 import { db } from '@/lib/db';

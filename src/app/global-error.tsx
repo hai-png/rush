@@ -1,8 +1,5 @@
 'use client';
 
-// Global error boundary — catches unexpected errors and shows a friendly UI
-// instead of a blank screen. Must be a client component.
-
 import { useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 

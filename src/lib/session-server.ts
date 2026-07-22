@@ -1,5 +1,3 @@
-// Server-side session check for page-level route guards.
-// Reads the session cookie, verifies it, returns the session or null.
 import { cookies } from 'next/headers';
 import { redirect } from 'next/navigation';
 import { verifySession, type Session } from '@/lib/auth';

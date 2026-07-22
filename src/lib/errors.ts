@@ -1,4 +1,3 @@
-// Typed error envelope — single source of truth for HTTP error responses.
 import { logger } from '@/lib/logger';
 // them to { error: { code, message, requestId } }.
 
