@@ -52,11 +52,10 @@ type RateRule = {
 
 const RATE_RULES: RateRule[] = [
   { pattern: /\/api\/v1\/auth\/token$/, limit: 100, windowSec: 60, keyFn: ({ ip }) => ip ? `ip:${ip}` : null },
-  // Per-user throttle on 2FA code attempts — the 100/min IP limit above still
-  // allows brute-forcing a 6-digit TOTP across multiple IPs. This 10/min cap
-  // per user (looked up by phone in the body) makes 10^6 codes take ~70 days
-  // even with infinite IPs, and one TOTP window (30s) gets at most 5 tries.
-  { pattern: /\/api\/v1\/auth\/token$/, limit: 10, windowSec: 60, keyFn: ({ body }) => body?.phone ? `phone:${body.phone}` : null },
+  // P1-8 / SEC-010: tightened from 10/min to 5/min per phone. A 6-digit TOTP
+  // has 10^6 possibilities; at 5 attempts/min across rotating 30s windows,
+  // a sustained brute-force takes ~140 days for a 50% success chance.
+  { pattern: /\/api\/v1\/auth\/token$/, limit: 5, windowSec: 60, keyFn: ({ body }) => body?.phone ? `phone:${body.phone}` : null },
   { pattern: /\/api\/v1\/auth\/register$/, limit: 50, windowSec: 3600, keyFn: ({ ip }) => ip ? `ip:${ip}` : null },
   { pattern: /\/api\/v1\/auth\/otp\/send$/, limit: 3, windowSec: 600, keyFn: ({ ip }) => ip ? `ip:${ip}` : null },
   { pattern: /\/api\/v1\/auth\/otp\/send$/, limit: 3, windowSec: 600, keyFn: ({ body }) => `phone:${body?.phone ?? 'unknown'}` },
@@ -69,13 +68,16 @@ const RATE_RULES: RateRule[] = [
 const DEFAULT_AUTHED = { limit: 100, windowSec: 60 };
 const DEFAULT_ANON = { limit: 60, windowSec: 60 };
 
+export type RateLimitInfo = { limit: number; remaining: number; resetAt: number };
+
 export function rateLimitCheck(
   path: string,
   method: string,
   ctx: { session: Session | null; body: any; ip: string | undefined },
-): void {
+): RateLimitInfo | null {
   const matchingRules = RATE_RULES.filter(r => r.pattern.test(path));
   let maxRetry = 0;
+  let info: RateLimitInfo | null = null;
 
   for (const rule of matchingRules) {
     const keySuffix = rule.keyFn(ctx);
@@ -89,8 +91,11 @@ export function rateLimitCheck(
     const bucket = rateBuckets.get(key);
     if (!bucket || bucket.expiresAt < now) {
       rateBuckets.set(key, { count: 1, expiresAt: now + rule.windowSec * 1000 });
+      info = { limit: rule.limit, remaining: rule.limit - 1, resetAt: Math.ceil((now + rule.windowSec * 1000) / 1000) };
     } else {
       bucket.count++;
+      const remaining = Math.max(0, rule.limit - bucket.count);
+      info = { limit: rule.limit, remaining, resetAt: Math.ceil(bucket.expiresAt / 1000) };
       if (bucket.count > rule.limit) {
         const ttl = Math.ceil((bucket.expiresAt - now) / 1000);
         if (ttl > maxRetry) maxRetry = ttl;
@@ -102,20 +107,24 @@ export function rateLimitCheck(
   if (matchingRules.length === 0 && (method === 'POST' || method === 'PUT' || method === 'PATCH' || method === 'DELETE')) {
     const { limit, windowSec } = ctx.session ? DEFAULT_AUTHED : DEFAULT_ANON;
     const keySuffix = ctx.session ? `user:${ctx.session.id}` : (ctx.ip ? `ip:${ctx.ip}` : null);
-    if (!keySuffix) return;
+    if (!keySuffix) return info;
     if (keySuffix.startsWith('ip:undefined')) throw new RateLimitError(60);
     const key = `rl:${path}:${keySuffix}`;
     const now = Date.now();
     const bucket = rateBuckets.get(key);
     if (!bucket || bucket.expiresAt < now) {
       rateBuckets.set(key, { count: 1, expiresAt: now + windowSec * 1000 });
+      info = { limit, remaining: limit - 1, resetAt: Math.ceil((now + windowSec * 1000) / 1000) };
     } else {
       bucket.count++;
+      const remaining = Math.max(0, limit - bucket.count);
+      info = { limit, remaining, resetAt: Math.ceil(bucket.expiresAt / 1000) };
       if (bucket.count > limit) {
         throw new RateLimitError(Math.ceil((bucket.expiresAt - now) / 1000));
       }
     }
   }
+  return info;
 }
 
 setInterval(() => {
@@ -245,7 +254,7 @@ async function persistIdempotency(scopedKey: string, status: number, body: unkno
 }
 
 type HandlerResult = { status?: number; data?: unknown; headers?: Record<string, string> } | unknown;
-type Handler = (ctx: ApiContext & { body?: any; params: Record<string, string> }) => Promise<HandlerResult> | HandlerResult;
+type Handler = (ctx: ApiContext & { body?: any; params: Record<string, string>; query: Record<string, string> }) => Promise<HandlerResult> | HandlerResult;
 
 export function api(options: ApiOptions, handler: Handler) {
   return async (req: NextRequest, ctx: { params: Promise<Record<string, string>> }): Promise<NextResponse> => {
@@ -311,7 +320,7 @@ export function api(options: ApiOptions, handler: Handler) {
         }
       }
 
-      rateLimitCheck(req.nextUrl.pathname, req.method, { session, body, ip });
+      const rateInfo = rateLimitCheck(req.nextUrl.pathname, req.method, { session, body, ip });
 
       if (options.requireAuth && !session) throw new UnauthorizedError();
       if (options.requireRole && session) {
@@ -328,7 +337,11 @@ export function api(options: ApiOptions, handler: Handler) {
       }
 
       const params = await ctx.params;
-      const result = await handler({ requestId, ipAddress: ip, userAgent: ua, session, body, params });
+      // Extract query params from the URL search string so handlers can
+      // read ?corporateId= etc. without needing a separate req object.
+      const query: Record<string, string> = {};
+      req.nextUrl.searchParams.forEach((value, key) => { query[key] = value; });
+      const result = await handler({ requestId, ipAddress: ip, userAgent: ua, session, body, params, query });
 
       if (result instanceof NextResponse) {
         if (idem.scopedKey) {
@@ -351,6 +364,12 @@ export function api(options: ApiOptions, handler: Handler) {
         for (const [k, v] of Object.entries(headers)) res.headers.set(k, String(v));
       }
       res.headers.set('x-request-id', requestId);
+      // P2-52 / API-032: X-RateLimit-* headers so clients can proactively back off.
+      if (rateInfo) {
+        res.headers.set('X-RateLimit-Limit', String(rateInfo.limit));
+        res.headers.set('X-RateLimit-Remaining', String(rateInfo.remaining));
+        res.headers.set('X-RateLimit-Reset', String(rateInfo.resetAt));
+      }
       return res;
     } catch (err) {
       const { status, body } = toErrorEnvelope(err, requestId);

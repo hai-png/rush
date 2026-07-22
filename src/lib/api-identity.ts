@@ -75,8 +75,32 @@ export async function POST_token({ body, ipAddress, userAgent }: any) {
   if (!user || !user.isActive || user.deletedAt) {
     throw new UnauthorizedError('Invalid credentials');
   }
+
+  // P1-8 / API-030: account lockout. After 5 failed attempts, lock for 15 min.
+  const MAX_FAILED_ATTEMPTS = 5;
+  const LOCKOUT_MS = 15 * 60_000;
+  if (user.lockedUntil && user.lockedUntil > new Date()) {
+    const retryAfter = Math.ceil((user.lockedUntil.getTime() - Date.now()) / 1000);
+    throw new UnauthorizedError(`Account locked. Try again in ${retryAfter} seconds.`);
+  }
+
   const ok = await verifyPassword(input.password, user.passwordHash);
-  if (!ok) throw new UnauthorizedError('Invalid credentials');
+  if (!ok) {
+    // Increment failed attempts; lock if threshold reached.
+    const newAttempts = user.failedLoginAttempts + 1;
+    const shouldLock = newAttempts >= MAX_FAILED_ATTEMPTS;
+    await db.user.update({
+      where: { id: user.id },
+      data: {
+        failedLoginAttempts: newAttempts,
+        ...(shouldLock ? { lockedUntil: new Date(Date.now() + LOCKOUT_MS) } : {}),
+      },
+    });
+    if (shouldLock) {
+      await audit({ actorId: user.id, action: 'user.account_locked', entityType: 'user', entityId: user.id, after: { reason: 'max_failed_attempts' }, ipAddress, userAgent });
+    }
+    throw new UnauthorizedError('Invalid credentials');
+  }
 
   if (user.twoFactorEnabled) {
     if (!input.code) throw new TwoFactorRequiredError();
@@ -85,8 +109,26 @@ export async function POST_token({ body, ipAddress, userAgent }: any) {
     const secret = decryptField(user.twoFactorSecret);
     if (!secret) throw new ForbiddenError('2FA secret could not be decrypted. Contact support.');
     if (!verifySync({ secret, token: input.code })) {
+      // 2FA failure also counts toward lockout.
+      const newAttempts = user.failedLoginAttempts + 1;
+      const shouldLock = newAttempts >= MAX_FAILED_ATTEMPTS;
+      await db.user.update({
+        where: { id: user.id },
+        data: {
+          failedLoginAttempts: newAttempts,
+          ...(shouldLock ? { lockedUntil: new Date(Date.now() + LOCKOUT_MS) } : {}),
+        },
+      });
       throw new UnauthorizedError('Invalid 2FA code');
     }
+  }
+
+  // Successful login — reset failed attempts + clear lockout.
+  if (user.failedLoginAttempts > 0 || user.lockedUntil) {
+    await db.user.update({
+      where: { id: user.id },
+      data: { failedLoginAttempts: 0, lockedUntil: null },
+    });
   }
 
   const { token } = await issueSession(user, { userAgent, ipAddress });

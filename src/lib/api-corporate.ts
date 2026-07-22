@@ -17,11 +17,6 @@ export async function POST_onboard({ session, body, ipAddress, userAgent }: any)
   if (session.role !== 'rider' && session.role !== 'platform_admin') {
     throw new ForbiddenError('Only riders can onboard a corporate');
   }
-  // corporate_admin is a privileged role — enforce 2FA + phone verification
-  // before promoting. Platform admins are already privileged so they pass.
-  if (session.role !== 'platform_admin') {
-    await assertTwoFactorEnabled(session.id, 'corporate_admin');
-  }
   const input = OnboardInput.parse(body);
 
   const existing = await db.corporate.findUnique({ where: { adminUserId: session.id } });
@@ -29,7 +24,20 @@ export async function POST_onboard({ session, body, ipAddress, userAgent }: any)
 
   const code = await generateUniqueCode();
 
+  // P1-5 / SEC-007: move the 2FA + phone-verification check INSIDE the
+  // promotion transaction so a user can't disable 2FA between the check and
+  // the role update. The check reads from tx (the same transaction that does
+  // the promotion) so it's atomic.
   const corp = await db.$transaction(async (tx) => {
+    if (session.role !== 'platform_admin') {
+      const u = await tx.user.findUnique({
+        where: { id: session.id },
+        select: { twoFactorEnabled: true, phoneVerified: true },
+      });
+      if (!u) throw new ForbiddenError('Account not found');
+      if (!u.phoneVerified) throw new ForbiddenError('Phone verification required for this role. Verify your phone first.');
+      if (!u.twoFactorEnabled) throw new ForbiddenError('Two-factor authentication required for this role. Enable it at /api/v1/auth/2fa/setup.');
+    }
     await tx.user.update({ where: { id: session.id }, data: { role: 'corporate_admin' } });
     const newCorp = await tx.corporate.create({
       data: {
@@ -51,7 +59,7 @@ export async function POST_onboard({ session, body, ipAddress, userAgent }: any)
       },
     });
     return newCorp;
-  });
+  }, { timeout: 15000, maxWait: 20000 });
 
   await audit({
     actorId: session.id,
@@ -79,12 +87,20 @@ async function generateUniqueCode(): Promise<string> {
   throw new Error('Failed to generate unique corporate code');
 }
 
-async function resolveCorporate(session: any) {
-  // corporate_admin → their own corporate. platform_admin → the first
-  // corporate (admin oversight). Returns null if not found.
+// P1-34 / API-003: resolveCorporate now accepts an optional corporateId
+// (from query params) so platform_admin can target a specific corporate.
+// Previously it returned findFirst({}) — an arbitrary corporate — so admin
+// actions on /corporate/members/:id etc. would 404 for any corp other than
+// the first.
+async function resolveCorporate(session: any, corporateId?: string) {
   if (session.role === 'platform_admin') {
+    if (corporateId) {
+      return db.corporate.findUnique({ where: { id: corporateId } });
+    }
+    // No corporateId specified — fall back to the first corporate (legacy behavior).
     return db.corporate.findFirst({});
   }
+  // corporate_admin → their own corporate (ignore any corporateId param).
   return db.corporate.findUnique({ where: { adminUserId: session.id } });
 }
 
@@ -110,12 +126,12 @@ const InviteInput = z.object({
   expiresAt: z.string().datetime().optional(),
 });
 
-export async function POST_invite({ session, body, ipAddress, userAgent }: any) {
+export async function POST_invite({ session, body, query, ipAddress, userAgent }: any) {
   if (session.role !== 'corporate_admin' && session.role !== 'platform_admin') {
     throw new ForbiddenError('Corporate admin only');
   }
   const input = InviteInput.parse(body);
-  const corp = await resolveCorporate(session);
+  const corp = await resolveCorporate(session, query?.corporateId);
   if (!corp) throw new NotFoundError('No corporate found');
 
   // Retry on collision (matches generateUniqueCode pattern for corporate codes).
@@ -153,11 +169,11 @@ export async function POST_invite({ session, body, ipAddress, userAgent }: any) 
   return { status: 201, data: invite };
 }
 
-export async function GET_invites({ session }: any) {
+export async function GET_invites({ session, query }: any) {
   if (session.role !== 'corporate_admin' && session.role !== 'platform_admin') {
     throw new ForbiddenError('Corporate admin only');
   }
-  const corp = await resolveCorporate(session);
+  const corp = await resolveCorporate(session, query?.corporateId);
   if (!corp) throw new NotFoundError('No corporate found');
   const invites = await db.corporateInvite.findMany({
     where: { corporateId: corp.id },
@@ -223,11 +239,11 @@ export async function POST_signup({ session, body, ipAddress, userAgent }: any) 
   };
 }
 
-export async function GET_members({ session }: any) {
+export async function GET_members({ session, query }: any) {
   if (session.role !== 'corporate_admin' && session.role !== 'platform_admin') {
     throw new ForbiddenError('Corporate admin only');
   }
-  const corp = await resolveCorporate(session);
+  const corp = await resolveCorporate(session, query?.corporateId);
   if (!corp) throw new NotFoundError('No corporate found');
   const members = await db.corporateMember.findMany({
     where: { corporateId: corp.id, deletedAt: null },
@@ -237,11 +253,11 @@ export async function GET_members({ session }: any) {
   return { data: members };
 }
 
-export async function POST_approve({ session, params, ipAddress, userAgent }: any) {
+export async function POST_approve({ session, params, query, ipAddress, userAgent }: any) {
   if (session.role !== 'corporate_admin' && session.role !== 'platform_admin') {
     throw new ForbiddenError('Corporate admin only');
   }
-  const corp = await resolveCorporate(session);
+  const corp = await resolveCorporate(session, query?.corporateId);
   if (!corp) throw new NotFoundError('No corporate found');
 
   const member = await db.corporateMember.findUnique({ where: { id: params.id } });
@@ -263,11 +279,11 @@ export async function POST_approve({ session, params, ipAddress, userAgent }: an
   return { data: { id: member.id, approvalStatus: 'approved' } };
 }
 
-export async function POST_reject({ session, params, ipAddress, userAgent }: any) {
+export async function POST_reject({ session, params, query, ipAddress, userAgent }: any) {
   if (session.role !== 'corporate_admin' && session.role !== 'platform_admin') {
     throw new ForbiddenError('Corporate admin only');
   }
-  const corp = await resolveCorporate(session);
+  const corp = await resolveCorporate(session, query?.corporateId);
   if (!corp) throw new NotFoundError('No corporate found');
 
   const member = await db.corporateMember.findUnique({ where: { id: params.id } });
@@ -301,13 +317,13 @@ export async function POST_validate_invite({ body }: any) {
   return { data: { corporateName: invite.corporate.name, subsidyPercent: invite.corporate.subsidyPercent, maxUses: invite.maxUses, usesCount: invite.usesCount } };
 }
 
-export async function GET_me({ session }: any) {
+export async function GET_me({ session, query }: any) {
   if (session.role !== 'corporate_admin' && session.role !== 'platform_admin') {
     throw new ForbiddenError('Corporate admin only');
   }
   // P1-33 / API-002: use resolveCorporate so platform_admin can fetch a corporate
   // (was hardcoded to findUnique by adminUserId, which always 404'd for admins).
-  const corp = await resolveCorporate(session);
+  const corp = await resolveCorporate(session, query?.corporateId);
   if (!corp) throw new NotFoundError('No corporate found');
   // resolveCorporate returns a minimal corp object; re-fetch with counts.
   const full = await db.corporate.findUnique({
@@ -328,12 +344,12 @@ const UpdateCorporateInput = z.object({
   monthlySeatAllowance: z.number().int().min(1).max(1000).optional(),
 });
 
-export async function PATCH_corporate({ session, body, ipAddress, userAgent }: any) {
+export async function PATCH_corporate({ session, body, query, ipAddress, userAgent }: any) {
   if (session.role !== 'corporate_admin' && session.role !== 'platform_admin') {
     throw new ForbiddenError('Corporate admin only');
   }
   const input = UpdateCorporateInput.parse(body);
-  const corp = await resolveCorporate(session);
+  const corp = await resolveCorporate(session, query?.corporateId);
   if (!corp) throw new NotFoundError('No corporate found');
 
   const updated = await db.corporate.update({ where: { id: corp.id }, data: input });
@@ -341,11 +357,11 @@ export async function PATCH_corporate({ session, body, ipAddress, userAgent }: a
   return { data: updated };
 }
 
-export async function DELETE_member({ session, params, ipAddress, userAgent }: any) {
+export async function DELETE_member({ session, params, query, ipAddress, userAgent }: any) {
   if (session.role !== 'corporate_admin' && session.role !== 'platform_admin') {
     throw new ForbiddenError('Corporate admin only');
   }
-  const corp = await resolveCorporate(session);
+  const corp = await resolveCorporate(session, query?.corporateId);
   if (!corp) throw new NotFoundError('No corporate found');
   const member = await db.corporateMember.findUnique({ where: { id: params.id } });
   if (!member || member.corporateId !== corp.id) throw new NotFoundError('Member not found');
@@ -368,12 +384,12 @@ const UpdateMemberInput = z.object({
   isActive: z.boolean().optional(),
 });
 
-export async function PATCH_member({ session, params, body, ipAddress, userAgent }: any) {
+export async function PATCH_member({ session, params, body, query, ipAddress, userAgent }: any) {
   if (session.role !== 'corporate_admin' && session.role !== 'platform_admin') {
     throw new ForbiddenError('Corporate admin only');
   }
   const input = UpdateMemberInput.parse(body);
-  const corp = await resolveCorporate(session);
+  const corp = await resolveCorporate(session, query?.corporateId);
   if (!corp) throw new NotFoundError('No corporate found');
   const member = await db.corporateMember.findUnique({ where: { id: params.id } });
   if (!member || member.corporateId !== corp.id) throw new NotFoundError('Member not found');
