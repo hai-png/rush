@@ -98,7 +98,7 @@ export async function POST_ride({ session, body, ipAddress, userAgent }: any) {
         status: 'booked',
       },
     });
-  });
+  }, { timeout: 15000, maxWait: 20000 });
 
   await audit({
     actorId: session.id,
@@ -150,7 +150,7 @@ export async function POST_board({ session, params, ipAddress, userAgent }: any)
         data: { status: 'boarded' },
       });
     }
-  });
+  }, { timeout: 15000, maxWait: 20000 });
   await audit({
     actorId: session.id,
     action: 'trip.boarded',
@@ -179,7 +179,7 @@ export async function POST_complete({ session, params, ipAddress, userAgent }: a
     // Boarded rides complete; booked rides (no-shows) cascade to no_show (P2-2).
     await tx.ride.updateMany({ where: { tripId: trip.id, status: 'boarded' }, data: { status: 'completed' } });
     await tx.ride.updateMany({ where: { tripId: trip.id, status: 'booked' }, data: { status: 'no_show' } });
-  });
+  }, { timeout: 15000, maxWait: 20000 });
   await audit({
     actorId: session.id,
     action: 'trip.completed',
@@ -244,7 +244,7 @@ export async function POST_trip_cancel({ session, params, body, ipAddress, userA
     await tx.trip.update({ where: { id: trip.id }, data: { seatsBooked: 0 } });
 
     return rides;
-  });
+  }, { timeout: 15000, maxWait: 20000 });
 
   // Restore subscription credits for cancelled subscription-booked rides.
   for (const r of affected) {
@@ -371,26 +371,31 @@ export async function PATCH_ride({ session, params, body, ipAddress, userAgent }
 
   const before = ride;
 
+  // P0-6: if transitioning to cancelled from booked/boarded, release the seat
+  // and restore subscription credit. releaseRide uses db (not tx) so it must
+  // run OUTSIDE the transaction to avoid SQLite single-writer lock conflicts.
+  const shouldReleaseSeat = input.status === 'cancelled' && (ride.status === 'booked' || ride.status === 'boarded');
+
   const updated = await db.$transaction(async (tx) => {
-    // P0-6: if transitioning to cancelled from booked/boarded, release the seat back to the trip.
-    if (input.status === 'cancelled' && (ride.status === 'booked' || ride.status === 'boarded')) {
+    if (shouldReleaseSeat) {
       await tx.trip.updateMany({
         where: { id: ride.tripId, seatsBooked: { gt: 0 } },
         data: { seatsBooked: { decrement: 1 } },
       });
-      // Restore subscription credit if the ride was booked against a subscription.
-      if (ride.subscriptionId) {
-        try { await releaseRide(ride.subscriptionId); } catch (err) {
-          logger.error({ err: (err as Error).message }, '[ride.patch] releaseRide failed');
-        }
-      }
     }
     return tx.ride.update({
       where: { id: params.id },
       data: input,
       include: { trip: { include: { route: true } } },
     });
-  });
+  }, { timeout: 15000, maxWait: 20000 });
+
+  // Restore subscription credit outside the tx (releaseRide uses db).
+  if (shouldReleaseSeat && ride.subscriptionId) {
+    try { await releaseRide(ride.subscriptionId); } catch (err) {
+      logger.error({ err: (err as Error).message }, '[ride.patch] releaseRide failed');
+    }
+  }
 
   await audit({ actorId: session.id, action: 'ride.updated', entityType: 'ride', entityId: params.id, before, after: input, ipAddress, userAgent });
   return { data: updated };

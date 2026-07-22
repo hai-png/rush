@@ -111,7 +111,7 @@ export async function POST_create({ session, body, ipAddress, userAgent }: any) 
       },
     });
     return created;
-  });
+  }, { timeout: 15000, maxWait: 20000 });
 
   // Create the Telebirr checkout *after* the sub+payment row commits, so if
   // createCheckout throws we still have a pending Payment that the user can retry.
@@ -209,7 +209,7 @@ export async function POST_cancel({ session, params, ipAddress, userAgent }: any
       }
     }
     return ridesToCancel;
-  });
+  }, { timeout: 15000, maxWait: 20000 });
 
   // Notify the user.
   try {
@@ -336,7 +336,7 @@ export async function POST_renew({ session, params, body, ipAddress, userAgent }
       },
     });
     return created;
-  });
+  }, { timeout: 15000, maxWait: 20000 });
 
   let checkout: any;
   try {

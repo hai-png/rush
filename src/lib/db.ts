@@ -27,10 +27,12 @@ async function applySqlitePragmas(): Promise<void> {
   if (!url.startsWith('file:')) return // Postgres or other — skip
 
   try {
-    await db.$executeRaw`PRAGMA journal_mode=WAL`
-    await db.$executeRaw`PRAGMA busy_timeout=5000`
-    await db.$executeRaw`PRAGMA synchronous=NORMAL`
-    await db.$executeRaw`PRAGMA foreign_keys=ON`
+    // Use $queryRaw for PRAGMAs — some (e.g. journal_mode) return result rows,
+    // which $executeRaw rejects on SQLite.
+    await db.$queryRaw`PRAGMA journal_mode=WAL`
+    await db.$queryRaw`PRAGMA busy_timeout=5000`
+    await db.$queryRaw`PRAGMA synchronous=NORMAL`
+    await db.$queryRaw`PRAGMA foreign_keys=ON`
     logger.info('[db] SQLite PRAGMAs applied: WAL, busy_timeout=5000, synchronous=NORMAL, foreign_keys=ON')
   } catch (err) {
     logger.error({ err: (err as Error).message }, '[db] failed to apply SQLite PRAGMAs')

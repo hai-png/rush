@@ -14,7 +14,9 @@
     "db:reset": "prisma migrate reset",
     "db:seed": "bun run scripts/seed.ts",
     "openapi:gen": "bun run scripts/gen-openapi.ts",
-    "e2e": "bash scripts/e2e-test.sh"
+    "e2e": "bash scripts/e2e-test.sh",
+    "test": "bun test scripts/",
+    "test:race": "bun test scripts/race-condition-tests.test.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.11.1",
