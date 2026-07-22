@@ -1,20 +1,13 @@
 import Link from 'next/link';
-import dynamicImport from 'next/dynamic';
 import { requireSession } from '@/lib/session-server';
 import { db } from '@/lib/db';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { SignOutButton } from '@/components/sign-out-button';
-import { Skeleton } from '@/components/ui/skeleton';
-
-// P2-26 / OPS-022: lazy-load RouteMap so leaflet (~150KB) only ships on pages
-// that actually render the map. Previously it was a static import, so every
-// /assignments page load shipped leaflet in the bundle.
-const RouteMap = dynamicImport(() => import('@/components/route-map').then(m => m.RouteMap), {
-  ssr: false,
-  loading: () => <Skeleton className="h-64 w-full" />,
-});
+// P2-26: lazy-load RouteMap via a client-component wrapper (ssr:false isn't
+// allowed in Server Components directly).
+import { RouteMap } from '@/components/route-map-lazy';
 
 export const dynamic = 'force-dynamic';
 

@@ -46,7 +46,7 @@ export async function register() {
     } catch (err) {
       logger.error({ err: (err as Error).message }, '[instrumentation] shutdown error');
     }
-    process.exit(0);
+    if (typeof process.exit === 'function') process.exit(0);
   }
 
   process.on('SIGTERM', () => shutdown('SIGTERM'));
@@ -62,6 +62,6 @@ export async function register() {
     logger.error({ err: err.message, stack: err.stack }, '[instrumentation] uncaughtException');
     // For uncaughtException we exit — the process state is undefined.
     // k8s/systemd will restart us.
-    process.exit(1);
+    if (typeof process.exit === 'function') process.exit(1);
   });
 }
