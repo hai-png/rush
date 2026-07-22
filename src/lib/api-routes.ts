@@ -62,11 +62,15 @@ const ROUTES: RouteEntry[] = [
   r('POST', '/auth/register', { exemptFromTosGate: true }, identity.POST_register),
   r('POST', '/auth/token', { exemptFromTosGate: true }, identity.POST_token),
   r('POST', '/auth/logout', {}, identity.POST_logout),
+  r('POST', '/auth/logout-all', { requireAuth: true, exemptFromTosGate: true }, identity.POST_logout_all),
   r('POST', '/auth/refresh', { exemptFromTosGate: true }, identity.POST_refresh),
   r('GET',  '/auth/me', { requireAuth: true, exemptFromTosGate: true }, identity.GET_me),
   r('POST', '/auth/change-password', { requireAuth: true }, identity.POST_change_password),
   r('GET',  '/auth/sessions', { requireAuth: true, exemptFromTosGate: true }, identity.GET_sessions),
   r('DELETE', '/auth/sessions/:id', { requireAuth: true, exemptFromTosGate: true }, identity.DELETE_session),
+  // P1 / API-012: admin session management for any user.
+  r('GET',    '/admin/users/:id/sessions', { requireAuth: true, requireRole: ['platform_admin'], exemptFromTosGate: true }, identity.GET_admin_user_sessions),
+  r('DELETE', '/admin/users/:id/sessions/:sid', { requireAuth: true, requireRole: ['platform_admin'], exemptFromTosGate: true }, identity.DELETE_admin_user_session),
   r('POST', '/auth/otp/send', { exemptFromTosGate: true }, identity.POST_otp_send),
   r('POST', '/auth/otp/verify', { exemptFromTosGate: true }, identity.POST_otp_verify),
   r('POST', '/auth/phone/verify', { requireAuth: true }, identity.POST_phone_verify),
@@ -211,6 +215,7 @@ const ROUTES: RouteEntry[] = [
 
   r('GET', '/health', { exemptFromTosGate: true }, health.GET_health),
   r('GET', '/healthz', { exemptFromTosGate: true }, health.GET_healthz),
+  r('GET', '/ready', { exemptFromTosGate: true }, health.GET_ready),
 
   r('POST', '/cron/run', { exemptFromTosGate: true }, cron.POST_run),
   r('GET', '/cron', { exemptFromTosGate: true }, cron.GET_cron_jobs),

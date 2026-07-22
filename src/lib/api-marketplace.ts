@@ -32,6 +32,20 @@ export async function POST_create_release({ session, body, ipAddress, userAgent 
   const trip = await db.trip.findUnique({ where: { id: input.tripId }, include: { shuttle: true } });
   if (!trip) throw new NotFoundError('Trip not found');
   if (trip.status !== 'scheduled') throw new BadRequestError('Trip is not scheduled');
+  // P1-19 / BIZ-019: cannot release a seat on a trip that has already departed.
+  if (trip.departureAt.getTime() < Date.now()) {
+    throw new BadRequestError('Cannot release a seat on a trip that has already departed');
+  }
+  // P1 / BIZ-024: expiresAt must be before trip departure (otherwise the
+  // release outlives the trip and a buyer could pay for a seat they can't use).
+  const expiresAtDate = new Date(input.expiresAt);
+  if (expiresAtDate > trip.departureAt) {
+    throw new BadRequestError('Release expiry must be before trip departure');
+  }
+  // P2 / BIZ-058: window must match the trip's window.
+  if (input.window !== trip.window) {
+    throw new BadRequestError(`Release window (${input.window}) does not match trip window (${trip.window})`);
+  }
 
   const ride = await db.ride.findFirst({
     where: { tripId: input.tripId, userId: session.id, status: 'booked' },
@@ -42,18 +56,25 @@ export async function POST_create_release({ session, body, ipAddress, userAgent 
     // Mark the seller's ride as 'released' and decrement trip.seatsBooked
     // so the freed seat is visible to other riders. The buyer will later
     // re-occupy it via POST_claim with a fresh Ride row + re-increment.
-    await tx.ride.update({ where: { id: ride.id }, data: { status: 'released' } });
-    await tx.trip.update({
-      where: { id: trip.id },
+    // CAS-guarded so concurrent releases can't double-decrement.
+    const rideCas = await tx.ride.updateMany({
+      where: { id: ride.id, status: 'booked' },
+      data: { status: 'released' },
+    });
+    if (rideCas.count === 0) throw new ConflictError('Ride is no longer booked (already released or cancelled)');
+    // P1-20 / BIZ-020: CAS-guarded decrement with lower bound.
+    const tripCas = await tx.trip.updateMany({
+      where: { id: trip.id, seatsBooked: { gt: 0 } },
       data: { seatsBooked: { decrement: 1 } },
     });
+    if (tripCas.count === 0) throw new ConflictError('Trip seatsBooked was already 0 — refusing to go negative');
     return tx.seatRelease.create({
       data: {
         userId: session.id,
         tripId: input.tripId,
         window: input.window,
         status: 'open',
-        expiresAt: new Date(input.expiresAt),
+        expiresAt: expiresAtDate,
       },
     });
   });
@@ -89,14 +110,13 @@ export async function POST_claim({ session, body, params, ipAddress, userAgent }
   const reference = `SC${createId()}`;
   const provider = getPaymentProvider(input.paymentMethod);
   const env = loadEnv();
-  const checkout = await provider.createCheckout({
-    merchOrderId: reference,
-    amount: Money.fromCents(fare),
-    description: `Seat claim for ${release.trip.route.origin} → ${release.trip.route.destination}`,
-    notifyUrl: env.TELEBIRR_NOTIFY_URL || `${env.APP_BASE_URL}/api/v1/webhooks/telebirr/notify`,
-    redirectUrl: env.TELEBIRR_REDIRECT_URL || `${env.APP_BASE_URL}/checkout/complete`,
-  });
 
+  // P1-21 / BIZ-004: create the SeatRelease claim + Payment row BEFORE calling
+  // createCheckout. Previously, createCheckout was called first — if the tx
+  // below rolled back (e.g. release already claimed by another buyer), the
+  // Telebirr order had been created with no matching Payment row. When the
+  // buyer completed payment at Telebirr, the webhook arrived for an unknown
+  // merchOrderId and the money was stuck with no record on our side.
   const claim = await db.$transaction(async (tx) => {
     // Mark release as claimed (atomic — only if still open).
     const updated = await tx.seatRelease.updateMany({
@@ -129,6 +149,28 @@ export async function POST_claim({ session, body, params, ipAddress, userAgent }
     await tx.payment.update({ where: { id: payment.id }, data: { seatClaimId: newClaim.id } });
     return newClaim;
   });
+
+  // Now that the Payment row has committed, create the Telebirr checkout.
+  // If this throws, mark the Payment failed + reopen the release so the
+  // user can retry cleanly.
+  let checkout: any;
+  try {
+    checkout = await provider.createCheckout({
+      merchOrderId: reference,
+      amount: Money.fromCents(fare),
+      description: `Seat claim for ${release.trip.route.origin} → ${release.trip.route.destination}`,
+      notifyUrl: env.TELEBIRR_NOTIFY_URL || `${env.APP_BASE_URL}/api/v1/webhooks/telebirr/notify`,
+      redirectUrl: env.TELEBIRR_REDIRECT_URL || `${env.APP_BASE_URL}/checkout/complete`,
+    });
+  } catch (err) {
+    // Reopen the release + fail the payment + fail the claim.
+    await db.$transaction(async (tx) => {
+      await tx.payment.updateMany({ where: { reference }, data: { status: 'failed' } });
+      await tx.seatClaim.updateMany({ where: { id: claim.id }, data: { status: 'refunded' } });
+      await tx.seatRelease.updateMany({ where: { id: release.id, status: 'claimed' }, data: { status: 'open' } });
+    }).catch(() => {});
+    throw err;
+  }
 
   await audit({
     actorId: session.id,

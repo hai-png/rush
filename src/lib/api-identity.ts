@@ -4,7 +4,7 @@ import { db } from '@/lib/db';
 import { setSessionCookie, clearSessionCookie } from '@/lib/api';
 import { hashPassword, verifyPassword, issueSession, verifySession, revokeSession, revokeAllSessionsForUser } from '@/lib/auth';
 import { EthiopianPhone } from '@/lib/phone';
-import { BadRequestError, ConflictError, UnauthorizedError, TwoFactorRequiredError, ForbiddenError } from '@/lib/errors';
+import { BadRequestError, ConflictError, UnauthorizedError, TwoFactorRequiredError, ForbiddenError, NotFoundError } from '@/lib/errors';
 import { sendOtp, verifyOtp } from '@/lib/otp';
 import { audit } from '@/lib/audit';
 import { CURRENT_TOS_VERSION } from '@/lib/env';
@@ -111,6 +111,18 @@ export async function POST_logout({ session }: any) {
   return res;
 }
 
+// P1 / API-011: POST /auth/logout-all — revoke every active session for the
+// current user. Useful when a user suspects their account is compromised
+// (e.g. lost phone) and wants to invalidate all sessions at once.
+export async function POST_logout_all({ session, ipAddress, userAgent }: any) {
+  if (!session) throw new UnauthorizedError();
+  await revokeAllSessionsForUser(session.id);
+  await audit({ actorId: session.id, action: 'user.logout_all', entityType: 'user', entityId: session.id, ipAddress, userAgent });
+  const res = NextResponse.json({ data: { ok: true } });
+  await clearSessionCookie(res);
+  return res;
+}
+
 export async function POST_refresh({ session, ipAddress, userAgent }: any) {
   if (!session) throw new UnauthorizedError();
   const user = await db.user.findUnique({ where: { id: session.id } });
@@ -155,6 +167,29 @@ export async function DELETE_session({ session, params }: any) {
     where: { id: params.id, userId: session!.id, revokedAt: null },
     data: { revokedAt: new Date() },
   });
+  return { status: 204 };
+}
+
+// P1 / API-012: admin endpoints to list + revoke any user's sessions.
+// Useful for incident response (e.g. suspected account compromise).
+export async function GET_admin_user_sessions({ session, params }: any) {
+  if (session.role !== 'platform_admin') throw new ForbiddenError('Admin only');
+  const rows = await db.session.findMany({
+    where: { userId: params.id, revokedAt: null, expiresAt: { gt: new Date() } },
+    orderBy: { createdAt: 'desc' },
+    select: { id: true, jti: true, userAgent: true, ipAddress: true, createdAt: true, expiresAt: true },
+  });
+  return { data: rows };
+}
+
+export async function DELETE_admin_user_session({ session, params }: any) {
+  if (session.role !== 'platform_admin') throw new ForbiddenError('Admin only');
+  const result = await db.session.updateMany({
+    where: { id: params.id, revokedAt: null },
+    data: { revokedAt: new Date() },
+  });
+  if (result.count === 0) throw new NotFoundError('Session not found or already revoked');
+  await audit({ actorId: session.id, action: 'admin.session_revoked', entityType: 'session', entityId: params.id });
   return { status: 204 };
 }
 
