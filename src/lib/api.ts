@@ -30,13 +30,12 @@ export type ApiOptions = {
   // Idempotency is auto-applied to POST with an Idempotency-Key header.
 };
 
-function clientIp(req: NextRequest): string | undefined {
+export function clientIp(req: NextRequest): string | undefined {
   const xff = req.headers.get('x-forwarded-for');
   if (xff) {
     const parts = xff.split(',').map(s => s.trim()).filter(Boolean);
     if (parts.length > 0) return parts[parts.length - 1];
   }
-  // Fall back to x-real-ip (set by some proxies) or undefined.
   return req.headers.get('x-real-ip') ?? undefined;
 }
 
@@ -70,7 +69,7 @@ const RATE_RULES: RateRule[] = [
 const DEFAULT_AUTHED = { limit: 100, windowSec: 60 };
 const DEFAULT_ANON = { limit: 60, windowSec: 60 };
 
-function rateLimitCheck(
+export function rateLimitCheck(
   path: string,
   method: string,
   ctx: { session: Session | null; body: any; ip: string | undefined },
@@ -126,7 +125,7 @@ setInterval(() => {
   }
 }, 5 * 60_000).unref?.();
 
-function readCookie(req: NextRequest, name: string): string | undefined {
+export function readCookie(req: NextRequest, name: string): string | undefined {
   const cookieHeader = req.headers.get('cookie') ?? '';
   for (const part of cookieHeader.split(';')) {
     const [k, ...v] = part.trim().split('=');
@@ -135,12 +134,12 @@ function readCookie(req: NextRequest, name: string): string | undefined {
   return undefined;
 }
 
-const CSRF_EXEMPT = [
+export const CSRF_EXEMPT = [
   /^\/api\/v1\/webhooks\//,
   /^\/api\/v1\/cron\//,
 ];
 
-async function csrfCheck(req: NextRequest): Promise<void> {
+export async function csrfCheck(req: NextRequest): Promise<void> {
   if (SAFE_METHODS.has(req.method)) return;
   if (CSRF_EXEMPT.some(re => re.test(req.nextUrl.pathname))) return;
 
@@ -175,7 +174,7 @@ const TOS_EXEMPT = [
   /^\/api\/v1\/cron/,
 ];
 
-function tosGate(path: string, session: Session | null): void {
+export function tosGate(path: string, session: Session | null): void {
   if (!session) return;
   if (TOS_EXEMPT.some(re => re.test(path))) return;
   if (session.tosVersion !== CURRENT_TOS_VERSION) {

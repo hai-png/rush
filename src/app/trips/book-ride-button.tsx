@@ -8,14 +8,22 @@ import {
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from '@/components/ui/select';
+import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import { api } from '@/lib/api-client';
 
 type Sub = { id: string; name: string; ridesIncluded: number; ridesUsed: number };
+type Pickup = { id: string; name: string; estimatedPickupTime: string };
 
-export function BookRideButton({ tripId, subs, seatsLeft }: { tripId: string; subs: Sub[]; seatsLeft: number }) {
+export function BookRideButton({ tripId, subs, seatsLeft, pickups = [] }: {
+  tripId: string;
+  subs: Sub[];
+  seatsLeft: number;
+  pickups?: Pickup[];
+}) {
   const [open, setOpen] = useState(false);
   const [subId, setSubId] = useState(subs[0]?.id ?? '');
+  const [pickupId, setPickupId] = useState<string>('');
   const [loading, setLoading] = useState(false);
 
   async function book() {
@@ -25,7 +33,11 @@ export function BookRideButton({ tripId, subs, seatsLeft }: { tripId: string; su
     }
     setLoading(true);
     try {
-      await api.post('/api/v1/rides', { tripId, subscriptionId: subId });
+      await api.post('/api/v1/rides', {
+        tripId,
+        subscriptionId: subId,
+        ...(pickupId && { pickupLocationId: pickupId }),
+      });
       toast.success('Ride booked');
       setOpen(false);
       window.location.href = '/dashboard/rider';
@@ -67,17 +79,35 @@ export function BookRideButton({ tripId, subs, seatsLeft }: { tripId: string; su
           <DialogTitle>Book this ride</DialogTitle>
           <DialogDescription>Pick which subscription to use. One ride credit will be consumed.</DialogDescription>
         </DialogHeader>
-        <div className="py-2">
-          <Select value={subId} onValueChange={setSubId}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
-            <SelectContent>
-              {subs.map(s => (
-                <SelectItem key={s.id} value={s.id}>
-                  {s.name} — {s.ridesIncluded === -1 ? 'unlimited' : `${s.ridesUsed}/${s.ridesIncluded} used`}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+        <div className="py-2 space-y-3">
+          <div className="space-y-1">
+            <Label className="text-xs text-muted-foreground">Subscription</Label>
+            <Select value={subId} onValueChange={setSubId}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {subs.map(s => (
+                  <SelectItem key={s.id} value={s.id}>
+                    {s.name} — {s.ridesIncluded === -1 ? 'unlimited' : `${s.ridesUsed}/${s.ridesIncluded} used`}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          {pickups.length > 0 && (
+            <div className="space-y-1">
+              <Label className="text-xs text-muted-foreground">Pickup location (optional)</Label>
+              <Select value={pickupId} onValueChange={setPickupId}>
+                <SelectTrigger><SelectValue placeholder="No preference" /></SelectTrigger>
+                <SelectContent>
+                  {pickups.map(p => (
+                    <SelectItem key={p.id} value={p.id}>
+                      {p.name} (~{p.estimatedPickupTime})
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>

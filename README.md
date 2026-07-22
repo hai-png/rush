@@ -128,6 +128,18 @@ The e2e test exercises: public catalog, rider registration + buy plan + Telebirr
 - Reply to support tickets + change status
 - Verify audit chain integrity at `/admin/audit-logs`
 
+## Mobile app
+
+A companion Expo React Native app lives in `apps/mobile/` (rider + contractor flows). It is a separate project with its own `package.json` — install and run independently:
+
+```bash
+cd apps/mobile
+npm install
+npx expo start
+```
+
+See `apps/mobile/README.md` for details. The mobile app talks to the web app's API at `http://10.0.2.2:3000` (Android emulator) or `http://localhost:3000` (web) — change `API_BASE` in `apps/mobile/src/lib/api.ts` for production.
+
 ## License
 
 Private.

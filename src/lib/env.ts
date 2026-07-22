@@ -83,6 +83,8 @@ export function loadEnv(): Env {
     TWILIO_FROM: process.env.TWILIO_FROM || '',
     RESEND_API_KEY: process.env.RESEND_API_KEY || '',
     RESEND_FROM: process.env.RESEND_FROM || '',
+    // Reserved for production hardening — currently read but not wired up.
+    // See DEPLOYMENT.md "Production hardening status" table.
     SENTRY_DSN: process.env.SENTRY_DSN || '',
     REDIS_URL: process.env.REDIS_URL || '',
   };

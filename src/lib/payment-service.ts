@@ -3,7 +3,6 @@ import { db } from '@/lib/db';
 import { Money } from '@/lib/money';
 import { BadRequestError, NotFoundError } from '@/lib/errors';
 import { getPaymentProvider } from '@/lib/payments';
-import { transitionSubscription } from '@/lib/subscription';
 import { enqueueNotification } from '@/lib/outbox';
 import { audit } from '@/lib/audit';
 import { createId } from '@/lib/id';
@@ -221,7 +220,10 @@ export async function scheduleRefund(paymentId: string, amount: Money, reason: s
 const BACKOFF_MIN = [1, 5, 15, 60, 240]; // shorter for dev
 
 export async function processRefundRetries(limit = 10): Promise<{ processed: number }> {
-  // Reset stale 'processing' rows.
+  // Reset stale 'processing' rows. Before resetting, we mark them as 'pending'
+  // WITHOUT immediately retrying — the next loop iteration will pick them up,
+  // and the refund call itself is idempotent on the Telebirr side (duplicate
+  // refund_request_no values are deduped by Telebirr and return REFUND_DUPLICATED).
   await db.refundRetry.updateMany({
     where: { status: 'processing', updatedAt: { lt: new Date(Date.now() - 15 * 60_000) } },
     data: { status: 'pending' },

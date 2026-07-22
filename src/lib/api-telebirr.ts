@@ -131,7 +131,12 @@ export async function POST_mandate_sign_url({ session, body }: any) {
   };
 }
 
-export async function GET_mandate({ params }: any) {
+export async function GET_mandate({ session, params }: any) {
+  // Mandates aren't persisted in our DB, so there's no per-user ownership
+  // concept. Restrict to platform_admin to prevent enumeration by any user.
+  if (session?.role !== 'platform_admin') {
+    throw new ForbiddenError('Admin only — mandate queries are admin-gated');
+  }
   const provider = getPaymentProvider('telebirr');
   if (!provider.queryMandate) {
     throw new BadRequestError('Subscription Payment not supported by current provider');
@@ -141,6 +146,9 @@ export async function GET_mandate({ params }: any) {
 }
 
 export async function POST_mandate_cancel({ session, params, ipAddress, userAgent }: any) {
+  if (session?.role !== 'platform_admin') {
+    throw new ForbiddenError('Admin only — mandate cancellation is admin-gated');
+  }
   const provider = getPaymentProvider('telebirr');
   if (!provider.cancelMandate) {
     throw new BadRequestError('Subscription Payment not supported by current provider');

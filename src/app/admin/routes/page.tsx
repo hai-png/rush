@@ -27,7 +27,7 @@ export default async function AdminRoutesPage() {
                   <div className="font-medium">{r.origin} → {r.destination}</div>
                   <div className="text-xs text-muted-foreground">{r.distanceKm} km · {r.durationMin} min</div>
                 </div>
-                <div className="text-xs">{(r.fareCents / 100).toFixed(0)} ETB</div>
+                <div className="text-xs">{(r.fareCents / 100).toFixed(2)} ETB</div>
               </div>
             ))}
           </CardContent>

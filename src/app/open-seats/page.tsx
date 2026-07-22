@@ -58,7 +58,7 @@ export default async function OpenSeatsPage() {
                   <div className="flex items-center justify-between text-sm">
                     <div>
                       <div className="text-xs text-muted-foreground">Fare</div>
-                      <div className="font-semibold">{(r.trip.route.fareCents / 100).toFixed(0)} ETB</div>
+                      <div className="font-semibold">{(r.trip.route.fareCents / 100).toFixed(2)} ETB</div>
                     </div>
                     <div className="text-xs text-muted-foreground">Expires {new Date(r.expiresAt).toLocaleTimeString()}</div>
                   </div>

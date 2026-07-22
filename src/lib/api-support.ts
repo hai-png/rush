@@ -87,15 +87,31 @@ export async function POST_message({ session, params, body }: any) {
     return m;
   });
 
-  const notifyUserId = session.role === 'platform_admin' ? ticket.userId : undefined;
-  if (notifyUserId) {
+  // Notify the other party: admin replies notify the rider; rider replies
+  // notify all platform admins (so they know to look at the ticket).
+  if (session.role === 'platform_admin') {
     await enqueueNotification({
-      userId: notifyUserId,
+      userId: ticket.userId,
       type: 'support_reply',
       title: 'New reply on your ticket',
       body: input.body.slice(0, 100),
       link: `/tickets/${ticket.id}`,
     });
+  } else {
+    // Rider replied — notify all platform admins.
+    const admins = await db.user.findMany({
+      where: { role: 'platform_admin', isActive: true },
+      select: { id: true },
+    });
+    for (const a of admins) {
+      await enqueueNotification({
+        userId: a.id,
+        type: 'support_reply',
+        title: `Rider replied to ticket: ${ticket.subject}`,
+        body: input.body.slice(0, 100),
+        link: `/admin/tickets`,
+      }).catch(() => {});
+    }
   }
   return { status: 201, data: msg };
 }

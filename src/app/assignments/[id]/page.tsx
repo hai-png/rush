@@ -42,7 +42,7 @@ export default async function AssignmentDetailPage({ params }: { params: Promise
             Driver: {assignment.contractor.name} · Rating: {assignment.contractor.contractorProfile?.rating.toFixed(1) ?? '—'} · {assignment.shuttle.plate} ({assignment.shuttle.vehicleType})
           </div>
           <div className="flex flex-wrap gap-2 mt-2">
-            <Badge variant="outline">Fare: {(assignment.route.fareCents / 100).toFixed(0)} ETB</Badge>
+            <Badge variant="outline">Fare: {(assignment.route.fareCents / 100).toFixed(2)} ETB</Badge>
             <Badge variant="outline">Schedule: {pattern.days?.join(', ')}</Badge>
             <Badge variant="outline">Windows: {pattern.windows?.join(', ')}</Badge>
             <Badge>{assignment.status}</Badge>

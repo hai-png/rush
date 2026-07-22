@@ -44,7 +44,7 @@ export default async function PlansPage() {
               </CardHeader>
               <CardContent>
                 <div className="text-3xl font-bold mb-1">
-                  {plan.priceCents === 0 ? 'Free' : `${(plan.priceCents / 100).toFixed(0)} ETB`}
+                  {plan.priceCents === 0 ? 'Free' : `${(plan.priceCents / 100).toFixed(2)} ETB`}
                   <span className="text-sm font-normal text-muted-foreground"> / {plan.durationDays}d</span>
                 </div>
                 <div className="text-sm text-muted-foreground mb-4">

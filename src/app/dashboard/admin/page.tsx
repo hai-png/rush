@@ -9,18 +9,20 @@ import { SignOutButton } from '@/components/sign-out-button';
 export default async function AdminDashboardPage() {
   await requireRole('platform_admin');
 
-  const [users, payments, subs, tickets, auditLogs, recentPayments] = await Promise.all([
+  const [users, payments, subs, tickets, auditLogs, revenueResult, recentPayments] = await Promise.all([
     db.user.count(),
     db.payment.count(),
     db.subscription.count(),
     db.supportTicket.count({ where: { status: { in: ['open', 'in_progress'] } } }),
     db.auditLog.count(),
+    db.payment.aggregate({ _sum: { amountCents: true }, where: { status: 'completed' } }),
     db.payment.findMany({
       orderBy: { createdAt: 'desc' },
       take: 10,
       include: { user: { select: { name: true, phone: true } }, subscription: { include: { plan: true } } },
     }),
   ]);
+  const revenueCents = revenueResult._sum.amountCents ?? 0;
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -47,12 +49,13 @@ export default async function AdminDashboardPage() {
       </header>
       <main className="flex-1 container mx-auto px-4 py-8 max-w-6xl">
         <h1 className="text-2xl font-bold mb-6">Admin overview</h1>
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3 mb-6">
+        <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 mb-6">
           <Stat label="Users" value={users} />
           <Stat label="Payments" value={payments} />
           <Stat label="Subscriptions" value={subs} />
           <Stat label="Open tickets" value={tickets} />
           <Stat label="Audit log rows" value={auditLogs} />
+          <Stat label="Revenue" value={(revenueCents / 100).toFixed(2)} suffix="ETB" />
         </div>
         <section>
           <h2 className="text-lg font-semibold mb-3">Recent payments</h2>
@@ -67,7 +70,7 @@ export default async function AdminDashboardPage() {
                     <div className="text-xs text-muted-foreground">{p.user?.name} · {p.user?.phone}</div>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span>{(p.amountCents / 100).toFixed(0)} ETB</span>
+                    <span>{(p.amountCents / 100).toFixed(2)} ETB</span>
                     <Badge variant="outline">{p.status}</Badge>
                   </div>
                 </div>
@@ -80,12 +83,12 @@ export default async function AdminDashboardPage() {
   );
 }
 
-function Stat({ label, value }: { label: string; value: number }) {
+function Stat({ label, value, suffix }: { label: string; value: number | string; suffix?: string }) {
   return (
     <Card>
       <CardContent className="py-4">
         <div className="text-xs text-muted-foreground uppercase">{label}</div>
-        <div className="text-2xl font-bold">{value}</div>
+        <div className="text-2xl font-bold">{value}{suffix && <span className="text-sm font-normal ml-1">{suffix}</span>}</div>
       </CardContent>
     </Card>
   );

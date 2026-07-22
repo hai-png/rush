@@ -169,6 +169,15 @@ export async function GET_export_csv({ session, params }: any) {
 export async function DELETE_route({ session, params, ipAddress, userAgent }: any) {
   const route = await db.route.findUnique({ where: { id: params.id } });
   if (!route) throw new NotFoundError('Route not found');
+  // Block soft-delete if there are upcoming trips — deactivating a route
+  // mid-cycle strands riders with booked rides. Admin should cancel the
+  // trips first (or wait for them to complete).
+  const upcomingTrips = await db.trip.count({
+    where: { routeId: params.id, status: 'scheduled', departureAt: { gt: new Date() } },
+  });
+  if (upcomingTrips > 0) {
+    throw new BadRequestError(`Cannot deactivate route with ${upcomingTrips} upcoming scheduled trip(s). Cancel or complete them first.`);
+  }
   await db.route.update({ where: { id: params.id }, data: { isActive: false } });
   await audit({ actorId: session.id, action: 'route.deleted', entityType: 'route', entityId: params.id, ipAddress, userAgent });
   return { data: { id: params.id, isActive: false } };
@@ -177,6 +186,13 @@ export async function DELETE_route({ session, params, ipAddress, userAgent }: an
 export async function DELETE_shuttle({ session, params, ipAddress, userAgent }: any) {
   const shuttle = await db.shuttle.findUnique({ where: { id: params.id } });
   if (!shuttle) throw new NotFoundError('Shuttle not found');
+  // Same guard as routes — don't strand booked riders.
+  const upcomingTrips = await db.trip.count({
+    where: { shuttleId: params.id, status: 'scheduled', departureAt: { gt: new Date() } },
+  });
+  if (upcomingTrips > 0) {
+    throw new BadRequestError(`Cannot deactivate shuttle with ${upcomingTrips} upcoming scheduled trip(s). Cancel or complete them first.`);
+  }
   await db.shuttle.update({ where: { id: params.id }, data: { isActive: false } });
   await audit({ actorId: session.id, action: 'shuttle.deleted', entityType: 'shuttle', entityId: params.id, ipAddress, userAgent });
   return { data: { id: params.id, isActive: false } };

@@ -1,7 +1,8 @@
 'use client';
 
 import { useState } from 'react';
-import { useRouter } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { Suspense } from 'react';
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -11,8 +12,10 @@ import { toast } from 'sonner';
 import { api, ApiError } from '@/lib/api-client';
 import { Bus, ChevronLeft } from 'lucide-react';
 
-export default function LoginPage() {
+function LoginInner() {
   const router = useRouter();
+  const searchParams = useSearchParams();
+  const next = searchParams.get('next');
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [code, setCode] = useState('');
@@ -25,7 +28,9 @@ export default function LoginPage() {
       const res = await api.post<{ user: { id: string; role: string; phone: string }; requiresTosAcceptance: boolean }>('/api/v1/auth/token', { phone, password, code: code || undefined });
       toast.success('Signed in');
       if (res.requiresTosAcceptance) {
-        router.push('/tos/accept');
+        router.push(next ? `/tos/accept?next=${encodeURIComponent(next)}` : '/tos/accept');
+      } else if (next) {
+        router.push(next);
       } else {
         routeByRole(res.user.role);
       }
@@ -90,5 +95,13 @@ export default function LoginPage() {
         </CardContent>
       </Card>
     </div>
+  );
+}
+
+export default function LoginPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen flex items-center justify-center">Loading…</div>}>
+      <LoginInner />
+    </Suspense>
   );
 }

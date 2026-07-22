@@ -113,7 +113,7 @@ export default async function RiderDashboardPage() {
                       {recentPayments.map(p => (
                         <div key={p.id} className="py-2 text-sm flex justify-between">
                           <span className="font-mono text-xs">{p.reference}</span>
-                          <span>{(p.amountCents / 100).toFixed(0)} ETB · <Badge variant="outline">{p.status}</Badge></span>
+                          <span>{(p.amountCents / 100).toFixed(2)} ETB · <Badge variant="outline">{p.status}</Badge></span>
                         </div>
                       ))}
                     </div>

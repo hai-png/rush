@@ -302,7 +302,7 @@ export async function recomputeContractorRating(contractorId: string): Promise<v
 }
 
 const FaqInput = z.object({
-  category: z.enum(['general', 'billing', 'routes', 'shuttle', 'account', 'corporate']),
+  category: z.enum(['general', 'billing', 'route', 'shuttle', 'account', 'corporate', 'other']).default('general'),
   question: z.string().min(1).max(500),
   answer: z.string().min(1).max(5000),
   sortOrder: z.number().int().default(0),

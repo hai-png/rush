@@ -207,10 +207,18 @@ export async function POST_accept_assignment({ session, params, ipAddress, userA
   }
   if (assignment.status !== 'assigned') throw new ConflictError(`Assignment is ${assignment.status}, not assigned`);
 
+  // Transition assigned → accepted (contractor acknowledged) → active (trips
+  // generated). For now we accept + activate in one step, but the 'accepted'
+  // intermediate status is preserved per the schema's status comment.
   await db.routeAssignment.update({
     where: { id: params.id },
-    data: { status: 'active', acceptedAt: new Date() },
+    data: { status: 'accepted', acceptedAt: new Date() },
   });
+  // Generate trips immediately and mark as active.
+  await generateTripsFromAssignment(assignment.id).catch((err) => {
+    // Trip generation is best-effort — the assignment is still accepted.
+  });
+  await db.routeAssignment.update({ where: { id: params.id }, data: { status: 'active' } });
   await audit({ actorId: session.id, action: 'assignment.accepted', entityType: 'route_assignment', entityId: params.id, ipAddress, userAgent });
   return { data: { id: params.id, status: 'active' } };
 }

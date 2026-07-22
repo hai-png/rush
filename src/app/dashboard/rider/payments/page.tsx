@@ -41,11 +41,11 @@ export default async function RiderPaymentsPage() {
                       {new Date(p.createdAt).toLocaleString()} · {p.method} · {p.subscription?.plan?.name ?? '—'}
                     </div>
                     {p.refundAmountCents > 0 && (
-                      <div className="text-xs text-orange-600">Refunded: {(p.refundAmountCents / 100).toFixed(0)} ETB</div>
+                      <div className="text-xs text-orange-600">Refunded: {(p.refundAmountCents / 100).toFixed(2)} ETB</div>
                     )}
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="font-semibold">{(p.amountCents / 100).toFixed(0)} ETB</span>
+                    <span className="font-semibold">{(p.amountCents / 100).toFixed(2)} ETB</span>
                     <Badge variant="outline">{p.status}</Badge>
                   </div>
                 </div>

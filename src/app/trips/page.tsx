@@ -18,7 +18,10 @@ export default async function TripsPage({ searchParams }: { searchParams: Promis
       departureAt: { gt: new Date() },
       ...(assignmentFilter && { assignmentId: assignmentFilter }),
     },
-    include: { route: true, shuttle: { include: { contractor: { select: { name: true } } } } },
+    include: {
+      route: { include: { pickups: { where: { isActive: true }, orderBy: { sortOrder: 'asc' } } } },
+      shuttle: { include: { contractor: { select: { name: true } } } },
+    },
     orderBy: { departureAt: 'asc' },
     take: 50,
   });
@@ -61,7 +64,7 @@ export default async function TripsPage({ searchParams }: { searchParams: Promis
                           {new Date(t.departureAt).toLocaleString()} · {t.window} · {t.shuttle.plate} ({t.shuttle.vehicleType})
                         </div>
                         <div className="text-xs text-muted-foreground">
-                          Driver: {t.shuttle.contractor.name} · fare {(t.route.fareCents / 100).toFixed(0)} ETB
+                          Driver: {t.shuttle.contractor.name} · fare {(t.route.fareCents / 100).toFixed(2)} ETB
                         </div>
                       </div>
                       <div className="flex flex-col items-end gap-1">
@@ -69,7 +72,12 @@ export default async function TripsPage({ searchParams }: { searchParams: Promis
                           {seatsLeft > 0 ? `${seatsLeft} seats left` : 'full'}
                         </Badge>
                         {session.role === 'rider' && (
-                          <BookRideButton tripId={t.id} subs={subs.map(s => ({ id: s.id, name: s.plan.name, ridesIncluded: s.plan.ridesIncluded, ridesUsed: s.ridesUsed }))} seatsLeft={seatsLeft} />
+                          <BookRideButton
+                            tripId={t.id}
+                            subs={subs.map(s => ({ id: s.id, name: s.plan.name, ridesIncluded: s.plan.ridesIncluded, ridesUsed: s.ridesUsed }))}
+                            seatsLeft={seatsLeft}
+                            pickups={t.route.pickups.map(p => ({ id: p.id, name: p.name, estimatedPickupTime: p.estimatedPickupTime }))}
+                          />
                         )}
                       </div>
                     </div>

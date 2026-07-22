@@ -75,6 +75,7 @@ Register `https://<your-domain>/api/v1/webhooks/telebirr/notify` with Ethio tele
 | Payments | Mock Telebirr | Real Telebirr H5/InApp/Subscription | Auto-detects creds |
 | Scheduler | In-process `setInterval` | External cron | Ready |
 | Error tracking | Console | Sentry | Stub — `SENTRY_DSN` read but not initialized |
+| Mobile app | Expo (separate project in `apps/mobile/`) | Standalone build | Ready — see `apps/mobile/README.md` |
 
 ## Security invariants
 

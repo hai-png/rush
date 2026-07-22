@@ -54,7 +54,7 @@ export default async function ListSeatPage() {
                         {new Date(r.trip.departureAt).toLocaleString()} · {r.trip.shuttle.plate}
                       </div>
                     </div>
-                    <Badge variant="outline">fare {(r.trip.route.fareCents / 100).toFixed(0)} ETB</Badge>
+                    <Badge variant="outline">fare {(r.trip.route.fareCents / 100).toFixed(2)} ETB</Badge>
                   </div>
                   <ListSeatForm ride={r} />
                 </CardContent>

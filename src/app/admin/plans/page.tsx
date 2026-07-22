@@ -28,7 +28,7 @@ export default async function AdminPlansPage() {
                   <div className="text-xs text-muted-foreground">{p.description}</div>
                 </div>
                 <div className="text-right text-xs">
-                  <div>{(p.priceCents / 100).toFixed(0)} ETB · {p.durationDays}d</div>
+                  <div>{(p.priceCents / 100).toFixed(2)} ETB · {p.durationDays}d</div>
                   <div className="text-muted-foreground">{p.ridesIncluded === -1 ? 'unlimited' : `${p.ridesIncluded} rides`}{p.isTrial ? ' · trial' : ''}</div>
                 </div>
               </div>

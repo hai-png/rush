@@ -2,9 +2,9 @@ import Link from 'next/link';
 import { requireRole } from '@/lib/session-server';
 import { db } from '@/lib/db';
 import { Card, CardContent } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { SignOutButton } from '@/components/sign-out-button';
+import { UserActions } from './user-actions';
 
 export default async function AdminUsersPage() {
   await requireRole('platform_admin');
@@ -27,15 +27,16 @@ export default async function AdminUsersPage() {
         <Card>
           <CardContent className="py-3 divide-y">
             {users.map(u => (
-              <div key={u.id} className="py-2 text-sm flex items-center justify-between">
-                <div>
+              <div key={u.id} className="py-2 text-sm flex items-center justify-between gap-3">
+                <div className="min-w-0">
                   <div className="font-medium">{u.name} <span className="text-xs text-muted-foreground">· {u.phone}</span></div>
                   <div className="text-xs text-muted-foreground">{u.email ?? '—'} · created {new Date(u.createdAt).toLocaleDateString()}</div>
                 </div>
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 shrink-0">
                   <Badge variant="outline">{u.role}</Badge>
                   {u.twoFactorEnabled && <Badge>2FA</Badge>}
                   {!u.isActive && <Badge variant="destructive">inactive</Badge>}
+                  <UserActions userId={u.id} currentRole={u.role} isActive={u.isActive} />
                 </div>
               </div>
             ))}

@@ -34,8 +34,8 @@ export default async function AdminPaymentsPage() {
                     <div className="text-xs text-muted-foreground">{p.user.name} · {p.user.phone} · {p.subscription?.plan?.name ?? '—'}</div>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span>{(p.amountCents / 100).toFixed(0)} ETB</span>
-                    {p.refundAmountCents > 0 && <span className="text-xs text-muted-foreground">refunded {(p.refundAmountCents / 100).toFixed(0)}</span>}
+                    <span>{(p.amountCents / 100).toFixed(2)} ETB</span>
+                    {p.refundAmountCents > 0 && <span className="text-xs text-muted-foreground">refunded {(p.refundAmountCents / 100).toFixed(2)}</span>}
                     <Badge variant="outline">{p.status}</Badge>
                     <Badge>{p.method}</Badge>
                   </div>

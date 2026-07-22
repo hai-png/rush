@@ -52,18 +52,6 @@ export async function POST_create({ session, body, ipAddress, userAgent }: any) 
   const now = new Date();
   const endDate = new Date(now.getTime() + plan.durationDays * 24 * 3600_000);
 
-  const sub = await db.subscription.create({
-    data: {
-      userId: session.id,
-      planId: plan.id,
-      corporateId,
-      status: 'pending_payment',
-      startDate: now,
-      endDate,
-    },
-    include: { plan: true },
-  });
-
   let riderAmountCents = plan.priceCents;
   let corporateSubsidyCents = 0;
   if (corporateId) {
@@ -87,15 +75,32 @@ export async function POST_create({ session, body, ipAddress, userAgent }: any) 
     redirectUrl: env.TELEBIRR_REDIRECT_URL || `${env.APP_BASE_URL}/checkout/complete`,
   });
 
-  await db.payment.create({
-    data: {
-      reference,
-      userId: session.id,
-      subscriptionId: sub.id,
-      method: input.paymentMethod,
-      amountCents: riderAmountCents,
-      status: 'pending',
-    },
+  // Create subscription + payment atomically — without this, a payment-create
+  // failure would leave an orphaned pending_payment subscription with no
+  // payment record the user could retry.
+  const sub = await db.$transaction(async (tx) => {
+    const created = await tx.subscription.create({
+      data: {
+        userId: session.id,
+        planId: plan.id,
+        corporateId,
+        status: 'pending_payment',
+        startDate: now,
+        endDate,
+      },
+      include: { plan: true },
+    });
+    await tx.payment.create({
+      data: {
+        reference,
+        userId: session.id,
+        subscriptionId: created.id,
+        method: input.paymentMethod,
+        amountCents: riderAmountCents,
+        status: 'pending',
+      },
+    });
+    return created;
   });
 
   await audit({
@@ -193,27 +198,30 @@ export async function POST_renew({ session, params, body, ipAddress, userAgent }
 
   const now = new Date();
   const endDate = new Date(now.getTime() + sub.plan.durationDays * 24 * 3600_000);
-  const newSub = await db.subscription.create({
-    data: {
-      userId: sub.userId,
-      planId: sub.planId,
-      corporateId: sub.corporateId,
-      status: 'pending_payment',
-      startDate: now,
-      endDate,
-    },
-    include: { plan: true },
-  });
-
-  await db.payment.create({
-    data: {
-      reference,
-      userId: sub.userId,
-      subscriptionId: newSub.id,
-      method: paymentMethod,
-      amountCents: riderAmountCents,
-      status: 'pending',
-    },
+  // Atomic subscription + payment creation (same fix as POST_create).
+  const newSub = await db.$transaction(async (tx) => {
+    const created = await tx.subscription.create({
+      data: {
+        userId: sub.userId,
+        planId: sub.planId,
+        corporateId: sub.corporateId,
+        status: 'pending_payment',
+        startDate: now,
+        endDate,
+      },
+      include: { plan: true },
+    });
+    await tx.payment.create({
+      data: {
+        reference,
+        userId: sub.userId,
+        subscriptionId: created.id,
+        method: paymentMethod,
+        amountCents: riderAmountCents,
+        status: 'pending',
+      },
+    });
+    return created;
   });
 
   await audit({
@@ -235,15 +243,8 @@ export async function POST_renew({ session, params, body, ipAddress, userAgent }
   };
 }
 
-export async function DELETE_subscription({ session, params, ipAddress, userAgent }: any) {
-  const sub = await db.subscription.findUnique({ where: { id: params.id } });
-  if (!sub) throw new NotFoundError('Subscription not found');
-  if (sub.userId !== session.id && session.role !== 'platform_admin') {
-    throw new NotFoundError('Subscription not found');
-  }
-  if (sub.status === 'cancelled') throw new ConflictError('Already cancelled');
-  if (sub.status === 'expired') throw new ConflictError('Already expired');
-  await db.subscription.update({ where: { id: sub.id }, data: { status: 'cancelled', cancelledAt: new Date() } });
-  await audit({ actorId: session.id, action: 'subscription.cancelled', entityType: 'subscription', entityId: sub.id, ipAddress, userAgent });
-  return { data: { id: sub.id, status: 'cancelled' } };
+export async function DELETE_subscription(ctx: any) {
+  // Identical to POST /subscriptions/:id/cancel — kept for REST-style clients
+  // who prefer DELETE for removal. Delegates to avoid drift.
+  return POST_cancel(ctx);
 }

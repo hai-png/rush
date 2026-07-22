@@ -515,7 +515,7 @@ model TicketMessage {
 
 model FaqArticle {
   id         String   @id @default(cuid())
-  category   String   // billing | routes | shuttle | account | corporate | general
+  category   String   // general | billing | route | shuttle | account | corporate | other
   question   String
   answer     String
   sortOrder  Int      @default(0)

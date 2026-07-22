@@ -58,27 +58,20 @@ async function drainOutbox(): Promise<void> {
         const payload = JSON.parse(evt.payload);
         switch (evt.channel) {
           case 'notification':
-            // Notification row already written by enqueueNotification; just log.
-            logger.info({ userId: payload.userId, title: payload.title }, '[outbox:notification]');
+            // No-op: enqueueNotification already wrote the Notification row.
+            // The outbox event exists only for retry observability.
             break;
           case 'sms':
-            // Send via real SMS provider (Twilio or console fallback).
             const smsResult = await getSmsProvider().send(payload.phone, payload.body);
             if (!smsResult.ok) throw new Error(smsResult.error || 'SMS send failed');
             break;
           case 'email':
-            // Send via real email provider (Resend or console fallback).
             const emailResult = await getEmailProvider().send(payload.email, payload.subject, payload.html || payload.body);
             if (!emailResult.ok) throw new Error(emailResult.error || 'Email send failed');
             break;
-          case 'refund':
-            logger.info({ paymentId: payload.paymentId }, '[outbox:refund]');
-            break;
-          case 'audit':
-            logger.info({ action: payload.action }, '[outbox:audit]');
-            break;
-          case 'webhook':
-            logger.info({ url: payload.url }, '[outbox:webhook]');
+          default:
+            // Unknown channel — log + mark delivered so we don't retry forever.
+            logger.warn({ channel: evt.channel, id: evt.id }, '[outbox] unknown channel');
             break;
         }
         await db.outboxEvent.update({
