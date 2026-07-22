@@ -6,6 +6,17 @@ import { getPaymentProvider } from '@/lib/payments';
 import { loadEnv } from '@/lib/env';
 import { audit } from '@/lib/audit';
 import { createId } from '@/lib/id';
+import { enqueueNotification } from '@/lib/outbox';
+import { logger } from '@/lib/logger';
+
+// Single source of truth for corporate subsidy calculation (P2-9, DB-052, BIZ-062).
+export function computeCorporateSubsidy(priceCents: number, subsidyPercent: number): { riderAmountCents: number; corporateSubsidyCents: number } {
+  const corporateSubsidyCents = Math.round(priceCents * Math.max(0, Math.min(100, subsidyPercent)) / 100);
+  return {
+    corporateSubsidyCents,
+    riderAmountCents: priceCents - corporateSubsidyCents,
+  };
+}
 
 export async function GET_list({ session }: any) {
   const subs = await db.subscription.findMany({
@@ -28,7 +39,7 @@ export async function POST_create({ session, body, ipAddress, userAgent }: any) 
   const plan = await db.subscriptionPlan.findUnique({ where: { id: input.planId } });
   if (!plan || !plan.isActive) throw new NotFoundError('Plan not found');
 
-  // Trial-only-once check
+  // Trial-only-once check (P1-28 race condition: re-validated inside the tx below).
   if (plan.isTrial) {
     const priorTrial = await db.subscription.findFirst({
       where: { userId: session.id, plan: { isTrial: true } },
@@ -37,6 +48,8 @@ export async function POST_create({ session, body, ipAddress, userAgent }: any) 
   }
 
   let corporateId: string | undefined;
+  let corporateSubsidyCents = 0;
+  let riderAmountCents = plan.priceCents;
   if (input.corporateCode) {
     const corp = await db.corporate.findUnique({ where: { code: input.corporateCode } });
     if (!corp || !corp.isActive || corp.deletedAt) throw new BadRequestError('Invalid corporate code');
@@ -47,38 +60,35 @@ export async function POST_create({ session, body, ipAddress, userAgent }: any) 
       throw new BadRequestError('You are not an approved member of this corporate');
     }
     corporateId = corp.id;
+    const subsidy = computeCorporateSubsidy(plan.priceCents, corp.subsidyPercent);
+    corporateSubsidyCents = subsidy.corporateSubsidyCents;
+    riderAmountCents = subsidy.riderAmountCents;
+  }
+
+  // P1-27 / BIZ-027: reject zero-amount checkouts (100% subsidy) — Telebirr rejects them
+  // and we'd end up with a stuck pending_payment subscription.
+  if (riderAmountCents <= 0) {
+    throw new BadRequestError('Corporate subsidy cannot cover 100% of the plan price — please contact support');
   }
 
   const now = new Date();
   const endDate = new Date(now.getTime() + plan.durationDays * 24 * 3600_000);
 
-  let riderAmountCents = plan.priceCents;
-  let corporateSubsidyCents = 0;
-  if (corporateId) {
-    const corp = await db.corporate.findUnique({ where: { id: corporateId } });
-    if (corp) {
-      corporateSubsidyCents = Math.round(plan.priceCents * corp.subsidyPercent / 100);
-      riderAmountCents = plan.priceCents - corporateSubsidyCents;
-    }
-  }
-
   const reference = `PO${createId()}`;
   const provider = getPaymentProvider(input.paymentMethod);
   const env = loadEnv();
-  const checkout = await provider.createCheckout({
-    merchOrderId: reference,
-    amount: Money.fromCents(riderAmountCents),
-    description: corporateSubsidyCents > 0
-      ? `${plan.name} subscription (${100 - Math.round(corporateSubsidyCents / plan.priceCents * 100)}% after corporate subsidy)`
-      : `${plan.name} subscription`,
-    notifyUrl: env.TELEBIRR_NOTIFY_URL || `${env.APP_BASE_URL}/api/v1/webhooks/telebirr/notify`,
-    redirectUrl: env.TELEBIRR_REDIRECT_URL || `${env.APP_BASE_URL}/checkout/complete`,
-  });
 
-  // Create subscription + payment atomically — without this, a payment-create
-  // failure would leave an orphaned pending_payment subscription with no
-  // payment record the user could retry.
+  // Create subscription + payment atomically (already done in original code).
+  // P1-28: re-check trial inside the tx so two parallel POST /subscriptions calls
+  // for a trial plan can't both succeed.
   const sub = await db.$transaction(async (tx) => {
+    if (plan.isTrial) {
+      const priorTrialInTx = await tx.subscription.findFirst({
+        where: { userId: session.id, plan: { isTrial: true } },
+        select: { id: true },
+      });
+      if (priorTrialInTx) throw new ConflictError('You have already used the trial plan');
+    }
     const created = await tx.subscription.create({
       data: {
         userId: session.id,
@@ -102,6 +112,27 @@ export async function POST_create({ session, body, ipAddress, userAgent }: any) 
     });
     return created;
   });
+
+  // Create the Telebirr checkout *after* the sub+payment row commits, so if
+  // createCheckout throws we still have a pending Payment that the user can retry.
+  // (P1-21 — orphaned Telebirr order if the tx rolls back.)
+  let checkout: any;
+  try {
+    checkout = await provider.createCheckout({
+      merchOrderId: reference,
+      amount: Money.fromCents(riderAmountCents),
+      description: corporateSubsidyCents > 0
+        ? `${plan.name} subscription (${100 - Math.round(corporateSubsidyCents / plan.priceCents * 100)}% after corporate subsidy)`
+        : `${plan.name} subscription`,
+      notifyUrl: env.TELEBIRR_NOTIFY_URL || `${env.APP_BASE_URL}/api/v1/webhooks/telebirr/notify`,
+      redirectUrl: env.TELEBIRR_REDIRECT_URL || `${env.APP_BASE_URL}/checkout/complete`,
+    });
+  } catch (err) {
+    // Mark the Payment as failed so the user can retry cleanly; the subscription
+    // stays pending_payment and can be re-checked-out via POST /payments/checkout.
+    await db.payment.updateMany({ where: { reference }, data: { status: 'failed' } }).catch(() => {});
+    throw err;
+  }
 
   await audit({
     actorId: session.id,
@@ -134,6 +165,8 @@ export async function GET_one({ session, params }: any) {
   return { data: sub };
 }
 
+// Cascade-cancel future rides when a subscription is cancelled (P0-3 / BIZ-005).
+// Restore trip.seatsBooked for each cancelled ride so other riders can book.
 export async function POST_cancel({ session, params, ipAddress, userAgent }: any) {
   const sub = await db.subscription.findUnique({ where: { id: params.id } });
   if (!sub) throw new NotFoundError('Subscription not found');
@@ -143,18 +176,64 @@ export async function POST_cancel({ session, params, ipAddress, userAgent }: any
   if (sub.status === 'cancelled') throw new ConflictError('Already cancelled');
   if (sub.status === 'expired') throw new ConflictError('Already expired');
 
-  await db.subscription.update({
-    where: { id: sub.id },
-    data: { status: 'cancelled', cancelledAt: new Date() },
+  const before = sub;
+  const cancelledRides = await db.$transaction(async (tx) => {
+    const subCas = await tx.subscription.updateMany({
+      where: { id: sub.id, status: { in: ['active', 'pending_payment'] } },
+      data: { status: 'cancelled', cancelledAt: new Date() },
+    });
+    if (subCas.count === 0) throw new ConflictError('Subscription is no longer in a cancellable state');
+
+    // Find rides that need to be cancelled (only future trips, status booked).
+    const ridesToCancel = await tx.ride.findMany({
+      where: {
+        subscriptionId: sub.id,
+        status: 'booked',
+        trip: { status: 'scheduled', departureAt: { gt: new Date() } },
+      },
+      select: { id: true, tripId: true },
+    });
+
+    if (ridesToCancel.length > 0) {
+      await tx.ride.updateMany({
+        where: { id: { in: ridesToCancel.map(r => r.id) } },
+        data: { status: 'cancelled' },
+      });
+      // Decrement seatsBooked on each affected trip (CAS guarded).
+      const tripIds = [...new Set(ridesToCancel.map(r => r.tripId))];
+      for (const tripId of tripIds) {
+        await tx.trip.updateMany({
+          where: { id: tripId, seatsBooked: { gt: 0 } },
+          data: { seatsBooked: { decrement: 1 } },
+        });
+      }
+    }
+    return ridesToCancel;
   });
+
+  // Notify the user.
+  try {
+    await enqueueNotification({
+      userId: sub.userId,
+      type: 'subscription_cancelled',
+      title: 'Subscription cancelled',
+      body: `Your subscription has been cancelled. ${cancelledRides.length} future ${cancelledRides.length === 1 ? 'ride was' : 'rides were'} also cancelled.`,
+      link: '/dashboard/rider',
+    });
+  } catch (err) {
+    logger.error({ err: (err as Error).message }, '[sub.cancel] notify failed');
+  }
+
   await audit({
     actorId: session.id,
     action: 'subscription.cancelled',
     entityType: 'subscription',
     entityId: sub.id,
+    before,
+    after: { status: 'cancelled', cancelledRides: cancelledRides.length },
     ipAddress, userAgent,
   });
-  return { data: { id: sub.id, status: 'cancelled' } };
+  return { data: { id: sub.id, status: 'cancelled', cancelledRides: cancelledRides.length } };
 }
 
 export async function POST_renew({ session, params, body, ipAddress, userAgent }: any) {
@@ -166,9 +245,9 @@ export async function POST_renew({ session, params, body, ipAddress, userAgent }
   if (sub.userId !== session.id && session.role !== 'platform_admin') {
     throw new NotFoundError('Subscription not found');
   }
+  if (sub.status === 'cancelled') throw new ConflictError('Cannot renew a cancelled subscription');
 
-  // Trial-only-once check (matches POST_create). Without this, a user could
-  // renew a trial plan indefinitely since renew creates a new subscription row.
+  // Trial-only-once check.
   if (sub.plan.isTrial) {
     const priorTrial = await db.subscription.findFirst({
       where: { userId: sub.userId, plan: { isTrial: true }, id: { not: sub.id } },
@@ -178,36 +257,71 @@ export async function POST_renew({ session, params, body, ipAddress, userAgent }
 
   const { paymentMethod } = z.object({ paymentMethod: z.enum(['telebirr', 'cbe']) }).parse(body);
   let riderAmountCents = sub.plan.priceCents;
+  // P1-28 / BIZ-026: re-validate corporate is still active + member still approved.
   if (sub.corporateId) {
     const corp = await db.corporate.findUnique({ where: { id: sub.corporateId } });
-    if (corp) {
-      riderAmountCents = sub.plan.priceCents - Math.round(sub.plan.priceCents * corp.subsidyPercent / 100);
+    if (!corp || !corp.isActive || corp.deletedAt) {
+      throw new BadRequestError('Your corporate is no longer active — renew without the corporate code or contact support');
     }
+    const member = await db.corporateMember.findUnique({
+      where: { corporateId_userId: { corporateId: corp.id, userId: sub.userId } },
+    });
+    if (!member || member.approvalStatus !== 'approved' || !member.isActive || member.deletedAt) {
+      throw new BadRequestError('Your corporate membership is no longer active');
+    }
+    const subsidy = computeCorporateSubsidy(sub.plan.priceCents, corp.subsidyPercent);
+    riderAmountCents = subsidy.riderAmountCents;
+  }
+
+  if (riderAmountCents <= 0) {
+    throw new BadRequestError('Corporate subsidy cannot cover 100% of the plan price — please contact support');
   }
 
   const reference = `PO${createId()}`;
   const provider = getPaymentProvider(paymentMethod);
   const env = loadEnv();
-  const checkout = await provider.createCheckout({
-    merchOrderId: reference,
-    amount: Money.fromCents(riderAmountCents),
-    description: `${sub.plan.name} renewal`,
-    notifyUrl: env.TELEBIRR_NOTIFY_URL || `${env.APP_BASE_URL}/api/v1/webhooks/telebirr/notify`,
-    redirectUrl: env.TELEBIRR_REDIRECT_URL || `${env.APP_BASE_URL}/checkout/complete`,
-  });
 
   const now = new Date();
-  const endDate = new Date(now.getTime() + sub.plan.durationDays * 24 * 3600_000);
-  // Atomic subscription + payment creation (same fix as POST_create).
+  // P1-27 / BIZ-025: extend the existing subscription's endDate if it's still active,
+  // rather than creating an overlapping subscription. If the old sub is expired,
+  // start the new one from now.
+  const newStartDate = sub.status === 'active' && sub.endDate > now ? sub.endDate : now;
+  const newEndDate = new Date(newStartDate.getTime() + sub.plan.durationDays * 24 * 3600_000);
+
   const newSub = await db.$transaction(async (tx) => {
+    // If the old sub is still active, extend its endDate to the new end and reset ridesUsed.
+    // Otherwise, create a new subscription row.
+    if (sub.status === 'active' && sub.endDate > now) {
+      const extended = await tx.subscription.update({
+        where: { id: sub.id },
+        data: {
+          endDate: newEndDate,
+          ridesUsed: 0,
+          cancelledAt: null,
+        },
+        include: { plan: true },
+      });
+      await tx.payment.create({
+        data: {
+          reference,
+          userId: sub.userId,
+          subscriptionId: extended.id,
+          method: paymentMethod,
+          amountCents: riderAmountCents,
+          status: 'pending',
+        },
+      });
+      return extended;
+    }
+    // Old sub is expired or pending — create a fresh one.
     const created = await tx.subscription.create({
       data: {
         userId: sub.userId,
         planId: sub.planId,
         corporateId: sub.corporateId,
         status: 'pending_payment',
-        startDate: now,
-        endDate,
+        startDate: newStartDate,
+        endDate: newEndDate,
       },
       include: { plan: true },
     });
@@ -224,12 +338,26 @@ export async function POST_renew({ session, params, body, ipAddress, userAgent }
     return created;
   });
 
+  let checkout: any;
+  try {
+    checkout = await provider.createCheckout({
+      merchOrderId: reference,
+      amount: Money.fromCents(riderAmountCents),
+      description: `${sub.plan.name} renewal`,
+      notifyUrl: env.TELEBIRR_NOTIFY_URL || `${env.APP_BASE_URL}/api/v1/webhooks/telebirr/notify`,
+      redirectUrl: env.TELEBIRR_REDIRECT_URL || `${env.APP_BASE_URL}/checkout/complete`,
+    });
+  } catch (err) {
+    await db.payment.updateMany({ where: { reference }, data: { status: 'failed' } }).catch(() => {});
+    throw err;
+  }
+
   await audit({
     actorId: session.id,
     action: 'subscription.renewed',
     entityType: 'subscription',
     entityId: newSub.id,
-    after: { previousSubId: sub.id, planId: sub.planId, paymentRef: reference, method: paymentMethod },
+    after: { previousSubId: sub.id, planId: sub.planId, paymentRef: reference, method: paymentMethod, newEndDate },
     ipAddress, userAgent,
   });
 
@@ -244,7 +372,5 @@ export async function POST_renew({ session, params, body, ipAddress, userAgent }
 }
 
 export async function DELETE_subscription(ctx: any) {
-  // Identical to POST /subscriptions/:id/cancel — kept for REST-style clients
-  // who prefer DELETE for removal. Delegates to avoid drift.
   return POST_cancel(ctx);
 }

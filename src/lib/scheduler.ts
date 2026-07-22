@@ -108,31 +108,75 @@ async function drainOutbox(): Promise<void> {
 }
 
 async function expireStale(): Promise<void> {
+  const now = new Date();
+  // Capture the IDs of subs that are about to expire so we can cascade-cancel their future rides.
+  const expiringSubs = await db.subscription.findMany({
+    where: { status: 'active', endDate: { lt: now } },
+    select: { id: true, userId: true },
+  });
+
   const expiredSubs = await db.subscription.updateMany({
-    where: { status: 'active', endDate: { lt: new Date() } },
+    where: { status: 'active', endDate: { lt: now } },
     data: { status: 'expired' },
   });
+
+  // P0-4 / BIZ-006: cascade-cancel future booked rides on expired subscriptions,
+  // and free up the seats so other riders can book them. Rides on already-departed
+  // or in-transit trips are left alone (the rider may already be on the shuttle).
+  if (expiringSubs.length > 0) {
+    for (const s of expiringSubs) {
+      await db.$transaction(async (tx) => {
+        const ridesToCancel = await tx.ride.findMany({
+          where: {
+            subscriptionId: s.id,
+            status: 'booked',
+            trip: { status: 'scheduled', departureAt: { gt: now } },
+          },
+          select: { id: true, tripId: true },
+        });
+        if (ridesToCancel.length === 0) return;
+        await tx.ride.updateMany({
+          where: { id: { in: ridesToCancel.map(r => r.id) } },
+          data: { status: 'cancelled' },
+        });
+        const tripIds = [...new Set(ridesToCancel.map(r => r.tripId))];
+        for (const tripId of tripIds) {
+          await tx.trip.updateMany({
+            where: { id: tripId, seatsBooked: { gt: 0 } },
+            data: { seatsBooked: { decrement: 1 } },
+          });
+        }
+      }).catch((err) => logger.error({ err: (err as Error).message, subId: s.id }, '[scheduler] cascade-cancel expired-sub rides failed'));
+    }
+  }
 
   // Before marking releases as expired, collect them so we can restore
   // each seller's ride + trip capacity. A release that expired without a
   // buyer means the seller gets their seat back.
   const expiringReleases = await db.seatRelease.findMany({
-    where: { status: 'open', expiresAt: { lt: new Date() } },
+    where: { status: 'open', expiresAt: { lt: now } },
     select: { id: true, tripId: true, userId: true },
   });
   const expiredReleases = await db.seatRelease.updateMany({
-    where: { status: 'open', expiresAt: { lt: new Date() } },
+    where: { status: 'open', expiresAt: { lt: now } },
     data: { status: 'expired' },
   });
   if (expiringReleases.length > 0) {
     for (const r of expiringReleases) {
       await db.$transaction(async (tx) => {
+        // CAS-guarded restoration so concurrent paths can't double-increment seatsBooked (P1-22).
         const sellerRide = await tx.ride.findFirst({
           where: { tripId: r.tripId, userId: r.userId, status: 'released' },
+          select: { id: true },
         });
         if (sellerRide) {
-          await tx.ride.update({ where: { id: sellerRide.id }, data: { status: 'booked' } });
-          await tx.trip.update({ where: { id: r.tripId }, data: { seatsBooked: { increment: 1 } } });
+          const rideCas = await tx.ride.updateMany({
+            where: { id: sellerRide.id, status: 'released' },
+            data: { status: 'booked' },
+          });
+          if (rideCas.count === 1) {
+            await tx.trip.update({ where: { id: r.tripId }, data: { seatsBooked: { increment: 1 } } });
+          }
         }
       }).catch((err) => logger.error({ err: (err as Error).message }, '[scheduler] restore expired release failed'));
       // Notify the seller their release expired and seat was restored.
@@ -147,11 +191,7 @@ async function expireStale(): Promise<void> {
   }
 
   if (expiredSubs.count > 0) {
-    const expired = await db.subscription.findMany({
-      where: { status: 'expired', updatedAt: { gt: new Date(Date.now() - 5 * 60_000) } },
-      select: { id: true, userId: true },
-    });
-    for (const s of expired) {
+    for (const s of expiringSubs) {
       await enqueueNotification({
         userId: s.userId,
         type: 'subscription_expired',
