@@ -199,6 +199,57 @@ export async function POST_change_password({ session, body, ipAddress, userAgent
   return { data: { ok: true } };
 }
 
+// P1 / API-009: Phone-change flow (request + confirm).
+// Step 1: POST /account/phone/change/request — sends OTP to the NEW phone.
+// Step 2: POST /account/phone/change/confirm — verifies OTP + updates user.phone.
+// Both require the current session. The confirm step bumps tokenVersion so
+// all other sessions are invalidated (the user must re-login on other devices).
+const PhoneChangeRequestInput = z.object({
+  newPhone: z.string().refine(EthiopianPhone.isValid, 'Invalid Ethiopian phone'),
+});
+
+export async function POST_phone_change_request({ session, body, ipAddress, userAgent }: any) {
+  const input = PhoneChangeRequestInput.parse(body);
+  const newPhone = EthiopianPhone.normalize(input.newPhone);
+
+  // Reject if the new phone is already registered.
+  const existing = await db.user.findUnique({ where: { phone: newPhone } });
+  if (existing) throw new ConflictError('Phone number already registered');
+
+  // Send OTP to the new phone.
+  await sendOtp(newPhone, 'phone_change');
+  await audit({ actorId: session.id, action: 'user.phone_change_requested', entityType: 'user', entityId: session.id, after: { newPhone }, ipAddress, userAgent });
+  return { data: { ok: true, message: 'OTP sent to new phone number' } };
+}
+
+const PhoneChangeConfirmInput = z.object({
+  newPhone: z.string().refine(EthiopianPhone.isValid, 'Invalid Ethiopian phone'),
+  code: z.string().length(6),
+});
+
+export async function POST_phone_change_confirm({ session, body, ipAddress, userAgent }: any) {
+  const input = PhoneChangeConfirmInput.parse(body);
+  const newPhone = EthiopianPhone.normalize(input.newPhone);
+
+  // Verify the OTP.
+  await verifyOtp(newPhone, 'phone_change', input.code);
+
+  // Reject if the new phone is already registered (race: someone could have
+  // registered it between request and confirm).
+  const existing = await db.user.findUnique({ where: { phone: newPhone } });
+  if (existing) throw new ConflictError('Phone number already registered');
+
+  const oldPhone = (await db.user.findUnique({ where: { id: session.id }, select: { phone: true } }))?.phone;
+  // Update the phone + bump tokenVersion so all other sessions are invalidated.
+  await db.user.update({
+    where: { id: session.id },
+    data: { phone: newPhone, tokenVersion: { increment: 1 }, phoneVerified: true },
+  });
+  await revokeAllSessionsForUser(session.id);
+  await audit({ actorId: session.id, action: 'user.phone_changed', entityType: 'user', entityId: session.id, before: { phone: oldPhone }, after: { phone: newPhone }, ipAddress, userAgent });
+  return { data: { ok: true, message: 'Phone number updated. Please sign in again with your new phone number.' } };
+}
+
 export async function GET_sessions({ session }: any) {
   const rows = await db.session.findMany({ where: { userId: session!.id, revokedAt: null, expiresAt: { gt: new Date() } }, orderBy: { createdAt: 'desc' } });
   return { data: rows };

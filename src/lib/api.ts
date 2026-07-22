@@ -8,6 +8,7 @@ import { verifySession } from '@/lib/auth';
 import { AppError, UnauthorizedError, ForbiddenError, RateLimitError, ConflictError, toErrorEnvelope } from '@/lib/errors';
 import { CURRENT_TOS_VERSION } from '@/lib/env';
 import { ensureSchedulerStarted } from '@/lib/scheduler';
+import { logger } from '@/lib/logger';
 
 export const SESSION_COOKIE = 'addis-session';
 const CSRF_COOKIE = 'addis-csrf';
@@ -259,10 +260,16 @@ type Handler = (ctx: ApiContext & { body?: any; params: Record<string, string>; 
 export function api(options: ApiOptions, handler: Handler) {
   return async (req: NextRequest, ctx: { params: Promise<Record<string, string>> }): Promise<NextResponse> => {
     const requestId = crypto.randomUUID();
+    const requestStart = Date.now();
     // Start the background scheduler on first API request (no-op if already started).
     ensureSchedulerStarted();
     const ip = clientIp(req);
     const ua = req.headers.get('user-agent') ?? undefined;
+
+    // P1-53 / OPS-017: structured request logging with requestId correlation.
+    // The child logger is available to handlers via ctx, but we also log a
+    // completion line at the end of every request for access-log analysis.
+    const requestLogger = logger.child({ requestId, method: req.method, path: req.nextUrl.pathname, ip, userId: undefined as string | undefined });
 
     // Ensure CSRF cookie exists for safe methods.
     if (SAFE_METHODS.has(req.method)) {
@@ -291,6 +298,8 @@ export function api(options: ApiOptions, handler: Handler) {
         // Failed credential verification MUST propagate as 401 — never silently
         session = await verifySession(token);
       }
+      // Update the requestLogger with the resolved userId for completion logging.
+      if (session) (requestLogger as any).bindings.userId = session.id;
 
       // ── CSRF ────────────────────────────────────────────────────────────
       await csrfCheck(req);
@@ -370,6 +379,13 @@ export function api(options: ApiOptions, handler: Handler) {
         res.headers.set('X-RateLimit-Remaining', String(rateInfo.remaining));
         res.headers.set('X-RateLimit-Reset', String(rateInfo.resetAt));
       }
+      // P1-53 / OPS-017: request completion log.
+      const durationMs = Date.now() - requestStart;
+      if (durationMs > 1000) {
+        requestLogger.warn({ status, durationMs }, '[api] slow request');
+      } else {
+        requestLogger.info({ status, durationMs }, '[api] request completed');
+      }
       return res;
     } catch (err) {
       const { status, body } = toErrorEnvelope(err, requestId);
@@ -384,6 +400,13 @@ export function api(options: ApiOptions, handler: Handler) {
       res.headers.set('x-request-id', requestId);
       if (err instanceof RateLimitError) {
         res.headers.set('retry-after', String(err.retryAfterSec));
+      }
+      // P1-53: error completion log (5xx at error, 4xx at info).
+      const durationMs = Date.now() - requestStart;
+      if (status >= 500) {
+        requestLogger.error({ status, durationMs, err: (err as Error).message }, '[api] server error');
+      } else {
+        requestLogger.info({ status, durationMs }, '[api] client error');
       }
       return res;
     }

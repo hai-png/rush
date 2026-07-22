@@ -1,4 +1,17 @@
 import { logger } from '@/lib/logger';
+
+// P1-50: lazy-load Sentry so the errors.ts module doesn't crash if
+// @sentry/nextjs isn't installed (e.g. in the test environment).
+let SentryModule: any = null;
+async function getSentry(): Promise<any> {
+  if (SentryModule !== null) return SentryModule;
+  try {
+    SentryModule = await import('@sentry/nextjs');
+  } catch {
+    SentryModule = false; // not installed
+  }
+  return SentryModule;
+}
 // them to { error: { code, message, requestId } }.
 
 export class AppError extends Error {
@@ -47,6 +60,12 @@ export function toErrorEnvelope(err: unknown, requestId: string): { status: numb
       body: { error: { code: 'VALIDATION_ERROR', message: 'Invalid request body', details: (err as any).issues, requestId } },
     };
   }
+  // P1-50 / OPS-006: report unhandled (non-AppError) errors to Sentry.
+  // Fire-and-forget — toErrorEnvelope is synchronous and we don't want to
+  // block the error response on Sentry's network call.
+  getSentry().then(sentry => {
+    if (sentry) sentry.captureException(err, { tags: { requestId } });
+  }).catch(() => {});
   logger.error({ err }, '[unhandled]');
   return {
     status: 500,

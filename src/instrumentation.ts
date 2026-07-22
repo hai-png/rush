@@ -13,6 +13,16 @@ const isNodeRuntime = typeof process !== 'undefined' && typeof process.on === 'f
 
 export async function register() {
   if (!isNodeRuntime) return; // Edge Runtime — no-op
+
+  // P1-50 / OPS-006: initialize Sentry if SENTRY_DSN is configured.
+  try {
+    const { initSentry } = await import('@/lib/sentry');
+    initSentry();
+  } catch (err) {
+    // Sentry not installed or failed to init — non-fatal.
+    logger.error({ err: (err as Error).message }, '[instrumentation] sentry init failed');
+  }
+
   // Lazy-import db only in the Node runtime so Edge doesn't try to load Prisma.
   const { db } = await import('@/lib/db');
 

@@ -66,6 +66,9 @@ const ROUTES: RouteEntry[] = [
   r('POST', '/auth/refresh', { exemptFromTosGate: true }, identity.POST_refresh),
   r('GET',  '/auth/me', { requireAuth: true, exemptFromTosGate: true }, identity.GET_me),
   r('POST', '/auth/change-password', { requireAuth: true }, identity.POST_change_password),
+  // P1 / API-009: phone-change flow.
+  r('POST', '/account/phone/change/request', { requireAuth: true }, identity.POST_phone_change_request),
+  r('POST', '/account/phone/change/confirm', { requireAuth: true }, identity.POST_phone_change_confirm),
   r('GET',  '/auth/sessions', { requireAuth: true, exemptFromTosGate: true }, identity.GET_sessions),
   r('DELETE', '/auth/sessions/:id', { requireAuth: true, exemptFromTosGate: true }, identity.DELETE_session),
   // P1 / API-012: admin session management for any user.
