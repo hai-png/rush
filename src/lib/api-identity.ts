@@ -8,6 +8,7 @@ import { BadRequestError, ConflictError, UnauthorizedError, TwoFactorRequiredErr
 import { sendOtp, verifyOtp } from '@/lib/otp';
 import { audit } from '@/lib/audit';
 import { CURRENT_TOS_VERSION } from '@/lib/env';
+import { decryptField, encryptField } from '@/lib/crypto-field';
 import { generateSecret, verifySync } from 'otplib';
 
 const RegisterInput = z.discriminatedUnion('kind', [
@@ -80,7 +81,10 @@ export async function POST_token({ body, ipAddress, userAgent }: any) {
   if (user.twoFactorEnabled) {
     if (!input.code) throw new TwoFactorRequiredError();
     if (!user.twoFactorSecret) throw new ForbiddenError('2FA enabled but no secret. Contact support.');
-    if (!verifySync({ secret: user.twoFactorSecret, token: input.code })) {
+    // P1-6 / SEC-013: decrypt the secret before verifying the TOTP code.
+    const secret = decryptField(user.twoFactorSecret);
+    if (!secret) throw new ForbiddenError('2FA secret could not be decrypted. Contact support.');
+    if (!verifySync({ secret, token: input.code })) {
       throw new UnauthorizedError('Invalid 2FA code');
     }
   }
@@ -219,7 +223,10 @@ export async function POST_2fa_setup({ session, body }: any) {
 export async function POST_2fa_enable({ session, body }: any) {
   const { secret, code } = z.object({ secret: z.string(), code: z.string().length(6) }).parse(body);
   if (!verifySync({ secret, token: code })) throw new BadRequestError('Invalid code');
-  await db.user.update({ where: { id: session!.id }, data: { twoFactorSecret: secret, twoFactorEnabled: true } });
+  // P1-6 / SEC-013: encrypt the secret at rest so DB read access (admin,
+  // backup, SQL injection, CSV export) cannot recover the raw TOTP seed.
+  const encrypted = encryptField(secret);
+  await db.user.update({ where: { id: session!.id }, data: { twoFactorSecret: encrypted, twoFactorEnabled: true } });
   await audit({ actorId: session!.id, action: 'user.2fa_enabled', entityType: 'user', entityId: session!.id });
   return { data: { enabled: true } };
 }
@@ -232,7 +239,10 @@ export async function POST_2fa_disable({ session, body }: any) {
   if (!ok) throw new UnauthorizedError('Password incorrect');
   if (user.twoFactorEnabled) {
     if (!code) throw new BadRequestError('2FA code is required to disable 2FA');
-    if (!user.twoFactorSecret || !verifySync({ secret: user.twoFactorSecret, token: code })) {
+    if (!user.twoFactorSecret) throw new BadRequestError('Invalid 2FA code');
+    // P1-6: decrypt before verifying.
+    const secret = decryptField(user.twoFactorSecret);
+    if (!secret || !verifySync({ secret, token: code })) {
       throw new BadRequestError('Invalid 2FA code');
     }
   }
@@ -248,7 +258,8 @@ export async function POST_2fa_verify({ session, body }: any) {
   if (!user.twoFactorEnabled || !user.twoFactorSecret) {
     throw new BadRequestError('2FA is not enabled');
   }
-  if (!verifySync({ secret: user.twoFactorSecret, token: code })) {
+  const secret = decryptField(user.twoFactorSecret);
+  if (!secret || !verifySync({ secret, token: code })) {
     throw new BadRequestError('Invalid 2FA code');
   }
   return { data: { verified: true } };

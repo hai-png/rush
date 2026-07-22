@@ -353,8 +353,12 @@ export async function DELETE_member({ session, params, ipAddress, userAgent }: a
   return { data: { id: params.id, isActive: false } };
 }
 
+// P1-35 / API-004: removed `ridesUsedThisMonth` from the admin-editable input.
+// Allowing a corporate admin to set this field directly bypassed the
+// corporate seat-allowance quota (now enforced in consumeRide). If a
+// manual reset is needed, a dedicated /members/:id/reset-usage endpoint
+// with stronger audit should be added.
 const UpdateMemberInput = z.object({
-  ridesUsedThisMonth: z.number().int().min(0).optional(),
   employeeId: z.string().min(1).max(50).optional(),
   isActive: z.boolean().optional(),
 });
@@ -369,7 +373,8 @@ export async function PATCH_member({ session, params, body, ipAddress, userAgent
   const member = await db.corporateMember.findUnique({ where: { id: params.id } });
   if (!member || member.corporateId !== corp.id) throw new NotFoundError('Member not found');
 
+  const before = member;
   const updated = await db.corporateMember.update({ where: { id: params.id }, data: input });
-  await audit({ actorId: session.id, action: 'corporate.member_updated', entityType: 'corporate_member', entityId: params.id, after: input, ipAddress, userAgent });
+  await audit({ actorId: session.id, action: 'corporate.member_updated', entityType: 'corporate_member', entityId: params.id, before, after: input, ipAddress, userAgent });
   return { data: updated };
 }

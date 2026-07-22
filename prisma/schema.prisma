@@ -56,6 +56,7 @@ model User {
   corporateInvites   CorporateInvite[]    @relation("InviteCreator")
 
   @@index([isActive, deletedAt])
+  @@index([role, isActive])           // P1-15: admin lookups (notify all admins)
 }
 
 model RiderProfile {
@@ -84,6 +85,8 @@ model ContractorProfile {
   updatedAt           DateTime @updatedAt
 
   documents           ContractorDocument[]
+
+  @@index([verificationStatus])    // P1: admin pending-contractors query
 }
 
 model Corporate {
@@ -138,6 +141,7 @@ model Session {
   revokedAt DateTime?
 
   @@index([userId])
+  @@index([userId, revokedAt, expiresAt])   // P1: revokeAllSessionsForUser + GET /auth/sessions
 }
 
 model OtpCode {
@@ -242,6 +246,8 @@ model Shuttle {
   trips         Trip[]
   assignments   RouteAssignment[]
 
+  @@index([contractorId])            // P1: contractor dashboard + GET_my_shuttles
+  @@index([contractorId, isActive])
 }
 
 model Trip {
@@ -268,6 +274,8 @@ model Trip {
   @@index([routeId, departureAt])
   @@index([shuttleId, departureAt])
   @@index([assignmentId])
+  @@index([driverId, departureAt])   // P1: contractor dashboard + recomputeContractorRating
+  @@index([status, departureAt])     // P1: GET /trips catalog + expireStale
 }
 
 // ─── Route Assignments (monthly commitments) ────────────────────────────────
@@ -344,6 +352,7 @@ model Subscription {
 
   @@index([userId, status])
   @@index([corporateId])
+  @@index([status, endDate])            // P1: expireStale scheduler job
 }
 
 model Payment {
@@ -474,6 +483,7 @@ model Ride {
   @@index([seatClaimId])
   @@index([pickupLocationId])
   @@index([assignmentId])
+  @@index([tripId, userId, status])    // P1: marketplace release/claim + double-book check
 }
 
 // ─── Support ─────────────────────────────────────────────────────────────────
@@ -538,10 +548,12 @@ model Notification {
   createdAt DateTime @default(now())
 
   @@index([userId, readAt])
+  @@index([userId, type, createdAt])    // P1: scheduler dedup for expiry warnings
 }
 
 model AuditLog {
   id         String   @id @default(cuid())
+  seq        Int      @unique @default(0)  // P1: monotonic sequence for hash-chain ordering (replaces createdAt ordering)
   actorId    String?
   actor      User?    @relation("AuditActor", fields: [actorId], references: [id], onDelete: SetNull)
   action     String
@@ -558,6 +570,7 @@ model AuditLog {
   @@index([entityType, entityId])
   @@index([actorId])
   @@index([createdAt])
+  @@index([seq])        // P1: verifyAuditChain pagination by sequence
 }
 
 model OutboxEvent {

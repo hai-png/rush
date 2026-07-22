@@ -32,6 +32,15 @@ export async function PATCH_user({ session, params, body, ipAddress, userAgent }
   if (!user) throw new NotFoundError('User not found');
   if (user.id === session.id) throw new BadRequestError('Cannot modify your own account');
   if (input.action === 'suspend') {
+    // P1-36 / API-005: last-platform-admin guard. Without this, an admin
+    // could suspend the only other platform_admin (or two admins could
+    // suspend each other in a race) and lock the system out.
+    if (user.role === 'platform_admin') {
+      const adminCount = await db.user.count({ where: { role: 'platform_admin', isActive: true } });
+      if (adminCount <= 1) {
+        throw new BadRequestError('Cannot suspend the last active platform admin');
+      }
+    }
     await db.user.update({ where: { id: params.id }, data: { isActive: false, tokenVersion: { increment: 1 } } });
     await db.session.updateMany({ where: { userId: params.id, revokedAt: null }, data: { revokedAt: new Date() } }).catch(() => {});
     await audit({ actorId: session.id, action: 'user.suspended', entityType: 'user', entityId: params.id, ipAddress, userAgent });
