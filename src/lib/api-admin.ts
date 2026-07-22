@@ -101,9 +101,10 @@ const ShuttleInput = z.object({
 
 export async function POST_shuttles({ body, session, ipAddress, userAgent }: any) {
   const input = ShuttleInput.parse(body);
-  // Contractors can only create shuttles for themselves; admins can create for anyone.
-  if (session.role === 'contractor' && input.contractorId !== session.id) {
-    throw new BadRequestError('Contractors can only create shuttles for themselves');
+  if (session.role === 'contractor') {
+    input.contractorId = session.id;
+  } else if (!input.contractorId) {
+    throw new BadRequestError('contractorId is required');
   }
   const shuttle = await db.shuttle.create({ data: input });
   await audit({ actorId: session.id, action: 'shuttle.created', entityType: 'shuttle', entityId: shuttle.id, after: input, ipAddress, userAgent });
@@ -176,7 +177,6 @@ export async function POST_audit_verify() {
 }
 
 // Keep Money import for future use (admin endpoints may need it).
-void Money;
 
 
 export async function GET_payment({ params }: any) {

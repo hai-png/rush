@@ -42,6 +42,13 @@ export async function PATCH_user({ session, params, body, ipAddress, userAgent }
     await audit({ actorId: session.id, action: 'user.reactivated', entityType: 'user', entityId: params.id, ipAddress, userAgent });
   } else if (input.action === 'change_role') {
     if (!input.role) throw new BadRequestError('role is required for change_role');
+    if (input.role !== 'platform_admin') {
+      const adminCount = await db.user.count({ where: { role: 'platform_admin', isActive: true } });
+      const target = await db.user.findUnique({ where: { id: params.id } });
+      if (target?.role === 'platform_admin' && adminCount <= 1) {
+        throw new BadRequestError('Cannot demote the last platform admin');
+      }
+    }
     await db.user.update({ where: { id: params.id }, data: { role: input.role } });
     await audit({ actorId: session.id, action: 'user.role_changed', entityType: 'user', entityId: params.id, after: { role: input.role }, ipAddress, userAgent });
   } else {

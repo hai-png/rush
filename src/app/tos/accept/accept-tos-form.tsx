@@ -15,7 +15,9 @@ export function AcceptTosForm() {
     try {
       await api.post('/api/v1/tos/accept');
       toast.success('Terms accepted');
-      router.push('/dashboard/rider');
+      const role = (document.cookie.match(/addis-role=([^;]+)/) || [])[1];
+    // We don't have the role cookie — just go to / and let the redirect logic handle it.
+    router.push('/');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed');
     } finally { setLoading(false); }

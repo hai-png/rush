@@ -17,6 +17,17 @@ echo "════════════════════════�
 echo "  Addis Ride — end-to-end flow test"
 echo "════════════════════════════════════════════════════════════════"
 
+# Clear all transactional data via API (keep seeded users/plans/routes)
+bun -e "
+import { PrismaClient } from '@prisma/client';
+const db = new PrismaClient();
+const models = ['ride','seatClaim','seatRelease','refundRetry','telebirrNotifyEvent','payment','subscription','notification','outboxEvent','supportTicket','ticketMessage','session','idempotencyRecord','auditLog','corporateInvite','corporateMember','corporate','contractorDocument','uploadedFile','trip','routeAssignment','pickupLocation','shuttle','route','subscriptionPlan','faqArticle','otpCode','tosAcceptance','contractorProfile','riderProfile','user'];
+for (const m of models) { try { await (db as any)[m].deleteMany({}); } catch {} }
+console.log('  (pre-test cleanup done)');
+" 2>/dev/null
+rm -rf db/uploads/*
+bun run db:seed > /dev/null 2>&1
+
 get_csrf() { grep -i 'csrf' $1 | awk '{print $NF}'; }
 spost() {
   local jar=$1; shift; local url=$1; shift; local body=$1; shift
@@ -197,7 +208,7 @@ echo "$EXPORT" | python3 -c 'import sys,json;d=json.load(sys.stdin);exit(0 if "u
 # ─── 8. Cron flow ────────────────────────────────────────────────────────────
 echo ""
 echo "── 8. Cron flow: run scheduled tasks ──"
-CRON=$(curl -s -X POST $BASE/api/v1/cron/run)
+CRON=$(curl -s -X POST $BASE/api/v1/cron/run -H 'content-type: application/json' -d '{"_cronSecret":"dev-only-cron-secret-32-chars"}')
 echo "$CRON" | python3 -c 'import sys,json;d=json.load(sys.stdin);exit(0 if "refunds" in d["data"] else 1)' 2>/dev/null && ok "cron ran" || bad "cron"
 echo "$CRON" | python3 -c 'import sys,json;d=json.load(sys.stdin);exit(0 if d["data"].get("scheduler")=="running" else 1)' 2>/dev/null && ok "scheduler marked as running" || bad "scheduler status"
 

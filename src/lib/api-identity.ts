@@ -233,7 +233,8 @@ export async function POST_2fa_disable({ session, body }: any) {
   if (!user) throw new UnauthorizedError();
   const ok = await verifyPassword(password, user.passwordHash);
   if (!ok) throw new UnauthorizedError('Password incorrect');
-  if (user.twoFactorEnabled && code) {
+  if (user.twoFactorEnabled) {
+    if (!code) throw new BadRequestError('2FA code is required to disable 2FA');
     if (!user.twoFactorSecret || !verifySync({ secret: user.twoFactorSecret, token: code })) {
       throw new BadRequestError('Invalid 2FA code');
     }

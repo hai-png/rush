@@ -248,6 +248,7 @@ export async function processRefundRetries(limit = 10): Promise<{ processed: num
       result = { status: 'failed' as const, error: (err as Error).message, permanent: false };
     }
 
+    const sideEffects: Array<() => Promise<void>> = [];
     await db.$transaction(async (tx) => {
       if (result.status === 'succeeded') {
         const updated = await tx.refundRetry.updateMany({
@@ -269,20 +270,19 @@ export async function processRefundRetries(limit = 10): Promise<{ processed: num
             refundedAt: new Date(),
           },
         });
-        await enqueueNotification({
-          userId: fresh.userId,
-          type: 'refund_completed',
-          title: 'Refund completed',
-          body: `Your refund of ${Money.fromCents(retry.amountCents).toString()} has been processed.`,
+        const userId = fresh.userId;
+        const refundAmount = retry.amountCents;
+        sideEffects.push(async () => {
+          await enqueueNotification({ userId, type: 'refund_completed', title: 'Refund completed', body: `Your refund of ${Money.fromCents(refundAmount).toString()} has been processed.` });
         });
       } else {
         const attempts = retry.attempts + 1;
         if (result.status === 'failed' && result.permanent) {
           await tx.refundRetry.update({ where: { id: retry.id }, data: { status: 'permanent_failure', attempts, lastError: result.error } });
-          await enqueueNotification({ userId: payment.userId, type: 'refund_failed', title: 'Refund failed', body: 'Your refund could not be processed.' });
+          sideEffects.push(async () => { await enqueueNotification({ userId: payment.userId, type: 'refund_failed', title: 'Refund failed', body: 'Your refund could not be processed.' }); });
         } else if (attempts >= retry.maxAttempts) {
           await tx.refundRetry.update({ where: { id: retry.id }, data: { status: 'permanent_failure', attempts } });
-          await enqueueNotification({ userId: payment.userId, type: 'refund_failed', title: 'Refund failed', body: 'Your refund could not be processed after multiple attempts.' });
+          sideEffects.push(async () => { await enqueueNotification({ userId: payment.userId, type: 'refund_failed', title: 'Refund failed', body: 'Your refund could not be processed after multiple attempts.' }); });
         } else {
           const backoffMin = BACKOFF_MIN[Math.min(attempts - 1, BACKOFF_MIN.length - 1)];
           await tx.refundRetry.update({
@@ -296,6 +296,9 @@ export async function processRefundRetries(limit = 10): Promise<{ processed: num
         }
       }
     });
+    for (const fx of sideEffects) {
+      try { await fx(); } catch (e) { logger.error({ err: (e as Error).message }, '[processRefundRetries] side effect failed'); }
+    }
     processed++;
   }
   return { processed };

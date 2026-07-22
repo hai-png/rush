@@ -12,10 +12,8 @@ export async function POST_run(ctx: any) {
   const requestId = ctx.requestId ?? crypto.randomUUID();
   try {
     const env = loadEnv();
-    if (env.NODE_ENV === 'production') {
-      if (!ctx.body?._cronSecret || ctx.body._cronSecret !== env.CRON_SECRET) {
-        return NextResponse.json({ error: { code: 'UNAUTHORIZED', message: 'Invalid cron secret', requestId } }, { status: 401 });
-      }
+    if (!ctx.body?._cronSecret || ctx.body._cronSecret !== env.CRON_SECRET) {
+      return NextResponse.json({ error: { code: 'UNAUTHORIZED', message: 'Invalid cron secret', requestId } }, { status: 401 });
     }
     ensureSchedulerStarted();
 

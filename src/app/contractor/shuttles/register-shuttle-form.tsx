@@ -17,7 +17,7 @@ export function RegisterShuttleForm() {
   async function submit() {
     setLoading(true);
     try {
-      await api.post('/api/v1/admin/shuttles', { ...form, contractorId: 'self' });
+      await api.post('/api/v1/admin/shuttles', { ...form });
       toast.success('Shuttle registered');
       setOpen(false); window.location.reload();
     } catch (err) {

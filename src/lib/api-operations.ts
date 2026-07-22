@@ -38,6 +38,17 @@ export async function POST_ride({ session, body, ipAddress, userAgent }: any) {
     if (sub.status !== 'active') throw new BadRequestError('Subscription not active');
   }
 
+  if (input.seatClaimId) {
+    const claim = await db.seatClaim.findUnique({
+      where: { id: input.seatClaimId },
+      include: { seatRelease: true },
+    });
+    if (!claim) throw new NotFoundError('Seat claim not found');
+    if (claim.claimantUserId !== session.id) throw new ForbiddenError('Not your seat claim');
+    if (claim.status !== 'confirmed') throw new BadRequestError('Seat claim is not confirmed');
+    if (claim.seatRelease.tripId !== input.tripId) throw new BadRequestError('Seat claim is for a different trip');
+  }
+
   const ride = await db.$transaction(async (tx) => {
     const updated = await tx.trip.updateMany({
       where: { id: trip.id, seatsBooked: { lt: trip.shuttle.capacity } },
