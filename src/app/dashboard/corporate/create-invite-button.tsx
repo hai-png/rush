@@ -1,4 +1,5 @@
 'use client';
+import { useRouter } from 'next/navigation';
 
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
@@ -11,6 +12,8 @@ import { toast } from 'sonner';
 import { api } from '@/lib/api-client';
 
 export function CreateInviteButton() {
+  const router = useRouter();
+
   const [open, setOpen] = useState(false);
   const [note, setNote] = useState('');
   const [maxUses, setMaxUses] = useState(50);
@@ -23,7 +26,7 @@ export function CreateInviteButton() {
       toast.success('Invite created');
       setOpen(false);
       setNote('');
-      window.location.reload();
+      router.refresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed');
     } finally { setLoading(false); }

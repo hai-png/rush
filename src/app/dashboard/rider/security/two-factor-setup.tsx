@@ -1,4 +1,5 @@
 'use client';
+import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -8,6 +9,8 @@ import { toast } from 'sonner';
 import { api } from '@/lib/api-client';
 
 export function TwoFactorSetup({ enabled }: { enabled: boolean }) {
+  const router = useRouter();
+
   const [open, setOpen] = useState(false);
   const [password, setPassword] = useState('');
   const [secret, setSecret] = useState('');
@@ -30,7 +33,7 @@ export function TwoFactorSetup({ enabled }: { enabled: boolean }) {
     try {
       await api.post('/api/v1/auth/2fa/enable', { secret, code });
       toast.success('2FA enabled');
-      setOpen(false); window.location.reload();
+      setOpen(false); router.refresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Invalid code');
     } finally { setLoading(false); }
@@ -41,7 +44,7 @@ export function TwoFactorSetup({ enabled }: { enabled: boolean }) {
     try {
       await api.post('/api/v1/auth/2fa/disable', { password });
       toast.success('2FA disabled');
-      window.location.reload();
+      router.refresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed');
     } finally { setLoading(false); }

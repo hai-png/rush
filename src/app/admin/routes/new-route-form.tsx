@@ -1,4 +1,5 @@
 'use client';
+import { useRouter } from 'next/navigation';
 
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
@@ -9,6 +10,8 @@ import { toast } from 'sonner';
 import { api } from '@/lib/api-client';
 
 export function NewRouteForm() {
+  const router = useRouter();
+
   const [form, setForm] = useState({ origin: '', destination: '', distanceKm: 10, durationMin: 30, fareCents: 5000 });
   const [loading, setLoading] = useState(false);
 
@@ -18,7 +21,7 @@ export function NewRouteForm() {
     try {
       await api.post('/api/v1/admin/routes', form);
       toast.success('Route created');
-      window.location.reload();
+      router.refresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed');
     } finally { setLoading(false); }

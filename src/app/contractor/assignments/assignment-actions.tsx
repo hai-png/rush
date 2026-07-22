@@ -1,4 +1,5 @@
 'use client';
+import { useRouter } from 'next/navigation';
 
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
@@ -11,6 +12,8 @@ import { toast } from 'sonner';
 import { api } from '@/lib/api-client';
 
 export function AssignmentActions({ id }: { id: string }) {
+  const router = useRouter();
+
   const [loading, setLoading] = useState<null | 'accept' | 'reject'>(null);
   const [rejectOpen, setRejectOpen] = useState(false);
   const [reason, setReason] = useState('');
@@ -20,7 +23,7 @@ export function AssignmentActions({ id }: { id: string }) {
     try {
       await api.post(`/api/v1/assignments/${id}/accept`);
       toast.success('Assignment accepted — now active');
-      window.location.reload();
+      router.refresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed');
     } finally { setLoading(null); }
@@ -32,7 +35,7 @@ export function AssignmentActions({ id }: { id: string }) {
       await api.post(`/api/v1/assignments/${id}/reject`, { reason });
       toast.success('Assignment rejected');
       setRejectOpen(false);
-      window.location.reload();
+      router.refresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed');
     } finally { setLoading(null); }

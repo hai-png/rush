@@ -1,4 +1,5 @@
 'use client';
+import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -11,6 +12,8 @@ import { api } from '@/lib/api-client';
 import { Plus } from 'lucide-react';
 
 export function FaqForm() {
+  const router = useRouter();
+
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [form, setForm] = useState({ category: 'general', question: '', answer: '', sortOrder: 0 });
@@ -20,7 +23,7 @@ export function FaqForm() {
     try {
       await api.post('/api/v1/admin/faqs', form);
       toast.success('FAQ created');
-      setOpen(false); window.location.reload();
+      setOpen(false); router.refresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed');
     } finally { setLoading(false); }

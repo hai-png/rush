@@ -1,4 +1,5 @@
 'use client';
+import { useRouter } from 'next/navigation';
 
 import { useState, useEffect } from 'react';
 import { Button } from '@/components/ui/button';
@@ -27,6 +28,8 @@ const DAYS = [
 ];
 
 export function CreateAssignmentButton() {
+  const router = useRouter();
+
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [routes, setRoutes] = useState<any[]>([]);
@@ -65,7 +68,7 @@ export function CreateAssignmentButton() {
       });
       toast.success('Assignment created — trips generated');
       setOpen(false);
-      window.location.reload();
+      router.refresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed');
     } finally { setLoading(false); }

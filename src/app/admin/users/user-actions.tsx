@@ -1,4 +1,5 @@
 'use client';
+import { useRouter } from 'next/navigation';
 
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
@@ -9,6 +10,8 @@ import { toast } from 'sonner';
 import { api } from '@/lib/api-client';
 
 export function UserActions({ userId, currentRole, isActive }: { userId: string; currentRole: string; isActive: boolean }) {
+  const router = useRouter();
+
   const [loading, setLoading] = useState<'suspend' | 'reactivate' | 'role' | null>(null);
   const [role, setRole] = useState(currentRole);
 
@@ -19,7 +22,7 @@ export function UserActions({ userId, currentRole, isActive }: { userId: string;
       if (action === 'change_role') body.role = role;
       await api.patch(`/api/v1/admin/users/${userId}`, body);
       toast.success(`User ${action === 'change_role' ? 'role updated' : action === 'suspend' ? 'suspended' : 'reactivated'}`);
-      window.location.reload();
+      router.refresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed');
     } finally { setLoading(null); }

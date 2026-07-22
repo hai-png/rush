@@ -1,4 +1,5 @@
 'use client';
+import { useRouter } from 'next/navigation';
 
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
@@ -7,6 +8,8 @@ import { toast } from 'sonner';
 import { api } from '@/lib/api-client';
 
 export function ReplyForm({ ticketId }: { ticketId: string }) {
+  const router = useRouter();
+
   const [body, setBody] = useState('');
   const [loading, setLoading] = useState(false);
 
@@ -17,7 +20,7 @@ export function ReplyForm({ ticketId }: { ticketId: string }) {
       await api.post(`/api/v1/tickets/${ticketId}/messages`, { body });
       setBody('');
       toast.success('Reply sent');
-      window.location.reload();
+      router.refresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed');
     } finally { setLoading(false); }

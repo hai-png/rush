@@ -1,17 +1,20 @@
 'use client';
+import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import { api } from '@/lib/api-client';
 
 export function RevokeSessionButton({ id }: { id: string }) {
+  const router = useRouter();
+
   const [loading, setLoading] = useState(false);
   async function revoke() {
     setLoading(true);
     try {
       await api.del(`/api/v1/auth/sessions/${id}`);
       toast.success('Session revoked');
-      window.location.reload();
+      router.refresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed');
     } finally { setLoading(false); }

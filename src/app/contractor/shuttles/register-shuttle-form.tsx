@@ -1,4 +1,5 @@
 'use client';
+import { useRouter } from 'next/navigation';
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -10,6 +11,8 @@ import { api } from '@/lib/api-client';
 import { Plus } from 'lucide-react';
 
 export function RegisterShuttleForm() {
+  const router = useRouter();
+
   const [open, setOpen] = useState(false);
   const [loading, setLoading] = useState(false);
   const [form, setForm] = useState({ plate: '', model: '', vehicleType: 'coaster', capacity: 30, year: 2024 });
@@ -19,7 +22,7 @@ export function RegisterShuttleForm() {
     try {
       await api.post('/api/v1/admin/shuttles', { ...form });
       toast.success('Shuttle registered');
-      setOpen(false); window.location.reload();
+      setOpen(false); router.refresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed');
     } finally { setLoading(false); }

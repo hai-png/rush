@@ -1,4 +1,5 @@
 'use client';
+import { useRouter } from 'next/navigation';
 
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
@@ -6,13 +7,15 @@ import { toast } from 'sonner';
 import { api } from '@/lib/api-client';
 
 export function VerifyButton({ id }: { id: string }) {
+  const router = useRouter();
+
   const [loading, setLoading] = useState<null | 'verified' | 'rejected'>(null);
   async function verify(status: 'verified' | 'rejected') {
     setLoading(status);
     try {
       await api.post(`/api/v1/admin/contractors/${id}/verify`, { status });
       toast.success(`Contractor ${status}`);
-      window.location.reload();
+      router.refresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed');
     } finally { setLoading(null); }

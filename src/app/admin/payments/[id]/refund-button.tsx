@@ -1,4 +1,5 @@
 'use client';
+import { useRouter } from 'next/navigation';
 
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
@@ -12,6 +13,8 @@ import { toast } from 'sonner';
 import { api } from '@/lib/api-client';
 
 export function RefundButton({ paymentId, maxAmount }: { paymentId: string; maxAmount: number }) {
+  const router = useRouter();
+
   const [open, setOpen] = useState(false);
   const [amount, setAmount] = useState(maxAmount);
   const [reason, setReason] = useState('');
@@ -31,7 +34,7 @@ export function RefundButton({ paymentId, maxAmount }: { paymentId: string; maxA
       await api.post(`/api/v1/admin/payments/${paymentId}/refund`, { amount, reason });
       toast.success('Refund scheduled');
       setOpen(false);
-      window.location.reload();
+      router.refresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed');
     } finally { setLoading(false); }

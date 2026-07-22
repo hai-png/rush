@@ -1,4 +1,5 @@
 'use client';
+import { useRouter } from 'next/navigation';
 
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
@@ -6,6 +7,8 @@ import { toast } from 'sonner';
 import { api } from '@/lib/api-client';
 
 export function MemberActions({ id }: { id: string }) {
+  const router = useRouter();
+
   const [loading, setLoading] = useState<null | 'approve' | 'reject'>(null);
 
   async function act(action: 'approve' | 'reject') {
@@ -13,7 +16,7 @@ export function MemberActions({ id }: { id: string }) {
     try {
       await api.post(`/api/v1/corporate/members/${id}/${action}`);
       toast.success(action === 'approve' ? 'Member approved' : 'Member rejected');
-      window.location.reload();
+      router.refresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed');
     } finally { setLoading(null); }

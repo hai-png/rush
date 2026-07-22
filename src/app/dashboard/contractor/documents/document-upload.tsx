@@ -1,4 +1,5 @@
 'use client';
+import { useRouter } from 'next/navigation';
 
 import { useState, useRef } from 'react';
 import { Button } from '@/components/ui/button';
@@ -6,6 +7,8 @@ import { toast } from 'sonner';
 import { Upload, RefreshCw } from 'lucide-react';
 
 export function DocumentUpload({ type, hasExisting }: { type: string; hasExisting: boolean }) {
+  const router = useRouter();
+
   const inputRef = useRef<HTMLInputElement>(null);
   const [loading, setLoading] = useState(false);
 
@@ -29,7 +32,7 @@ export function DocumentUpload({ type, hasExisting }: { type: string; hasExistin
         throw new Error(err.error?.message ?? `HTTP ${res.status}`);
       }
       toast.success(hasExisting ? 'Document replaced' : 'Document uploaded');
-      window.location.reload();
+      router.refresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Upload failed');
     } finally {

@@ -69,18 +69,18 @@ function LoginInner() {
           <CardDescription>Use a demo account from the home page or your own.</CardDescription>
         </CardHeader>
         <CardContent>
-          <form onSubmit={submit} className="space-y-3">
+          <form onSubmit={submit} className="space-y-3" autoComplete="on">
             <div>
               <Label htmlFor="phone">Phone</Label>
-              <Input id="phone" value={phone} onChange={e => setPhone(e.target.value)} placeholder="+251911000002" required />
+              <Input id="phone" name="phone" autoComplete="tel" value={phone} onChange={e => setPhone(e.target.value)} placeholder="+251911000002" required inputMode="tel" />
             </div>
             <div>
               <Label htmlFor="password">Password</Label>
-              <Input id="password" type="password" value={password} onChange={e => setPassword(e.target.value)} required />
+              <Input id="password" name="password" type="password" autoComplete="current-password" value={password} onChange={e => setPassword(e.target.value)} required />
             </div>
             <div>
               <Label htmlFor="code">2FA code (optional)</Label>
-              <Input id="code" value={code} onChange={e => setCode(e.target.value)} maxLength={6} placeholder="Only if 2FA is enabled" />
+              <Input id="code" name="code" autoComplete="one-time-code" value={code} onChange={e => setCode(e.target.value)} maxLength={6} placeholder="Only if 2FA is enabled" inputMode="numeric" pattern="[0-9]*" />
             </div>
             <Button type="submit" disabled={loading} className="w-full">
               {loading ? 'Signing in…' : 'Sign in'}

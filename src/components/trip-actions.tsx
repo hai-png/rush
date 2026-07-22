@@ -1,4 +1,5 @@
 'use client';
+import { useRouter } from 'next/navigation';
 
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
@@ -6,6 +7,8 @@ import { toast } from 'sonner';
 import { api } from '@/lib/api-client';
 
 export function TripActions({ tripId, status }: { tripId: string; status: string }) {
+  const router = useRouter();
+
   const [loading, setLoading] = useState<'board' | 'complete' | null>(null);
 
   async function act(action: 'board' | 'complete') {
@@ -13,7 +16,7 @@ export function TripActions({ tripId, status }: { tripId: string; status: string
     try {
       await api.post(`/api/v1/trips/${tripId}/${action}`);
       toast.success(`${action === 'board' ? 'Boarded' : 'Completed'}`);
-      window.location.reload();
+      router.refresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed');
     } finally { setLoading(null); }

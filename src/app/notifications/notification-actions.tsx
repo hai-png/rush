@@ -1,4 +1,5 @@
 'use client';
+import { useRouter } from 'next/navigation';
 
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
@@ -6,6 +7,8 @@ import { toast } from 'sonner';
 import { api } from '@/lib/api-client';
 
 export function NotificationActions({ mode, id }: { mode: 'mark-one' | 'mark-all'; id?: string }) {
+  const router = useRouter();
+
   const [loading, setLoading] = useState(false);
 
   async function markRead() {
@@ -16,7 +19,7 @@ export function NotificationActions({ mode, id }: { mode: 'mark-one' | 'mark-all
       } else {
         await api.post('/api/v1/notifications/read-all');
       }
-      window.location.reload();
+      router.refresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed');
     } finally { setLoading(false); }

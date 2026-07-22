@@ -43,26 +43,26 @@ export default function RiderSignupPage() {
           <CardDescription>Subscribe to a shuttle plan and ride daily.</CardDescription>
         </CardHeader>
         <CardContent>
-          <form onSubmit={submit} className="space-y-3">
+          <form onSubmit={submit} className="space-y-3" autoComplete="on">
             <div>
               <Label htmlFor="name">Name</Label>
-              <Input id="name" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required minLength={2} />
+              <Input id="name" name="name" autoComplete="name" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required minLength={2} />
             </div>
             <div>
               <Label htmlFor="phone">Phone</Label>
-              <Input id="phone" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} placeholder="+2519XXXXXXXX" required />
+              <Input id="phone" name="phone" autoComplete="tel" value={form.phone} onChange={e => setForm({ ...form, phone: e.target.value })} placeholder="+2519XXXXXXXX" required inputMode="tel" />
             </div>
             <div>
               <Label htmlFor="password">Password (min 10 chars)</Label>
-              <Input id="password" type="password" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} required minLength={10} />
+              <Input id="password" name="password" type="password" autoComplete="new-password" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} required minLength={10} />
             </div>
             <div>
               <Label htmlFor="homeArea">Home area</Label>
-              <Input id="homeArea" value={form.homeArea} onChange={e => setForm({ ...form, homeArea: e.target.value })} placeholder="Bole" required />
+              <Input id="homeArea" name="homeArea" autoComplete="address-level2" value={form.homeArea} onChange={e => setForm({ ...form, homeArea: e.target.value })} placeholder="Bole" required />
             </div>
             <div>
               <Label htmlFor="workArea">Work area</Label>
-              <Input id="workArea" value={form.workArea} onChange={e => setForm({ ...form, workArea: e.target.value })} placeholder="Merkato" required />
+              <Input id="workArea" name="workArea" autoComplete="address-level2" value={form.workArea} onChange={e => setForm({ ...form, workArea: e.target.value })} placeholder="Merkato" required />
             </div>
             <Button type="submit" disabled={loading} className="w-full">
               {loading ? 'Creating…' : 'Create account'}

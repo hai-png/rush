@@ -1,0 +1,36 @@
+'use client';
+
+import { useEffect } from 'react';
+import { Button } from '@/components/ui/button';
+import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+
+// P1-42 / FE-002: error.tsx for the dashboard route group.
+// Without this, any DB error crashed the entire route segment to global-error.tsx,
+// showing a full-screen '500 Something went wrong' with no contextual recovery.
+export default function DashboardError({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
+  useEffect(() => {
+    console.error('[dashboard error]', error);
+  }, [error]);
+
+  return (
+    <div className="min-h-screen flex items-center justify-center p-4 bg-muted/30">
+      <Card className="w-full max-w-md">
+        <CardHeader>
+          <CardTitle>Something went wrong</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <p className="text-sm text-muted-foreground">
+            We couldn't load this page. The error has been logged.
+          </p>
+          {error.digest && (
+            <p className="text-xs text-muted-foreground">Request ID: {error.digest}</p>
+          )}
+          <div className="flex gap-2">
+            <Button onClick={reset} size="sm">Try again</Button>
+            <Button onClick={() => window.history.back()} variant="outline" size="sm">Go back</Button>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+}

@@ -1,4 +1,5 @@
 'use client';
+import { useRouter } from 'next/navigation';
 
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
@@ -6,6 +7,8 @@ import { toast } from 'sonner';
 import { api } from '@/lib/api-client';
 
 export function CancelReleaseButton({ id }: { id: string }) {
+  const router = useRouter();
+
   const [loading, setLoading] = useState(false);
   async function cancel() {
     if (!confirm('Cancel this seat release? The seat will no longer be available on the marketplace.')) return;
@@ -13,7 +16,7 @@ export function CancelReleaseButton({ id }: { id: string }) {
     try {
       await api.post(`/api/v1/marketplace/seat-releases/${id}/cancel`);
       toast.success('Listing cancelled');
-      window.location.reload();
+      router.refresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed');
     } finally { setLoading(false); }

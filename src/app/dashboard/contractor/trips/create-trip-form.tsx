@@ -1,4 +1,5 @@
 'use client';
+import { useRouter } from 'next/navigation';
 
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
@@ -12,6 +13,8 @@ import { toast } from 'sonner';
 import { api } from '@/lib/api-client';
 
 export function CreateTripForm({ shuttles, routes }: { shuttles: any[]; routes: any[] }) {
+  const router = useRouter();
+
   const [shuttleId, setShuttleId] = useState(shuttles[0]?.id ?? '');
   const [routeId, setRouteId] = useState(routes[0]?.id ?? '');
   const [tripWindow, setTripWindow] = useState<'morning' | 'evening'>('morning');
@@ -29,7 +32,7 @@ export function CreateTripForm({ shuttles, routes }: { shuttles: any[]; routes: 
       const iso = new Date(departureAt).toISOString();
       await api.post('/api/v1/admin/trips', { shuttleId, routeId, departureAt: iso, window: tripWindow });
       toast.success('Trip scheduled');
-      window.location.reload();
+      router.refresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed');
     } finally { setLoading(false); }

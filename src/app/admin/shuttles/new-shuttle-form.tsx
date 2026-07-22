@@ -1,4 +1,5 @@
 'use client';
+import { useRouter } from 'next/navigation';
 
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
@@ -10,6 +11,8 @@ import { toast } from 'sonner';
 import { api } from '@/lib/api-client';
 
 export function NewShuttleForm() {
+  const router = useRouter();
+
   const [form, setForm] = useState({ contractorId: '', plate: '', model: '', vehicleType: 'coaster' as 'coaster' | 'minibus' | 'van' | 'sedan', capacity: 30, year: 2024 });
   const [loading, setLoading] = useState(false);
 
@@ -19,7 +22,7 @@ export function NewShuttleForm() {
     try {
       await api.post('/api/v1/admin/shuttles', form);
       toast.success('Shuttle created');
-      window.location.reload();
+      router.refresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed');
     } finally { setLoading(false); }

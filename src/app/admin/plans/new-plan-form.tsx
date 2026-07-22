@@ -1,4 +1,5 @@
 'use client';
+import { useRouter } from 'next/navigation';
 
 import { useState } from 'react';
 import { Button } from '@/components/ui/button';
@@ -11,6 +12,8 @@ import { toast } from 'sonner';
 import { api } from '@/lib/api-client';
 
 export function NewPlanForm() {
+  const router = useRouter();
+
   const [form, setForm] = useState({ slug: '', name: '', description: '', priceCents: 0, ridesIncluded: 0, durationDays: 30, isTrial: false, sortOrder: 0 });
   const [loading, setLoading] = useState(false);
 
@@ -20,7 +23,7 @@ export function NewPlanForm() {
     try {
       await api.post('/api/v1/admin/plans', form);
       toast.success('Plan created');
-      window.location.reload();
+      router.refresh();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed');
     } finally { setLoading(false); }
