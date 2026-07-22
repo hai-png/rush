@@ -1,4 +1,3 @@
-// List a seat for sale on the marketplace.
 import Link from 'next/link';
 import { requireRole } from '@/lib/session-server';
 import { db } from '@/lib/db';

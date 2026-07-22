@@ -1,5 +1,3 @@
-// Operations — rides (rider books a ride against a subscription or seat claim),
-// trips (contractor boards/completes).
 import { db } from '@/lib/db';
 import { z } from 'zod';
 import { BadRequestError, NotFoundError, ConflictError, ForbiddenError } from '@/lib/errors';
@@ -211,8 +209,6 @@ export async function POST_trip({ session, body, ipAddress, userAgent }: any) {
   return { status: 201, data: trip };
 }
 
-// In production, this would be a ShuttlePosition table + Redis for the live stream.
-
 const positions = new Map<string, { lat: number; lng: number; heading: number; speed: number; updatedAt: number }>();
 
 const PositionInput = z2.object({
@@ -251,7 +247,6 @@ export async function GET_shuttle_positions({ session }: any) {
   return { data: result };
 }
 
-// This is a raw handler (not via api() wrapper) because it returns a stream.
 import { NextRequest, NextResponse } from 'next/server';
 
 export async function handleShuttlePositionStream(req: NextRequest, session: any): Promise<NextResponse> {
@@ -259,7 +254,6 @@ export async function handleShuttlePositionStream(req: NextRequest, session: any
     return NextResponse.json({ error: { code: 'UNAUTHORIZED', message: 'Sign in required' } }, { status: 401 });
   }
   // For MVP, return a simple polling response (not a real SSE stream).
-  // A real implementation would use a ReadableStream + text/event-stream.
   const result: Array<{ lat: number; lng: number; heading: number; speed: number; updatedAt: number }> = [];
   for (const [, pos] of positions) {
     if (Date.now() - pos.updatedAt < 5 * 60_000) result.push(pos);

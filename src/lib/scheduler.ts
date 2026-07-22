@@ -1,6 +1,3 @@
-// In-process scheduler — runs background tasks on intervals.
-// In production this would be a separate worker process or external cron,
-// The scheduler is started lazily on first API request via ensureSchedulerStarted().
 
 import { db } from '@/lib/db';
 import { processRefundRetries } from '@/lib/payment-service';
@@ -15,24 +12,20 @@ export function ensureSchedulerStarted(): void {
   if (started) return;
   started = true;
 
-  // Drain outbox every 30s.
   const outboxTimer = setInterval(drainOutbox, 30_000);
   outboxTimer.unref?.();
   // Run once immediately so dev doesn't have to wait 30s.
   drainOutbox().catch(err => logger.error({ err: (err as Error).message }, '[scheduler] outbox drain failed'));
 
-  // Process refund retries every 60s.
   const refundTimer = setInterval(() => {
     processRefundRetries(20).catch(err => logger.error({ err: (err as Error).message }, '[scheduler] refund processing failed'));
   }, 60_000);
   refundTimer.unref?.();
 
-  // Expire subs + seat releases every 5min.
   const expireTimer = setInterval(expireStale, 5 * 60_000);
   expireTimer.unref?.();
   expireStale().catch(err => logger.error({ err: (err as Error).message }, '[scheduler] expire failed'));
 
-  // Corporate monthly reset + subscription-expiry warnings every hour.
   const hourlyTimer = setInterval(hourlyJobs, 60 * 60_000);
   hourlyTimer.unref?.();
   hourlyJobs().catch(err => logger.error({ err: (err as Error).message }, '[scheduler] hourly failed'));
@@ -131,7 +124,6 @@ async function expireStale(): Promise<void> {
     data: { status: 'expired' },
   });
 
-  // Notify owners of expired subs.
   if (expiredSubs.count > 0) {
     const expired = await db.subscription.findMany({
       where: { status: 'expired', updatedAt: { gt: new Date(Date.now() - 5 * 60_000) } },
@@ -157,8 +149,6 @@ async function hourlyJobs(): Promise<void> {
   await Promise.all([resetCorporateMonthlyCounters(), sendSubscriptionExpiryWarnings()]);
 }
 
-// Reset corporate members' ridesUsedThisMonth counter if it's been more than
-// 30 days since the last reset.
 async function resetCorporateMonthlyCounters(): Promise<void> {
   const cutoff = new Date(Date.now() - 30 * 24 * 3600_000);
   const result = await db.corporateMember.updateMany({
@@ -178,7 +168,6 @@ async function resetCorporateMonthlyCounters(): Promise<void> {
   }
 }
 
-// Send "subscription expiring soon" notification 3 days before endDate.
 async function sendSubscriptionExpiryWarnings(): Promise<void> {
   const threeDaysFromNow = new Date(Date.now() + 3 * 24 * 3600_000);
   const oneDayFromNow = new Date(Date.now() + 24 * 3600_000);
@@ -190,8 +179,6 @@ async function sendSubscriptionExpiryWarnings(): Promise<void> {
     select: { id: true, userId: true, endDate: true },
   });
 
-  // Avoid spamming: only notify if no 'subscription_expiring' notification
-  // exists for this user in the last 24h.
   let notified = 0;
   for (const s of soonExpiring) {
     const recent = await db.notification.findFirst({

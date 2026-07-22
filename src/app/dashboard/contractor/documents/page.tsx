@@ -1,4 +1,3 @@
-// Contractor documents upload + management.
 import Link from 'next/link';
 import { requireRole } from '@/lib/session-server';
 import { db } from '@/lib/db';

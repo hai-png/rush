@@ -1,4 +1,3 @@
-// Corporate members management page — full list with approve/reject/remove.
 import Link from 'next/link';
 import { requireRole } from '@/lib/session-server';
 import { db } from '@/lib/db';

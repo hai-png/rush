@@ -1,4 +1,3 @@
-// Account data export — calls /api/v1/account/export and pretty-prints the JSON.
 import Link from 'next/link';
 import { requireSession } from '@/lib/session-server';
 import { db } from '@/lib/db';

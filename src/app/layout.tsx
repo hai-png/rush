@@ -1,4 +1,3 @@
-// Root layout — sets up providers, fonts, theme.
 import type { Metadata } from 'next';
 import './globals.css';
 import { Providers } from './providers';

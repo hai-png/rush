@@ -1,5 +1,3 @@
-// Route dispatcher — single source of truth for the API surface.
-// Path patterns use :param for path parameters (e.g. /subscriptions/:id).
 
 import { NextRequest } from 'next/server';
 import { api, ApiOptions } from '@/lib/api';
@@ -12,7 +10,6 @@ type RouteEntry = {
   options: ApiOptions;
   handler: Handler;
   // If true, the dispatcher bypasses JSON body parsing + the api() wrapper
-  // multipart upload routes that need raw Request access.
   raw?: boolean;
 };
 
@@ -80,7 +77,6 @@ const ROUTES: RouteEntry[] = [
   r('POST', '/auth/2fa/verify', { requireAuth: true }, identity.POST_2fa_verify),
   r('POST', '/auth/2fa/disable', { requireAuth: true }, identity.POST_2fa_disable),
 
-  // Catalog (public)
   r('GET', '/plans', {}, catalog.GET_plans),
   r('GET', '/routes', {}, catalog.GET_routes),
   r('GET', '/routes/:id', {}, catalog.GET_route),
@@ -91,7 +87,6 @@ const ROUTES: RouteEntry[] = [
   r('GET', '/trips', {}, catalog.GET_trips),
   r('GET', '/faqs', {}, catalog.GET_faqs),
 
-  // Route assignments (monthly commitments)
   r('GET', '/assignments', { requireAuth: true }, assignments.GET_assignments),
   r('GET', '/assignments/:id', { requireAuth: true }, assignments.GET_assignment),
   r('POST', '/admin/assignments', { requireAuth: true, requireRole: ['platform_admin'] }, assignments.POST_assignment),
@@ -99,7 +94,6 @@ const ROUTES: RouteEntry[] = [
   r('POST', '/assignments/:id/reject', { requireAuth: true, requireRole: ['contractor', 'platform_admin'] }, assignments.POST_reject_assignment),
   r('GET', '/contractor/assignments', { requireAuth: true, requireRole: ['contractor', 'platform_admin'] }, assignments.GET_my_assignments),
 
-  // Subscriptions
   r('GET', '/subscriptions', { requireAuth: true }, subscriptions.GET_list),
   r('POST', '/subscriptions', { requireAuth: true }, subscriptions.POST_create),
   r('GET', '/subscriptions/:id', { requireAuth: true }, subscriptions.GET_one),
@@ -107,13 +101,11 @@ const ROUTES: RouteEntry[] = [
   r('DELETE', '/subscriptions/:id', { requireAuth: true }, subscriptions.DELETE_subscription),
   r('POST', '/subscriptions/:id/renew', { requireAuth: true }, subscriptions.POST_renew),
 
-  // Payments
   r('POST', '/payments/checkout', { requireAuth: true }, payments.POST_checkout),
   r('GET', '/payments/:id', { requireAuth: true }, payments.GET_one),
   r('GET', '/payments', { requireAuth: true }, payments.GET_list),
   r('POST', '/payments/:id/refund', { requireAuth: true, requireRole: ['platform_admin'] }, payments.POST_refund),
 
-  // Marketplace (seat releases / claims)
   r('GET', '/marketplace/seat-releases', { requireAuth: true }, marketplace.GET_releases),
   r('GET', '/marketplace/seat-releases/:id', { requireAuth: true }, marketplace.GET_release),
   r('GET', '/marketplace/my-releases', { requireAuth: true }, marketplace.GET_my_releases),
@@ -125,7 +117,6 @@ const ROUTES: RouteEntry[] = [
   r('GET', '/marketplace/seat-claims/:id', { requireAuth: true }, marketplace.GET_claim),
   r('POST', '/marketplace/seat-claims', { requireAuth: true }, marketplace.POST_claim_direct),
 
-  // Operations (rides, trips)
   r('GET', '/rides', { requireAuth: true }, operations.GET_rides),
   r('POST', '/rides', { requireAuth: true }, operations.POST_ride),
   r('PATCH', '/rides/:id', { requireAuth: true }, operations.PATCH_ride),
@@ -137,7 +128,6 @@ const ROUTES: RouteEntry[] = [
   r('POST', '/shuttle-positions', { requireAuth: true, requireRole: ['contractor', 'platform_admin'] }, operations.POST_shuttle_position),
   r('GET', '/shuttle-positions/stream', { requireAuth: true }, operations.handleShuttlePositionStream, true),
 
-  // Support
   r('GET', '/tickets', { requireAuth: true }, support.GET_list),
   r('POST', '/tickets', { requireAuth: true }, support.POST_create),
   r('GET', '/tickets/:id', { requireAuth: true }, support.GET_one),
@@ -146,7 +136,6 @@ const ROUTES: RouteEntry[] = [
   r('POST', '/tickets/:id/messages', { requireAuth: true }, support.POST_message),
   r('POST', '/tickets/:id/messages/with-attachment', { requireAuth: true }, support.handleTicketMessageWithAttachment, true),
 
-  // Engagement (notifications)
   r('GET', '/notifications', { requireAuth: true }, engagement.GET_notifications),
   r('GET', '/notifications/unread-count', { requireAuth: true }, engagement.GET_unread_count),
   r('GET', '/notifications/preferences', { requireAuth: true }, engagement.GET_preferences),
@@ -158,24 +147,20 @@ const ROUTES: RouteEntry[] = [
   r('POST', '/devices', { requireAuth: true }, engagement.POST_device),
   r('DELETE', '/devices', { requireAuth: true }, engagement.DELETE_device),
 
-  // Account
   r('GET', '/account', { requireAuth: true }, account.GET_account),
   r('PATCH', '/account', { requireAuth: true }, account.PATCH_account),
   r('GET', '/account/export', { requireAuth: true }, account.GET_export),
   r('POST', '/account/delete', { requireAuth: true, exemptFromTosGate: true }, account.POST_delete),
 
-  // Dashboard
   r('GET', '/dashboard/rider', { requireAuth: true, requireRole: ['rider', 'platform_admin'] }, dashboard.GET_rider),
   r('GET', '/dashboard/rider/active-trip', { requireAuth: true, requireRole: ['rider', 'platform_admin'] }, dashboard.GET_rider_active_trip),
   r('GET', '/dashboard/contractor', { requireAuth: true, requireRole: ['contractor', 'platform_admin'] }, dashboard.GET_contractor),
   r('GET', '/dashboard/corporate', { requireAuth: true, requireRole: ['corporate_admin', 'platform_admin'] }, dashboard.GET_corporate),
   r('GET', '/dashboard/admin', { requireAuth: true, requireRole: ['platform_admin'] }, dashboard.GET_admin),
 
-  // ToS
   r('GET', '/tos/current', { exemptFromTosGate: true }, tos.GET_current),
   r('POST', '/tos/accept', { requireAuth: true, exemptFromTosGate: true }, tos.POST_accept),
 
-  // Admin
   r('GET', '/admin/users', { requireAuth: true, requireRole: ['platform_admin'] }, admin.GET_users),
   r('GET', '/admin/payments', { requireAuth: true, requireRole: ['platform_admin'] }, admin.GET_payments),
   r('GET', '/admin/payments/:id', { requireAuth: true, requireRole: ['platform_admin'] }, admin.GET_payment),
@@ -197,7 +182,6 @@ const ROUTES: RouteEntry[] = [
   r('POST', '/admin/audit/verify', { requireAuth: true, requireRole: ['platform_admin'] }, admin.POST_audit_verify),
   r('POST', '/admin/trips', { requireAuth: true, requireRole: ['platform_admin', 'contractor'] }, admin.POST_trips),
 
-  // Admin advanced (feature parity)
   r('GET',  '/admin/dashboard', { requireAuth: true, requireRole: ['platform_admin'] }, adminAdvanced.GET_dashboard),
   r('PATCH', '/admin/users/:id', { requireAuth: true, requireRole: ['platform_admin'] }, adminAdvanced.PATCH_user),
   r('POST', '/admin/users/:id/impersonate', { requireAuth: true, requireRole: ['platform_admin'] }, adminAdvanced.POST_impersonate),
@@ -218,29 +202,23 @@ const ROUTES: RouteEntry[] = [
   r('PATCH', '/admin/routes/:id/price', { requireAuth: true, requireRole: ['platform_admin'] }, adminAdvanced.PATCH_route_price),
   r('POST', '/admin/faqs', { requireAuth: true, requireRole: ['platform_admin'] }, admin.POST_faq),
 
-  // Contractor-scoped (the contractor themselves, not admin-gated)
   r('GET', '/contractor/shuttles', { requireAuth: true, requireRole: ['contractor'] }, admin.GET_my_shuttles),
   r('GET', '/contractor/trips', { requireAuth: true, requireRole: ['contractor'] }, admin.GET_my_trips),
 
-  // Webhooks (no auth — but verified via provider signatures / cron secret)
   r('POST', '/webhooks/telebirr/notify', { exemptFromTosGate: true }, webhooks.POST_telebirr_notify),
 
-  // Health (public — for uptime checks + load balancer probes)
   r('GET', '/health', { exemptFromTosGate: true }, health.GET_health),
   r('GET', '/healthz', { exemptFromTosGate: true }, health.GET_healthz),
 
-  // Cron (secret-gated)
   r('POST', '/cron/run', { exemptFromTosGate: true }, cron.POST_run),
   r('GET', '/cron', { exemptFromTosGate: true }, cron.GET_cron_jobs),
 
-  // Telebirr advanced (InApp SDK + Subscription Payment)
   r('POST', '/payments/telebirr/inapp-checkout', { requireAuth: true }, telebirr.POST_inapp_checkout),
   r('POST', '/payments/telebirr/mandate/sign-url', { requireAuth: true }, telebirr.POST_mandate_sign_url),
   r('GET',  '/payments/telebirr/mandate/:mctContractNo', { requireAuth: true }, telebirr.GET_mandate),
   r('POST', '/payments/telebirr/mandate/:mctContractNo/cancel', { requireAuth: true }, telebirr.POST_mandate_cancel),
   r('POST', '/payments/telebirr/disburse', { requireAuth: true, requireRole: ['platform_admin'] }, telebirr.POST_disburse),
 
-  // Corporate
   r('POST', '/corporate/onboard', { requireAuth: true }, corporate.POST_onboard),
   r('GET',  '/corporate', { requireAuth: true, requireRole: ['corporate_admin', 'platform_admin'] }, corporate.GET_current),
   r('GET',  '/corporate/me', { requireAuth: true, requireRole: ['corporate_admin', 'platform_admin'] }, corporate.GET_me),
@@ -255,11 +233,9 @@ const ROUTES: RouteEntry[] = [
   r('PATCH', '/corporate/members/:id', { requireAuth: true, requireRole: ['corporate_admin', 'platform_admin'] }, corporate.PATCH_member),
   r('DELETE', '/corporate/members/:id', { requireAuth: true, requireRole: ['corporate_admin', 'platform_admin'] }, corporate.DELETE_member),
 
-  // Contractor documents (multipart — raw handler)
   r('GET',  '/contractor/documents', { requireAuth: true, requireRole: ['contractor', 'platform_admin'] }, documents.GET_documents),
   r('GET',  '/contractor/documents/:contractorId', { requireAuth: true, requireRole: ['platform_admin'] }, documents.GET_documents_for),
   r('POST', '/contractor/documents', { requireAuth: true, requireRole: ['contractor', 'platform_admin'] }, documents.handleDocumentUpload, true),
 
-  // Files (download is raw so it can stream bytes)
   r('GET',  '/files/:id', { requireAuth: true }, files.handleFileDownload, true),
 ];

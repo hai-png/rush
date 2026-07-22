@@ -1,4 +1,3 @@
-// Account — data export + soft-delete (with hard-delete blocked by app code).
 import { db } from '@/lib/db';
 import { audit } from '@/lib/audit';
 import { enqueueNotification } from '@/lib/outbox';
@@ -31,7 +30,6 @@ export async function GET_export({ session }: any) {
 
 export async function POST_delete({ session, ipAddress, userAgent }: any) {
   // Soft-delete only. Hard-delete is blocked because FKs would cascade unexpectedly.
-  // Anonymize PII but keep the row for audit/financial integrity.
   await db.user.update({
     where: { id: session.id },
     data: {
@@ -82,7 +80,6 @@ export async function PATCH_account({ session, body, ipAddress, userAgent }: any
   const user = await db.user.findUnique({ where: { id: session.id } });
   if (!user) throw new NotFoundError('User not found');
 
-  // If email is changing, validate it's not already taken.
   if (input.email !== undefined && input.email !== user.email) {
     if (input.email) {
       const existing = await db.user.findFirst({ where: { email: input.email, NOT: { id: session.id } } });

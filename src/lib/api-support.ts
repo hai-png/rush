@@ -1,4 +1,3 @@
-// Support — tickets + messages.
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { z } from 'zod';
@@ -88,7 +87,6 @@ export async function POST_message({ session, params, body }: any) {
     return m;
   });
 
-  // Notify the other party.
   const notifyUserId = session.role === 'platform_admin' ? ticket.userId : undefined;
   if (notifyUserId) {
     await enqueueNotification({
@@ -101,8 +99,6 @@ export async function POST_message({ session, params, body }: any) {
   }
   return { status: 201, data: msg };
 }
-
-// (Imports at top of file.)
 
 export async function handleTicketMessageWithAttachment(req: NextRequest, session: any, params: any): Promise<NextResponse> {
   const requestId = crypto.randomUUID();

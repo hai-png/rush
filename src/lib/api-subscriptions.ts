@@ -1,5 +1,3 @@
-// Subscriptions — list, create, fetch, cancel.
-// and returns the checkout URL (telebirr) or instructions (cbe).
 import { db } from '@/lib/db';
 import { z } from 'zod';
 import { Money } from '@/lib/money';
@@ -38,7 +36,6 @@ export async function POST_create({ session, body, ipAddress, userAgent }: any) 
     if (priorTrial) throw new BadRequestError('You have already used the trial plan');
   }
 
-  // Resolve corporate membership if code provided.
   let corporateId: string | undefined;
   if (input.corporateCode) {
     const corp = await db.corporate.findUnique({ where: { code: input.corporateCode } });
@@ -67,7 +64,6 @@ export async function POST_create({ session, body, ipAddress, userAgent }: any) 
     include: { plan: true },
   });
 
-  // Apply corporate subsidy if applicable.
   let riderAmountCents = plan.priceCents;
   let corporateSubsidyCents = 0;
   if (corporateId) {
@@ -78,7 +74,6 @@ export async function POST_create({ session, body, ipAddress, userAgent }: any) 
     }
   }
 
-  // Create the pending payment + checkout (rider pays their share).
   const reference = `PO${createId()}`;
   const provider = getPaymentProvider(input.paymentMethod);
   const env = loadEnv();
@@ -157,7 +152,6 @@ export async function POST_cancel({ session, params, ipAddress, userAgent }: any
   return { data: { id: sub.id, status: 'cancelled' } };
 }
 
-// Creates a new pending payment + checkout URL for the same plan.
 export async function POST_renew({ session, params, body }: any) {
   const sub = await db.subscription.findUnique({
     where: { id: params.id },
@@ -188,7 +182,6 @@ export async function POST_renew({ session, params, body }: any) {
     redirectUrl: env.TELEBIRR_REDIRECT_URL || `${env.APP_BASE_URL}/checkout/complete`,
   });
 
-  // Create a new subscription period.
   const now = new Date();
   const endDate = new Date(now.getTime() + sub.plan.durationDays * 24 * 3600_000);
   const newSub = await db.subscription.create({

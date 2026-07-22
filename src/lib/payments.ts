@@ -1,7 +1,3 @@
-// Payment provider abstraction. Real Telebirr is used when creds are configured;
-// otherwise a mock provider returns a fake checkout URL pointing at /telebirr-stub
-// which simulates the redirect and fires the real webhook handler.
-// CBE is manual bank transfer (no API).
 
 import { Money } from '@/lib/money';
 import { loadEnv } from '@/lib/env';
@@ -43,14 +39,12 @@ export type WebhookEvent =
   | { type: 'refund.succeeded'; refundRequestNo: string; raw: unknown; signatureValid: boolean; timestampMs: number }
   | { type: 'refund.failed'; refundRequestNo: string; raw: unknown; signatureValid: boolean; timestampMs: number };
 
-// complete the payment.
 export type InAppCheckoutResult = {
   prepayId: string;
   receiveCode: string;
   merchOrderId: string;
 };
 
-// later queries / cancels / disburses.
 export type MandateSignUrlResult = {
   mctContractNo: string; // 32-digit numeric, unique per subscription
   signUrl: string; // merchant:// deep link for the front-end SDK to invoke
@@ -82,7 +76,6 @@ export interface PaymentProvider {
   disburse?(opts: { mctContractNo: string; merchOrderId: string; amount: Money; reason: string }): Promise<DisburseResult>;
 }
 
-// stub page simulates the user paying and POSTs to the real webhook endpoint.
 class MockTelebirrProvider implements PaymentProvider {
   readonly name = 'telebirr' as const;
   async createCheckout(intent: PaymentIntent): Promise<CheckoutResult> {
@@ -103,7 +96,6 @@ class MockTelebirrProvider implements PaymentProvider {
   }
   async createInAppOrder(intent: PaymentIntent): Promise<InAppCheckoutResult> {
     // Mock returns the same shape as H5 checkout but with a receiveCode the
-    // mobile SDK would use to launch Telebirr SuperApp.
     console.log(`[MockTelebirr:InApp] createOrder for ${intent.merchOrderId}`);
     return {
       prepayId: `mock-inapp-${intent.merchOrderId}`,
@@ -113,8 +105,6 @@ class MockTelebirrProvider implements PaymentProvider {
   }
   buildMandateSignUrl(opts: { mctContractNo: string; mandateTemplateId: string }): MandateSignUrlResult {
     // In mock mode, point at a local stub page that simulates the mandate-sign
-    // flow. In real mode, this is a `merchant://` deep link the mobile/web SDK
-    // invokes to open Telebirr SuperApp.
     const env = loadEnv();
     const url = new URL('/telebirr-stub', env.APP_BASE_URL);
     url.searchParams.set('mandate', opts.mctContractNo);
@@ -150,7 +140,6 @@ class MockTelebirrProvider implements PaymentProvider {
       throw new Error('Telebirr webhook timestamp too old (replay suspected)');
     }
 
-    // Mock signatures are always considered valid (the stub page generates them).
     const signatureValid = payload.sign === 'mock-signature';
     const outRequestNo = payload.out_request_no ?? `orno-${Date.now()}`;
 
@@ -165,9 +154,6 @@ class MockTelebirrProvider implements PaymentProvider {
   }
 }
 
-//   2. RSA-PSS-SHA256 signature in the request body's `sign` field
-//   - SHA256withRSA with PSS padding + MGF1-SHA256 (NOT PKCS#1 v1.5)
-//   - Exclude fields: sign, sign_type, header, refund_info, openType,
 //   - Sort keys lexicographically, join as k=v&k=v
 class TelebirrProvider implements PaymentProvider {
   readonly name = 'telebirr' as const;
@@ -181,14 +167,12 @@ class TelebirrProvider implements PaymentProvider {
 
   private get webBase(): string {
     // Testbed ends with `?` (the URL builder appends `&field=...`).
-    // Production: confirm with Ethio telecom; using the documented testbed shape.
     return this.env.TELEBIRR_ENV === 'production'
       ? 'https://superapp.ethiomobilemoney.et:38443/payment/web/paygate?'
       : 'https://developerportal.ethiotelebirr.et:38443/payment/web/paygate?';
   }
 
   // Excluded from signing per Telebirr docs. Note: `biz_content` is excluded
-  // as a key but its children ARE flattened and signed.
   private static EXCLUDE_FIELDS = new Set([
     'sign', 'sign_type', 'header', 'refund_info',
     'openType', 'raw_request', 'biz_content', 'wallet_reference_data',
@@ -351,10 +335,8 @@ class TelebirrProvider implements PaymentProvider {
     };
   }
 
-  // Build the user-facing redirect URL: web/paygate?<signed fields>.
   private buildCheckoutUrl(prepayId: string, sign: string): string {
     // Per the docs, the checkout URL is the webBase + a sorted query string
-    // of the biz_content fields + sign + sign_type, then &version=1.0&trade_type=Checkout.
     const timestamp = this.createTimestamp();
     const nonceStr = this.createNonceStr();
     const queryString = [
@@ -369,7 +351,6 @@ class TelebirrProvider implements PaymentProvider {
     return `${this.webBase}${queryString}&version=1.0&trade_type=Checkout`;
   }
 
-  // Returns prepay_id + receiveCode; the mobile SDK launches SuperApp with those.
   async createInAppOrder(intent: PaymentIntent): Promise<InAppCheckoutResult> {
     const bizContent = {
       appid: this.env.TELEBIRR_MERCHANT_APP_ID,
@@ -384,7 +365,6 @@ class TelebirrProvider implements PaymentProvider {
     };
 
     // Note: docs have an inconsistency — spec table says /payment/v1/inapp/createOrder,
-    // sample code says /payment/v1/merchant/inapp/createOrder. Try spec path first.
     let response: any;
     try {
       response = await this.callBusinessApi<{
@@ -435,7 +415,6 @@ class TelebirrProvider implements PaymentProvider {
       return { status: 'pending', raw: response };
     }
 
-    // queryOrder trade_status: WAIT_PAY, PAYING, PAY_SUCCESS, PAY_FAILED,
     // ORDER_CLOSED, ACCEPTED, REFUNDING, REFUND_SUCCESS, REFUND_FAILED
     let status: 'pending' | 'completed' | 'failed' = 'pending';
     if (response.biz_content.trade_status === 'PAY_SUCCESS') status = 'completed';
@@ -485,7 +464,6 @@ class TelebirrProvider implements PaymentProvider {
     }
   }
 
-  // not a backend HTTP API. We just build the URL with the merchant's params.
   buildMandateSignUrl(opts: { mctContractNo: string; mandateTemplateId: string }): MandateSignUrlResult {
     const params = new URLSearchParams({
       mctShortCode: this.env.TELEBIRR_MERCHANT_CODE,
@@ -587,8 +565,6 @@ class TelebirrProvider implements PaymentProvider {
     let payload: any;
     try { payload = JSON.parse(raw); } catch { throw new Error('Invalid telebirr webhook JSON'); }
 
-    // Timestamp: docs say "13 chars" but samples use 10-digit Unix seconds.
-    // Accept either; reject if >5min old (replay protection).
     const ts = typeof payload.timestamp === 'number'
       ? payload.timestamp
       : typeof payload.timestamp === 'string' && payload.timestamp.trim() !== '' && !isNaN(Number(payload.timestamp))
@@ -602,14 +578,11 @@ class TelebirrProvider implements PaymentProvider {
       throw new Error('Telebirr webhook timestamp too old (replay suspected)');
     }
 
-    // Verify signature using SP's public key.
     let signatureValid = false;
     if (typeof payload.sign === 'string' && payload.sign && this.env.TELEBIRR_PUBLIC_KEY) {
       signatureValid = this.verifyTelebirr(payload, payload.sign);
     }
 
-    // Notify trade_status values: Completed, Failure, Pending, Paying, Expired
-    // (different from queryOrder's PAY_SUCCESS/PAY_FAILED)
     const outRequestNo = payload.out_request_no ?? payload.trans_id ?? `orno-${Date.now()}`;
 
     if (payload.refund_request_no) {
@@ -624,7 +597,6 @@ class TelebirrProvider implements PaymentProvider {
       : { type: 'payment.failed', merchOrderId: payload.merch_order_id, raw: payload, signatureValid, timestampMs, outRequestNo };
   }
 }
-
 
 class CbeProvider implements PaymentProvider {
   readonly name = 'cbe' as const;

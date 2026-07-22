@@ -1,5 +1,3 @@
-// Telebirr advanced endpoints — InApp SDK + Subscription Payment.
-//     - Pull funds from a signed mandate (PIN-free). Used by the scheduler.
 
 import { z } from 'zod';
 import { db } from '@/lib/db';
@@ -37,7 +35,6 @@ export async function POST_inapp_checkout({ session, body }: any) {
 
   const result = await provider.createInAppOrder(intent);
 
-  // Create the pending payment row.
   await db.payment.create({
     data: {
       reference,
@@ -73,7 +70,6 @@ export async function POST_mandate_sign_url({ session, body }: any) {
     throw new BadRequestError('Subscription Payment not supported by current provider');
   }
 
-  // Generate a 32-digit numeric contract number (system-unique per Telebirr docs)
   let mctContractNo = '';
   for (let i = 0; i < 32; i++) mctContractNo += Math.floor(Math.random() * 10).toString();
 
@@ -81,10 +77,6 @@ export async function POST_mandate_sign_url({ session, body }: any) {
     mctContractNo,
     mandateTemplateId: input.mandateTemplateId,
   });
-
-  // If subscriptionId was provided, record the contract number on the subscription
-  // (in a real app, you'd add a `telebirrMctContractNo` field to Subscription).
-  // deep link, then polls /mandate/:mctContractNo to confirm signing.
 
   await audit({
     actorId: session.id,
@@ -126,7 +118,6 @@ export async function POST_mandate_cancel({ session, params, ipAddress, userAgen
   return { data: result };
 }
 
-// in production; in dev, any signed-in admin can trigger for testing.
 const DisburseInput = z.object({
   mctContractNo: z.string().length(32),
   amountCents: z.number().int().positive(),

@@ -1,4 +1,3 @@
-// Auth/identity routes. POST /api/v1/auth/* — registration, login, OTP,
 // in src/app/api/v1/[[...route]]/route.ts applies the security middleware.
 
 import { NextResponse } from 'next/server';
@@ -244,7 +243,6 @@ export async function POST_2fa_disable({ session, body }: any) {
   return { status: 204 };
 }
 
-// login confirmation when 2FA is already enabled).
 export async function POST_2fa_verify({ session, body }: any) {
   const { code } = z.object({ code: z.string().length(6) }).parse(body);
   const user = await db.user.findUnique({ where: { id: session!.id } });

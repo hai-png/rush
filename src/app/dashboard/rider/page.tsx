@@ -1,5 +1,3 @@
-// Rider dashboard — active subscriptions, recent rides, recent payments,
-// unread notifications, open tickets.
 import Link from 'next/link';
 import { requireRole } from '@/lib/session-server';
 import { db } from '@/lib/db';

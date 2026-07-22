@@ -11,7 +11,6 @@ import { ChevronLeft } from 'lucide-react';
 
 export default function CorporateSignupPage() {
   // Corporate signup is a 2-step flow: (1) admin signs up + creates a corporate,
-  // MVP slice — show an explanatory page.
   const [code, setCode] = useState('');
   return (
     <div className="min-h-screen flex items-center justify-center p-4 bg-muted/30">

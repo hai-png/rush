@@ -1,12 +1,9 @@
-// Route assignments + pickup locations.
-// schedule pattern (e.g. Mon-Fri → ~22 trips/month).
 
 import { db } from '@/lib/db';
 import { z } from 'zod';
 import { BadRequestError, NotFoundError, ForbiddenError, ConflictError } from '@/lib/errors';
 import { audit } from '@/lib/audit';
 import { logger } from '@/lib/logger';
-
 
 export async function GET_pickups({ params }: any) {
   const pickups = await db.pickupLocation.findMany({
@@ -42,7 +39,6 @@ export async function DELETE_pickup({ session, params, ipAddress, userAgent }: a
   await audit({ actorId: session.id, action: 'pickup.deleted', entityType: 'pickup_location', entityId: params.id, ipAddress, userAgent });
   return { data: { id: params.id, isActive: false } };
 }
-
 
 export async function GET_assignments({ session }: any) {
   const now = new Date();
@@ -93,7 +89,6 @@ export async function POST_assignment({ session, body, ipAddress, userAgent }: a
   if (session.role !== 'platform_admin') throw new ForbiddenError('Admin only');
   const input = AssignmentInput.parse(body);
 
-  // Validate route, contractor, shuttle exist
   const [route, shuttle] = await Promise.all([
     db.route.findUnique({ where: { id: input.routeId } }),
     db.shuttle.findUnique({ where: { id: input.shuttleId } }),
@@ -104,7 +99,6 @@ export async function POST_assignment({ session, body, ipAddress, userAgent }: a
     throw new BadRequestError('Shuttle does not belong to this contractor');
   }
 
-  // Check contractor exists + is verified
   const contractor = await db.user.findUnique({
     where: { id: input.contractorId },
     include: { contractorProfile: true },
@@ -121,7 +115,6 @@ export async function POST_assignment({ session, body, ipAddress, userAgent }: a
   const monthStart = input.monthStart ? new Date(input.monthStart) : new Date(now.getFullYear(), now.getMonth(), 1);
   const monthEnd = new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 0, 23, 59, 59);
 
-  // Check for duplicate assignment (same route + contractor + month)
   const existing = await db.routeAssignment.findUnique({
     where: { routeId_contractorId_monthStart: { routeId: input.routeId, contractorId: input.contractorId, monthStart } },
   });
@@ -142,15 +135,12 @@ export async function POST_assignment({ session, body, ipAddress, userAgent }: a
     include: { route: true, shuttle: true, contractor: { select: { name: true } } },
   });
 
-  // Generate trips from the schedule pattern
   await generateTripsFromAssignment(assignment);
 
   await audit({ actorId: session.id, action: 'assignment.created', entityType: 'route_assignment', entityId: assignment.id, after: input, ipAddress, userAgent });
   return { status: 201, data: assignment };
 }
 
-// Generate individual Trip rows from an assignment's schedule pattern.
-// Runs on assignment creation + can be re-run by the cron to add next month's trips.
 export async function generateTripsFromAssignment(assignment: any): Promise<number> {
   const pattern = JSON.parse(assignment.schedulePattern);
   const { days, windows } = pattern;
@@ -190,7 +180,6 @@ export async function generateTripsFromAssignment(assignment: any): Promise<numb
 
   if (trips.length === 0) return 0;
 
-  // Bulk insert — skip duplicates (same routeId + shuttleId + departureAt)
   let created = 0;
   for (const trip of trips) {
     try {

@@ -179,7 +179,6 @@ export async function DELETE_shuttle({ session, params, ipAddress, userAgent }: 
   return { data: { id: params.id, isActive: false } };
 }
 
-// ─── System settings ────────────────────────────────────────────────────────
 const SettingsInput = z.object({
   key: z.string().min(1).max(100),
   value: z.string(),
@@ -196,7 +195,6 @@ export async function PUT_settings({ session, body, ipAddress, userAgent }: any)
   return { data: input };
 }
 
-// ─── Bulk operations ────────────────────────────────────────────────────────
 const BulkExpireInput = z.object({ subscriptionIds: z.array(z.string()).min(1).max(100) });
 
 export async function POST_bulk_expire({ session, body, ipAddress, userAgent }: any) {
@@ -215,7 +213,6 @@ export async function POST_bulk_suspend({ session, body, ipAddress, userAgent }:
   return { data: { suspended: result.count } };
 }
 
-// ─── Price management ───────────────────────────────────────────────────────
 const PriceUpdateInput = z.object({
   fareCents: z.number().int().nonnegative().optional(),
   distanceKm: z.number().positive().optional(),

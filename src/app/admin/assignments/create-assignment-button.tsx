@@ -48,7 +48,6 @@ export function CreateAssignmentButton() {
     }
   }, [open]);
 
-  // Filter shuttles to those owned by the selected contractor.
   const contractorShuttles = shuttles.filter((s: any) => s.contractorId === contractorId);
 
   async function submit() {

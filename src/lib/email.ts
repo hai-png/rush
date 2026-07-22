@@ -1,4 +1,3 @@
-// Email provider — real Resend integration when API key is set, console.log fallback.
 
 import { loadEnv } from '@/lib/env';
 import { logger } from '@/lib/logger';

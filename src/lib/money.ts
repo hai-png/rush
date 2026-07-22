@@ -1,4 +1,3 @@
-// Money — integer cents (1 ETB = 100 cents). No Decimal.js, no floats.
 export class Money {
   private constructor(public readonly cents: number) {
     if (!Number.isInteger(cents)) throw new Error(`Money must be integer cents, got ${cents}`);

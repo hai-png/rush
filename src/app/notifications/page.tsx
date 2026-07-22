@@ -1,4 +1,3 @@
-// Notifications list — with mark-as-read + mark-all-read buttons.
 import Link from 'next/link';
 import { requireSession } from '@/lib/session-server';
 import { db } from '@/lib/db';

@@ -1,4 +1,3 @@
-// Account delete — confirmation page with a button that soft-deletes the user.
 import Link from 'next/link';
 import { requireSession } from '@/lib/session-server';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';

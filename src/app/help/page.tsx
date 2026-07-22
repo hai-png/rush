@@ -1,4 +1,3 @@
-// Help & FAQ.
 import Link from 'next/link';
 import { db } from '@/lib/db';
 import { Card, CardContent } from '@/components/ui/card';

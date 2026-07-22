@@ -1,5 +1,3 @@
-// Seed — create a platform_admin + sample plans + routes + a shuttle + a trip.
-// Run with: bun run db:seed (package.json script needs to be added).
 
 import { PrismaClient } from '@prisma/client';
 import bcrypt from 'bcryptjs';
@@ -9,7 +7,6 @@ const prisma = new PrismaClient();
 async function main() {
   console.log('Seeding...');
 
-  // Admin user
   const adminPassword = await bcrypt.hash('admin-pass-1234', 12);
   const admin = await prisma.user.upsert({
     where: { phone: '+251911000001' },
@@ -26,7 +23,6 @@ async function main() {
   });
   console.log(`  admin: ${admin.phone} / admin-pass-1234`);
 
-  // Rider demo user
   const riderPassword = await bcrypt.hash('rider-pass-1234', 12);
   const rider = await prisma.user.upsert({
     where: { phone: '+251911000002' },
@@ -44,7 +40,6 @@ async function main() {
   });
   console.log(`  rider: ${rider.phone} / rider-pass-1234`);
 
-  // Contractor demo user
   const contractorPassword = await bcrypt.hash('contractor-pass-1234', 12);
   const contractor = await prisma.user.upsert({
     where: { phone: '+251911000003' },
@@ -68,7 +63,6 @@ async function main() {
   });
   console.log(`  contractor: ${contractor.phone} / contractor-pass-1234`);
 
-  // Plans — trial is paid (no free plan)
   const trialPlan = await prisma.subscriptionPlan.upsert({
     where: { slug: 'trial' },
     update: {},
@@ -179,7 +173,6 @@ async function main() {
   });
   console.log(`  assignment: ${assignment.id} (${assignment.status})`);
 
-  // Trip — tomorrow 8am (linked to the assignment)
   const trip = await prisma.trip.upsert({
     where: { id: 'trip-demo-001' },
     update: {},

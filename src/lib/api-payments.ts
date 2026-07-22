@@ -1,4 +1,3 @@
-// Payments — checkout, fetch, list, refund.
 import { db } from '@/lib/db';
 import { z } from 'zod';
 import { Money } from '@/lib/money';
@@ -47,8 +46,6 @@ export async function POST_refund({ session, params, body, ipAddress, userAgent 
   return { status: 202, data: { ok: true } };
 }
 
-// Checkout is handled as part of subscription create — this endpoint is for
-// re-initiating checkout on an existing pending payment (e.g. user abandoned).
 export async function POST_checkout({ session, body }: any) {
   const { paymentId } = z.object({ paymentId: z.string() }).parse(body);
   const payment = await db.payment.findUnique({ where: { id: paymentId }, include: { subscription: { include: { plan: true } } } });

@@ -32,7 +32,6 @@ export async function issueSession(user: { id: string; phone: string; role: stri
   const jti = createId();
   const expiresAt = new Date(Date.now() + SESSION_TTL_SEC * 1000);
 
-  // Persist a session row for revocation / listing.
   await db.session.create({
     data: {
       id: createId(),
@@ -73,7 +72,6 @@ export async function verifySession(token: string): Promise<SessionUser> {
   const jti = payload.jti!;
   const tv = (payload.tv as number) ?? 0;
 
-  // Check the session row exists & isn't revoked & tokenVersion matches.
   const session = await db.session.findUnique({ where: { jti } });
   if (!session || session.revokedAt || session.expiresAt < new Date()) {
     throw new UnauthorizedError('Session revoked or expired');

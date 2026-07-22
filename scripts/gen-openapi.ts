@@ -5,8 +5,6 @@
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-// The route table isn't exported (it's internal), so we read the source file
-// and extract the routes by regex.
 import { readFileSync } from 'node:fs';
 const source = readFileSync(join(process.cwd(), 'src/lib/api-routes.ts'), 'utf-8');
 const routeRegex = /r\('(GET|POST|PUT|PATCH|DELETE)',\s*'([^']+)'/g;

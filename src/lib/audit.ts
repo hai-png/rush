@@ -1,8 +1,6 @@
 // Hash-chained append-only audit log. Each entry's hash = sha256(canonical-json(payload)).
 // Append-only is enforced in app code — there is no update/delete path exposed.
 // Note: createdAt is NOT part of the hash because SQLite's DateTime rounding can
-// shift the ms by 1-2 between the JS Date used at compute time and the value
-// stored in the DB, which would break verification.
 import { db } from '@/lib/db';
 import { createHash } from 'node:crypto';
 

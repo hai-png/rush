@@ -1,5 +1,3 @@
-// Corporate endpoints:
-//   GET  /api/v1/corporate           — get the current corporate_admin's corporate
 
 import { db } from '@/lib/db';
 import { z } from 'zod';
@@ -27,7 +25,7 @@ export async function POST_onboard({ session, body, ipAddress, userAgent }: any)
 
   const corp = await db.$transaction(async (tx) => {
     await tx.user.update({ where: { id: session.id }, data: { role: 'corporate_admin' } });
-    return tx.corporate.create({
+    const newCorp = await tx.corporate.create({
       data: {
         code,
         name: input.name,
@@ -38,15 +36,15 @@ export async function POST_onboard({ session, body, ipAddress, userAgent }: any)
         adminUserId: session.id,
       },
     });
-  });
-
-  await db.corporateMember.create({
-    data: {
-      corporateId: corp.id,
-      userId: session.id,
-      employeeId: 'ADMIN',
-      approvalStatus: 'approved',
-    },
+    await tx.corporateMember.create({
+      data: {
+        corporateId: newCorp.id,
+        userId: session.id,
+        employeeId: 'ADMIN',
+        approvalStatus: 'approved',
+      },
+    });
+    return newCorp;
   });
 
   await audit({

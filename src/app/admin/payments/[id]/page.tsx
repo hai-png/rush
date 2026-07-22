@@ -1,4 +1,3 @@
-// Admin payment detail — show full payment info + refund trigger.
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { requireRole } from '@/lib/session-server';

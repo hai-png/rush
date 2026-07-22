@@ -1,4 +1,3 @@
-// Account — overview, link to export + delete.
 import Link from 'next/link';
 import { requireSession } from '@/lib/session-server';
 import { db } from '@/lib/db';

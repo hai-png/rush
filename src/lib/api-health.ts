@@ -1,5 +1,3 @@
-// Health check endpoint. Public (no auth). Returns DB + provider status.
-// Used by uptime checks (UptimeRobot, BetterStack, etc.) and load balancer probes.
 
 import { db } from '@/lib/db';
 import { loadEnv } from '@/lib/env';
@@ -8,7 +6,6 @@ export async function GET_health() {
   const start = Date.now();
   const env = loadEnv();
 
-  // Check DB connectivity.
   let dbOk = true;
   let dbError: string | undefined;
   try {

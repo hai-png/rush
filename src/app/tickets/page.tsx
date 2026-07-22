@@ -1,4 +1,3 @@
-// Tickets list + new ticket link.
 import Link from 'next/link';
 import { requireSession } from '@/lib/session-server';
 import { db } from '@/lib/db';

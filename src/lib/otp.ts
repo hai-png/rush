@@ -1,7 +1,3 @@
-// OTP service — phone-based one-time codes for signup verification, password
-// In dev (NODE_ENV !== 'production'), the code is logged to the console and
-// also returned to the caller so the test UI can display it. In production
-// the code is only sent via SMS (mocked here as a console log).
 import { db } from '@/lib/db';
 import { randomInt } from 'node:crypto';
 import { hashPassword, verifyPassword } from '@/lib/auth';
@@ -20,7 +16,6 @@ export async function sendOtp(rawPhone: string, purpose: OtpPurpose): Promise<{ 
     data: { expiresAt: new Date(0) },
   });
 
-  // Rate-limit: max 3 unverified codes per phone per 10 min.
   const recent = await db.otpCode.count({
     where: {
       phone,
@@ -43,8 +38,6 @@ export async function sendOtp(rawPhone: string, purpose: OtpPurpose): Promise<{ 
     },
   });
 
-  // In dev, return the code so the UI can auto-fill. In prod, send via SMS.
-  // SMS is mocked either way (console.log).
   if (process.env.NODE_ENV !== 'production') {
     console.log(`[OTP] ${phone} (${purpose}): ${code}`);
   }

@@ -1,4 +1,3 @@
-// Dashboards — per-role summary views.
 import { db } from '@/lib/db';
 
 export async function GET_rider({ session }: any) {

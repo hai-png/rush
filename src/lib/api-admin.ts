@@ -1,5 +1,3 @@
-// Admin — users, payments, plans, contractors, shuttles, routes, tickets,
-// audit logs. All routes require platform_admin role (enforced in the route table).
 import { db } from '@/lib/db';
 import { z } from 'zod';
 import { Money } from '@/lib/money';
@@ -157,7 +155,6 @@ export async function POST_ticket_message({ session, params, body }: any) {
     return m;
   });
 
-  // Notify the ticket owner (the rider) that admin replied.
   if (ticket.userId !== session.id) {
     await enqueueNotification({
       userId: ticket.userId,
@@ -175,9 +172,6 @@ export async function POST_audit_verify() {
   const result = await verifyAuditChain();
   return { data: result };
 }
-
-// Keep Money import for future use (admin endpoints may need it).
-
 
 export async function GET_payment({ params }: any) {
   const payment = await db.payment.findUnique({
@@ -212,7 +206,6 @@ export async function POST_refund({ session, params, body, ipAddress, userAgent 
   return { status: 202, data: { ok: true, message: 'Refund scheduled' } };
 }
 
-
 const PlanUpdateInput = z.object({
   name: z.string().min(1).optional(),
   description: z.string().optional(),
@@ -235,7 +228,6 @@ export async function PATCH_plan({ session, params, body, ipAddress, userAgent }
   return { data: updated };
 }
 
-
 const RouteUpdateInput = z.object({
   origin: z.string().min(1).optional(),
   destination: z.string().min(1).optional(),
@@ -254,7 +246,6 @@ export async function PATCH_route({ session, params, body, ipAddress, userAgent 
   return { data: updated };
 }
 
-
 const ShuttleUpdateInput = z.object({
   model: z.string().min(1).optional(),
   vehicleType: z.enum(['coaster', 'minibus', 'van', 'sedan']).optional(),
@@ -271,8 +262,6 @@ export async function PATCH_shuttle({ session, params, body, ipAddress, userAgen
   await audit({ actorId: session.id, action: 'shuttle.updated', entityType: 'shuttle', entityId: params.id, after: input, ipAddress, userAgent });
   return { data: updated };
 }
-
-// only on their own shuttles.
 
 const TripInput = z.object({
   routeId: z.string().min(1),
@@ -308,14 +297,12 @@ export async function POST_trips({ body, session, ipAddress, userAgent }: any) {
   return { status: 201, data: trip };
 }
 
-// Contractor: list their own shuttles (for the trip-creation form).
 export async function GET_my_shuttles({ session }: any) {
   if (session.role !== 'contractor') throw new ForbiddenError('Contractor only');
   const shuttles = await db.shuttle.findMany({ where: { contractorId: session.id }, orderBy: { plate: 'asc' } });
   return { data: shuttles };
 }
 
-// Contractor: list their trips (past + upcoming).
 export async function GET_my_trips({ session }: any) {
   if (session.role !== 'contractor') throw new ForbiddenError('Contractor only');
   const trips = await db.trip.findMany({
