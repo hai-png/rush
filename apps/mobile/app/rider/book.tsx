@@ -13,10 +13,23 @@ export default function BookScreen() {
   const [booking, setBooking] = useState(false);
 
   useEffect(() => {
+    // P0-14: fetch the trip + its route's pickup locations. The original code
+    // only fetched /subscriptions and left `pickups` as [], so the screen
+    // title said "Choose Pickup Location" but the list was always empty.
     Promise.all([
-      api.get<any>('/subscriptions').then(s => setSubs((s || []).filter((x: any) => x.status === 'active'))),
+      api.get<any>('/subscriptions').then(s => setSubs((s || []).filter((x: any) => x.status === 'active'))).catch(() => setSubs([])),
+      api.get<any>('/trips').then((trips: any) => {
+        const trip = (trips || []).find((t: any) => t.id === tripId);
+        if (trip?.route?.pickups) {
+          setPickups(trip.route.pickups.filter((p: any) => p.isActive !== false));
+        } else if (trip?.routeId) {
+          // Fall back to fetching pickups via the catalog endpoint if the trip
+          // response doesn't include nested pickups.
+          return api.get<any>(`/routes/${trip.routeId}/pickups`).then((p: any) => setPickups(p || [])).catch(() => setPickups([]));
+        }
+      }).catch(() => setPickups([])),
     ]).finally(() => setLoading(false));
-  }, []);
+  }, [tripId]);
 
   async function book(pickupId?: string) {
     if (subs.length === 0) {
