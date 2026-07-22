@@ -183,6 +183,22 @@ export async function GET_invites({ session, query }: any) {
   return { data: invites };
 }
 
+// P1 / API-014: revoke a corporate invite (set isActive=false). A revoked
+// invite can no longer be used to sign up.
+export async function DELETE_invite({ session, params, query, ipAddress, userAgent }: any) {
+  if (session.role !== 'corporate_admin' && session.role !== 'platform_admin') {
+    throw new ForbiddenError('Corporate admin only');
+  }
+  const corp = await resolveCorporate(session, query?.corporateId);
+  if (!corp) throw new NotFoundError('No corporate found');
+  const invite = await db.corporateInvite.findUnique({ where: { id: params.id } });
+  if (!invite || invite.corporateId !== corp.id) throw new NotFoundError('Invite not found');
+  const before = invite;
+  await db.corporateInvite.update({ where: { id: params.id }, data: { isActive: false } });
+  await audit({ actorId: session.id, action: 'corporate.invite_revoked', entityType: 'corporate_invite', entityId: params.id, before, after: { isActive: false }, ipAddress, userAgent });
+  return { data: { id: params.id, isActive: false } };
+}
+
 const SignupInput = z.object({
   inviteCode: z.string().min(8).max(32),
   employeeId: z.string().min(1).max(50),

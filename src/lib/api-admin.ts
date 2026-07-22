@@ -321,3 +321,28 @@ export async function POST_faq({ session, body, ipAddress, userAgent }: any) {
   await audit({ actorId: session.id, action: 'faq.created', entityType: 'faq_article', entityId: faq.id, after: input, ipAddress, userAgent });
   return { status: 201, data: faq };
 }
+
+// P1 / API-017: soft-delete a plan (set isActive=false). Blocks if there are
+// active subscriptions on it.
+export async function DELETE_plan({ session, params, ipAddress, userAgent }: any) {
+  const plan = await db.subscriptionPlan.findUnique({ where: { id: params.id } });
+  if (!plan) throw new NotFoundError('Plan not found');
+  const activeSubs = await db.subscription.count({ where: { planId: params.id, status: 'active' } });
+  if (activeSubs > 0) {
+    throw new BadRequestError(`Cannot delete plan with ${activeSubs} active subscription(s).`);
+  }
+  const before = plan;
+  await db.subscriptionPlan.update({ where: { id: params.id }, data: { isActive: false } });
+  await audit({ actorId: session.id, action: 'plan.deleted', entityType: 'subscription_plan', entityId: params.id, before, after: { isActive: false }, ipAddress, userAgent });
+  return { data: { id: params.id, isActive: false } };
+}
+
+// P1 / API-017: hard-delete a FAQ (no FK dependencies).
+export async function DELETE_faq({ session, params, ipAddress, userAgent }: any) {
+  const faq = await db.faqArticle.findUnique({ where: { id: params.id } });
+  if (!faq) throw new NotFoundError('FAQ not found');
+  const before = faq;
+  await db.faqArticle.delete({ where: { id: params.id } });
+  await audit({ actorId: session.id, action: 'faq.deleted', entityType: 'faq_article', entityId: params.id, before, ipAddress, userAgent });
+  return { data: { id: params.id, deleted: true } };
+}

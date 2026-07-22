@@ -110,6 +110,38 @@ export async function POST_activate_corporate({ session, params, ipAddress, user
   return { data: { id: params.id, isActive: true } };
 }
 
+// P1 / API-013: deactivate a corporate (soft-delete). Blocks if there are
+// active subscriptions — admin must expire/cancel them first.
+export async function DELETE_corporate({ session, params, ipAddress, userAgent }: any) {
+  const corp = await db.corporate.findUnique({ where: { id: params.id } });
+  if (!corp) throw new NotFoundError('Corporate not found');
+  const activeSubs = await db.subscription.count({
+    where: { corporateId: params.id, status: 'active' },
+  });
+  if (activeSubs > 0) {
+    throw new BadRequestError(`Cannot deactivate corporate with ${activeSubs} active subscription(s). Expire or cancel them first.`);
+  }
+  const before = corp;
+  await db.corporate.update({ where: { id: params.id }, data: { isActive: false, deletedAt: new Date() } });
+  await audit({ actorId: session.id, action: 'corporate.deactivated', entityType: 'corporate', entityId: params.id, before, after: { isActive: false }, ipAddress, userAgent });
+  return { data: { id: params.id, isActive: false } };
+}
+
+// P1 / API-013: list ALL corporates (the existing GET /admin/corporates/pending
+// returns active corporates, which is misleading).
+export async function GET_corporates({ query }: any) {
+  const filter: any = {};
+  if (query?.status === 'active') filter.isActive = true;
+  if (query?.status === 'inactive') filter.isActive = false;
+  const corporates = await db.corporate.findMany({
+    where: filter,
+    include: { _count: { select: { members: true, subscriptions: true, invites: true } } },
+    orderBy: { createdAt: 'desc' },
+    take: 200,
+  });
+  return { data: corporates };
+}
+
 export async function GET_admin_subscriptions() {
   const subs = await db.subscription.findMany({ include: { user: { select: { name: true, phone: true, email: true } }, plan: true, corporate: { select: { name: true } }, _count: { select: { payments: true, rides: true } } }, orderBy: { createdAt: 'desc' }, take: 200 });
   return { data: subs };
