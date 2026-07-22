@@ -227,7 +227,48 @@ async function expireStale(): Promise<void> {
 }
 
 async function hourlyJobs(): Promise<void> {
-  await Promise.all([resetCorporateMonthlyCounters(), sendSubscriptionExpiryWarnings()]);
+  await Promise.all([resetCorporateMonthlyCounters(), sendSubscriptionExpiryWarnings(), retentionJobs()]);
+}
+
+// P1 / DB-033..039: retention jobs. Without these, the Session, Notification,
+// OutboxEvent, IdempotencyRecord, OtpCode, TelebirrNotifyEvent, and RefundRetry
+// tables grow unbounded — after a year of operation they have millions of rows
+// and queries slow down. We delete rows older than the retention window.
+// AuditLog is NOT cleaned up here — financial/compliance retention requires 7+
+// years and is a separate concern.
+async function retentionJobs(): Promise<void> {
+  const now = new Date();
+  const THIRTY_DAYS = new Date(now.getTime() - 30 * 24 * 3600_000);
+  const NINETY_DAYS = new Date(now.getTime() - 90 * 24 * 3600_000);
+  const SEVEN_DAYS = new Date(now.getTime() - 7 * 24 * 3600_000);
+
+  const jobs = [
+    // Expired or revoked sessions older than 30 days.
+    { name: 'sessions', fn: () => db.session.deleteMany({ where: { OR: [{ revokedAt: { lt: THIRTY_DAYS } }, { expiresAt: { lt: now } }] } }) },
+    // Read notifications older than 90 days (unread ones preserved — user might still want them).
+    { name: 'notifications', fn: () => db.notification.deleteMany({ where: { readAt: { lt: NINETY_DAYS } } }) },
+    // Outbox events delivered or dead older than 30 days.
+    { name: 'outbox', fn: () => db.outboxEvent.deleteMany({ where: { status: { in: ['delivered', 'dead'] }, updatedAt: { lt: THIRTY_DAYS } } }) },
+    // Idempotency records older than their expiry (24h TTL).
+    { name: 'idempotency', fn: () => db.idempotencyRecord.deleteMany({ where: { expiresAt: { lt: now } } }) },
+    // OTP codes older than 7 days.
+    { name: 'otp_codes', fn: () => db.otpCode.deleteMany({ where: { expiresAt: { lt: SEVEN_DAYS } } }) },
+    // Telebirr notify events older than 90 days (after dispute window).
+    { name: 'telebirr_notify', fn: () => db.telebirrNotifyEvent.deleteMany({ where: { receivedAt: { lt: NINETY_DAYS } } }) },
+    // Refund retries in terminal state older than 90 days.
+    { name: 'refund_retries', fn: () => db.refundRetry.deleteMany({ where: { status: { in: ['succeeded', 'permanent_failure'] }, updatedAt: { lt: NINETY_DAYS } } }) },
+  ];
+
+  for (const job of jobs) {
+    try {
+      const result = await job.fn();
+      if (result.count > 0) {
+        logger.info({ job: job.name, deleted: result.count }, '[scheduler] retention job');
+      }
+    } catch (err) {
+      logger.error({ err: (err as Error).message, job: job.name }, '[scheduler] retention job failed');
+    }
+  }
 }
 
 async function resetCorporateMonthlyCounters(): Promise<void> {

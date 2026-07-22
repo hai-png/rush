@@ -41,20 +41,35 @@ export async function settlePayment(reference: string, reportedAmount: Money | u
     const p = await tx.payment.findUnique({ where: { reference } });
     if (!p) return false;
 
-    if (reportedAmount) {
-      const expected = Money.fromCents(p.amountCents);
-      if (!expected.eq(reportedAmount)) {
-        await tx.payment.update({ where: { id: p.id }, data: { status: 'failed' } });
-        sideEffects.push(async () => {
-          await audit({
-            action: 'payment.amount_mismatch',
-            entityType: 'payment',
-            entityId: p.id,
-            after: { expected: p.amountCents, reported: reportedAmount.cents },
-          });
+    // P1-22 / BIZ-029: require reportedAmount for settlement. Previously,
+    // if the webhook payload omitted `total_amount`, the amount-mismatch
+    // check was skipped and the payment settled for whatever was originally
+    // recorded — a malicious or buggy Telebirr could send a no-amount
+    // webhook for a 1-ETB payment on a 1500-ETB order and settle it.
+    if (!reportedAmount) {
+      await tx.payment.update({ where: { id: p.id }, data: { status: 'failed' } });
+      sideEffects.push(async () => {
+        await audit({
+          action: 'payment.amount_missing',
+          entityType: 'payment',
+          entityId: p.id,
+          after: { reason: 'webhook payload omitted total_amount' },
         });
-        return false;
-      }
+      });
+      return false;
+    }
+    const expected = Money.fromCents(p.amountCents);
+    if (!expected.eq(reportedAmount)) {
+      await tx.payment.update({ where: { id: p.id }, data: { status: 'failed' } });
+      sideEffects.push(async () => {
+        await audit({
+          action: 'payment.amount_mismatch',
+          entityType: 'payment',
+          entityId: p.id,
+          after: { expected: p.amountCents, reported: reportedAmount.cents },
+        });
+      });
+      return false;
     }
 
     if (p.subscriptionId) {
@@ -199,6 +214,28 @@ export async function scheduleRefund(paymentId: string, amount: Money, reason: s
         reason,
       },
     });
+    // P1-25 / BIZ-032: reserve the refund amount atomically with a CAS on
+    // refundAmountCents. Two concurrent scheduleRefund calls both read the
+    // same refundAmountCents and both pass the gt(original) check, but only
+    // one CAS succeeds — the loser's tx rolls back (the RefundRetry row is
+    // also rolled back, so no orphaned retry is scheduled).
+    const reserveCas = await tx.payment.updateMany({
+      where: {
+        id: paymentId,
+        // Only succeed if the new total still fits within the original amount.
+        // SQLite doesn't support expression-based where-clauses, so we re-read
+        // the refundAmountCents we just saw — if a concurrent refund bumped
+        // it, this CAS won't match and we throw.
+        refundAmountCents: payment.refundAmountCents,
+      },
+      data: {
+        refundAmountCents: payment.refundAmountCents + amount.cents,
+        status: 'partially_refunded',
+      },
+    });
+    if (reserveCas.count === 0) {
+      throw new BadRequestError('Concurrent refund detected — please retry. The original refund was not scheduled.');
+    }
     const userId = payment.userId;
     sideEffects.push(async () => {
       await audit({

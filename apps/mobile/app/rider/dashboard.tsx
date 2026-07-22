@@ -1,8 +1,9 @@
 import { View, Text, FlatList, TouchableOpacity, StyleSheet, RefreshControl } from 'react-native';
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect } from 'react';
 import { router } from 'expo-router';
 import { api } from '../../src/lib/api';
 import { useFocusEffect } from '@react-navigation/native';
+import { registerForPushNotifications, listenForNotifications } from '../../src/lib/push';
 
 type Assignment = {
   id: string;
@@ -18,9 +19,11 @@ export default function RiderDashboard() {
   const [assignments, setAssignments] = useState<Assignment[]>([]);
   const [subs, setSubs] = useState<any[]>([]);
   const [refreshing, setRefreshing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     setRefreshing(true);
+    setError(null);
     try {
       const [a, s] = await Promise.all([
         api.get<Assignment[]>('/assignments'),
@@ -28,11 +31,23 @@ export default function RiderDashboard() {
       ]);
       setAssignments(a || []);
       setSubs((s || []).filter((s: any) => s.status === 'active'));
-    } catch {}
+    } catch (e) {
+      setError(e instanceof Error ? e.message : 'Failed to load');
+      setAssignments([]);
+      setSubs([]);
+    }
     setRefreshing(false);
   }, []);
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
+
+  // P1-45 / FE-022: register for push notifications on mount.
+  useEffect(() => {
+    registerForPushNotifications().catch(() => {});
+    // Listen for incoming notifications while the app is foregrounded.
+    const unsub = listenForNotifications();
+    return unsub;
+  }, []);
 
   const activeSub = subs[0];
 
