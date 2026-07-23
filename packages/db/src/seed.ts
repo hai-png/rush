@@ -46,13 +46,13 @@ async function main() {
 function mkRoute(name: string, origin: string, destination: string, distanceKm: number, durationMin: number) {
   return {
     name, origin, destination, distanceKm, durationMin,
-    stops: [], polyline: [], originLatLng: [9.0, 38.7], destLatLng: [9.03, 38.75],
+    stops: [], polyline: [], originLatLng: mkCoord(origin), destLatLng: mkCoord(destination),
     morningWindow: { start: '06:30', end: '09:00' }, eveningWindow: { start: '16:30', end: '19:30' },
     fare: '60.00',
   };
 }
 async function mkUser(phone: string, name: string, role: 'rider' | 'contractor' | 'corporate_admin') {
-  return { phone, name, role, passwordHash: await hashPassword('demo12345'), phoneVerified: true };
+  return { phone, name, role, passwordHash: await hashPassword('demo123456'), phoneVerified: true };
 }
 
 main().then(() => process.exit(0)).catch((e) => { console.error(e); process.exit(1); });

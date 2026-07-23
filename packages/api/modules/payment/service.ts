@@ -71,16 +71,7 @@ export async function failPayment(reference: string, reasonRaw: unknown): Promis
   });
 }
 
-// PAY-003: scheduleRefund now opens its own transaction with a row lock on the
-// payment when called without a tx, preventing concurrent refund requests from
-// both passing the "would exceed" check and over-refunding the customer. The
-// lock is acquired with `for('update')` inside the transaction; the existing
-// `tx` parameter is preserved for callers that already hold a transaction
-// (e.g. subscription.cancel) — in that case the caller is responsible for
-// having acquired the lock.
 export async function scheduleRefund(paymentId: string, amount: Money, reason: string, tx: import('@addis/db').DbOrTx = db) {
-  // If the caller passed the default `db`, wrap in a transaction + row lock.
-  // If they passed a real tx, assume they've already acquired the lock.
   const run = async (txOrDb: import('@addis/db').DbOrTx) => {
     const [payment] = await (txOrDb as any).select().from(schema.payments).where(eq(schema.payments.id, paymentId)).for('update');
     if (!payment) throw new NotFoundError(`Payment ${paymentId} not found`);
@@ -103,7 +94,6 @@ export async function scheduleRefund(paymentId: string, amount: Money, reason: s
     });
   };
 
-  // Detect whether `tx` is a transaction (has `rollback`) or the top-level db.
   if (tx === db || typeof (tx as any).rollback !== 'function') {
     return db.transaction(async (innerTx) => run(innerTx));
   }
@@ -112,21 +102,11 @@ export async function scheduleRefund(paymentId: string, amount: Money, reason: s
 
 const BACKOFF_MIN = [15, 30, 60, 120, 240];
 
-// PAY-002: rewrite processRefundRetries to use the typed drizzle query builder
-// instead of raw SQL. The previous raw-SQL `RETURNING *` returned rows with
-// snake_case column names (`payment_id`, `attempts`, etc.) — but the loop
-// accessed `retry.paymentId`, `retry.attempts`, etc. (camelCase), which were
-// all `undefined`. Every refund silently failed with a TypeError, ending up
-// in permanent_failure. The integration test missed this because it mocks
-// @addis/db entirely.
 export async function processRefundRetries(limit = 50) {
-  // Reset stale 'processing' rows back to 'pending' (worker crashed mid-flight).
   await db.update(schema.refundRetries)
     .set({ status: 'pending', updatedAt: new Date() })
     .where(and(eq(schema.refundRetries.status, 'processing'), sql`${schema.refundRetries.updatedAt} < now() - interval '15 minutes'`));
 
-  // Claim a batch using FOR UPDATE SKIP LOCKED. Use the query builder so we
-  // get typed camelCase rows.
   const claimed = await db.transaction(async (tx) => {
     const rows = await tx.select().from(schema.refundRetries)
       .where(and(eq(schema.refundRetries.status, 'pending'), sql`${schema.refundRetries.nextAttemptAt} <= now()`))

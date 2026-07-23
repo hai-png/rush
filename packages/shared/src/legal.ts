@@ -4,6 +4,11 @@ export function getDpoContact(): string {
   return process.env.DPO_EMAIL || 'dpo@addisride.et';
 }
 
+export function getDpoContactEmail(): string {
+  return getDpoContact();
+}
+
+/** @deprecated Use getDpoContactEmail() instead. */
 export const DPO_CONTACT = getDpoContact();
 
 export const PAYMENT_RETENTION_YEARS = 7;

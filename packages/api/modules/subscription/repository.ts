@@ -76,9 +76,9 @@ export const subscriptionRepo = {
       .where(and(eq(schema.subscriptions.id, subscriptionId), eq(schema.subscriptions.status, 'active')));
   },
 
-  async incrementRidesUsed(tx = db, subscriptionId: string) {
+  async incrementRidesUsed(tx = db, subscriptionId: string): Promise<boolean> {
 
-    await tx.execute(sql`
+    const result = await tx.execute(sql`
       UPDATE subscriptions SET rides_used = rides_used + 1, updated_at = now()
       WHERE id = ${subscriptionId}
         AND status = 'active'
@@ -87,5 +87,7 @@ export const subscriptionRepo = {
           OR (SELECT rides_included FROM subscription_plans WHERE id = subscriptions.plan_id) > rides_used
         )
     `);
+    const count = (result as unknown as { rowCount?: number }).rowCount ?? 0;
+    return count > 0;
   },
 };

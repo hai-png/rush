@@ -19,10 +19,6 @@ async function assertTwoFactor(c: { get: (k: symbol) => unknown; set: (k: symbol
   c.set(TWO_FACTOR_CHECKED, true);
 }
 
-// SEC-009: privileged roles (corporate_admin, platform_admin) must have a
-// verified phone before they can use session-gated routes. This prevents
-// someone from creating a corporate_admin account with someone else's phone
-// number and immediately accessing admin endpoints.
 async function assertPhoneVerified(c: { get: (k: symbol) => unknown; set: (k: symbol, v: unknown) => void }, userId: string, role: string): Promise<void> {
   if (!TWO_FA_REQUIRED_ROLES.includes(role as any)) return;
   if (c.get(PHONE_VERIFIED_CHECKED)) return;
@@ -41,14 +37,6 @@ export const authMiddleware: MiddlewareHandler = async (c, next) => {
   const cookieToken = getCookie(c, '__Secure-session-token');
   const token = bearer ?? cookieToken;
 
-  // SEC-001: If a credential (bearer or session cookie) is present, a verification
-  // failure must propagate as 401 — never silently downgrade to anonymous. Silent
-  // downgrade allows:
-  //   - revoked/expired tokens to bypass route guards on optional-auth routes
-  //   - cross-site requests with a stolen/expired bearer to skip CSRF (since
-  //     csrf.ts skips CSRF when a bearer is present)
-  // Only swallow truly unexpected (non-AppError) throws, and even then log at
-  // error level so ops can detect bugs.
   if (token) {
     try {
       const { user, jti, impersonatedBy } = await identityService.verifySession(token);
@@ -58,16 +46,8 @@ export const authMiddleware: MiddlewareHandler = async (c, next) => {
       });
     } catch (err) {
       if (err instanceof AppError) {
-        // Unauthorized / Forbidden — propagate so the route handler (or
-        // requireAuth/requireRole) returns the correct status. Optional-auth
-        // routes that don't call requireAuth will still see no session set,
-        // but the explicit throw ensures the client knows their credential
-        // is invalid.
         throw err;
       }
-      // Non-AppError throws indicate a bug (DB connection, JWT lib, etc.).
-      // Log and continue anonymous — better to serve the request degraded
-      // than to 500 on a public route.
       const logger = c.get('logger');
       logger?.error({ err: (err as Error).message }, 'verifySession threw non-AppError; session left unset');
     }

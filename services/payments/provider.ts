@@ -19,11 +19,13 @@ export type RefundResult =
   | { status: 'succeeded' }
   | { status: 'processing'; retryAfterMs: number }
   | { status: 'failed'; error: string; permanent: boolean };
+export type NonceStr = string;
+
 export type WebhookEvent =
-  | { type: 'payment.settled'; merchOrderId: string; amount: Money; raw: unknown; signatureValid: boolean; timestampMs?: number }
-  | { type: 'payment.failed'; merchOrderId: string; raw: unknown; signatureValid: boolean; timestampMs?: number }
-  | { type: 'refund.succeeded'; refundRequestNo: string; raw: unknown; signatureValid: boolean; timestampMs?: number }
-  | { type: 'refund.failed'; refundRequestNo: string; raw: unknown; signatureValid: boolean; timestampMs?: number };
+  | { type: 'payment.settled'; merchOrderId: string; amount: Money; nonceStr: NonceStr; raw: unknown; signatureValid: boolean; timestampMs?: number }
+  | { type: 'payment.failed'; merchOrderId: string; nonceStr: NonceStr; raw: unknown; signatureValid: boolean; timestampMs?: number }
+  | { type: 'refund.succeeded'; refundRequestNo: string; nonceStr: NonceStr; raw: unknown; signatureValid: boolean; timestampMs?: number }
+  | { type: 'refund.failed'; refundRequestNo: string; nonceStr: NonceStr; raw: unknown; signatureValid: boolean; timestampMs?: number };
 
 export interface PaymentProvider {
   readonly name: PaymentMethod;

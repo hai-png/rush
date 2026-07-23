@@ -25,11 +25,6 @@ export const engagementService = {
   },
 
   async dispatch(envelope: NotificationEnvelope) {
-    // SEC-010: refuse to dispatch notifications to soft-deleted users. The
-    // in-app notification is still written (so audit/data-export includes
-    // it), but SMS/push/email channels are skipped — preventing notification
-    // leaks to recycled phone numbers / reassigned email addresses during
-    // the 30-day grace period before anonymization.
     const [user] = await db.select({ isActive: schema.users.isActive, deletedAt: schema.users.deletedAt })
       .from(schema.users).where(eq(schema.users.id, envelope.userId));
     const userDeleted = !user || !user.isActive || !!user.deletedAt;
@@ -52,9 +47,6 @@ export const engagementService = {
       }).returning();
     }
 
-    // Skip SMS/push/email for deleted users — they can't log in to see the
-    // in-app notification, and sending to their (possibly recycled) contact
-    // info is a PII leak.
     if (userDeleted) {
       return row;
     }

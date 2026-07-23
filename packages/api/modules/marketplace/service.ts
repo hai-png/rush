@@ -59,21 +59,8 @@ export const marketplaceService = {
           expiresAt: addHours(new Date(`${input.releaseDate}T00:00:00Z`), 24 + SEAT_RELEASE_TTL_HOURS),
         }).returning();
 
-        // PAY-004: incrementRidesUsed performs a conditional UPDATE that only
-        // increments if the subscription is active AND the rider has remaining
-        // rides. If the update matches 0 rows (e.g. concurrent release pushed
-        // rides_used to the limit between our pre-check at line 33 and this
-        // increment), the rider has no remaining rides — we must refuse the
-        // release, otherwise the rider gets a refund for a seat they didn't
-        // consume (money leak). subscriptionRepo.incrementRidesUsed returns
-        // void, so we re-query to verify the increment happened.
-        const ridesUsedBefore = sub.ridesUsed;
-        await subscriptionRepo.incrementRidesUsed(tx as any, sub.id);
-        const [subAfter] = await tx.select({ ridesUsed: schema.subscriptions.ridesUsed })
-          .from(schema.subscriptions).where(eq(schema.subscriptions.id, sub.id));
-        if (!subAfter || subAfter.ridesUsed !== ridesUsedBefore + 1) {
-          // Increment did not happen — quota exhausted concurrently. Force
-          // a rollback by throwing; the catch block re-throws as a 409.
+        const incremented = await subscriptionRepo.incrementRidesUsed(tx as any, sub.id);
+        if (!incremented) {
           throw new ConflictError('Subscription ride quota exhausted — no seats available to release (concurrent race)');
         }
 

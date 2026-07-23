@@ -56,6 +56,8 @@ const envSchema = z.object({
 
   S3_REGION: z.string().min(1).default('us-east-1'),
 
+  CURSOR_SECRET: z.string().min(32).optional(),
+
   S3_ACCESS_KEY_ID: z.string().min(16, 'S3_ACCESS_KEY_ID must be at least 16 characters'),
   S3_SECRET_ACCESS_KEY: z.string().min(32, 'S3_SECRET_ACCESS_KEY must be at least 32 characters'),
 
@@ -66,6 +68,8 @@ const envSchema = z.object({
   DPO_EMAIL: z.string().email().default('dpo@addisride.et'),
 
   METRICS_PASSWORD: z.string().min(16).optional(),
+
+  HIBP_FAIL_OPEN: z.coerce.boolean().default(false),
 
   NEXT_PUBLIC_TILE_SERVER_URL: z.string().url().optional(),
   NEXT_PUBLIC_CARTO_API_KEY: z.string().optional(),

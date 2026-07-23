@@ -42,11 +42,11 @@ export const CRON_JOBS: ReadonlyArray<{
     },
   },
   {
-    name: 'expire-seat-releases',
-    route: 'expire-seat-releases',
+    name: 'process-seat-claims',
+    route: 'process-seat-claims',
     intervalMs: 15 * 60_000,
     run: async () => {
-      const { and, eq, lt } = await import('drizzle-orm');
+      const { and, eq, lt, sql } = await import('drizzle-orm');
 
       const expired = await db.update(schema.seatReleases)
         .set({ status: 'expired', updatedAt: new Date() })
@@ -66,7 +66,6 @@ export const CRON_JOBS: ReadonlyArray<{
         .limit(50);
       for (const release of staleClaims) {
         await db.transaction(async (tx) => {
-
           const [claim] = await tx.select().from(schema.seatClaims)
             .where(eq(schema.seatClaims.seatReleaseId, release.id))
             .limit(1);
@@ -80,7 +79,26 @@ export const CRON_JOBS: ReadonlyArray<{
           await tx.update(schema.payments).set({ status: 'failed', updatedAt: new Date() }).where(eq(schema.payments.id, payment.id));
         });
       }
-      return { expired: expired.length, abandonedReverted: staleClaims.length };
+
+      const { marketplaceService } = await import('../modules/marketplace/service');
+      const claims = await db.select().from(schema.payments)
+        .where(and(
+          eq(schema.payments.status, 'completed'),
+          sql`${schema.payments.seatClaimId} IS NOT NULL`,
+          sql`NOT EXISTS (
+            SELECT 1 FROM refund_retries WHERE payment_id = ${schema.payments.id}
+          )`,
+        ));
+      let reconciled = 0;
+      for (const p of claims) {
+        try {
+          await marketplaceService.onClaimPaymentSettled(p.seatClaimId!);
+          reconciled++;
+        } catch (err) {
+          console.error('[process-seat-claims] reconcile failed', { paymentId: p.id, seatClaimId: p.seatClaimId, err });
+        }
+      }
+      return { expired: expired.length, abandonedReverted: staleClaims.length, reconciled };
     },
   },
   {
@@ -201,8 +219,6 @@ export const CRON_JOBS: ReadonlyArray<{
     run: async () => {
       const { and, eq, lt, sql } = await import('drizzle-orm');
       const otps = await db.delete(schema.otpCodes).where(lt(schema.otpCodes.createdAt, sql`now() - interval '7 days'`)).returning({ id: schema.otpCodes.id });
-      // DB-007: password_reset_tokens table dropped — password reset uses
-      // otp_codes with purpose='password_reset', pruned by the line above.
       const notifs = await db.delete(schema.notifications).where(and(sql`${schema.notifications.readAt} is not null`, lt(schema.notifications.createdAt, sql`now() - interval '90 days'`))).returning({ id: schema.notifications.id });
 
       const sessions = await db.delete(schema.sessions).where(lt(schema.sessions.expiresAt, sql`now()`)).returning({ id: schema.sessions.id });
@@ -248,34 +264,7 @@ export const CRON_JOBS: ReadonlyArray<{
       return supportService.autoCloseStale();
     },
   },
-  {
-    name: 'reconcile-claims',
-    route: 'reconcile-claims',
-    intervalMs: 30 * 60_000,
-    run: async () => {
-      const { and, eq, sql } = await import("drizzle-orm");
 
-      const { marketplaceService } = await import('../modules/marketplace/service');
-      const claims = await db.select().from(schema.payments)
-        .where(and(
-          eq(schema.payments.status, 'completed'),
-          sql`${schema.payments.seatClaimId} IS NOT NULL`,
-          sql`NOT EXISTS (
-            SELECT 1 FROM refund_retries WHERE payment_id = ${schema.payments.id}
-          )`,
-        ));
-      let reconciled = 0;
-      for (const p of claims) {
-        try {
-          await marketplaceService.onClaimPaymentSettled(p.seatClaimId!);
-          reconciled++;
-        } catch (err) {
-          console.error('[reconcile-claims] failed', { paymentId: p.id, seatClaimId: p.seatClaimId, err });
-        }
-      }
-      return { checked: claims.length, reconciled };
-    },
-  },
   {
 
     name: 'archive-old-records',
@@ -326,6 +315,7 @@ export const CRON_JOBS: ReadonlyArray<{
           await db.delete(schema.telebirrNotifyEvents).where(
             inArray(schema.telebirrNotifyEvents.merchOrderId, oldNotify.map(r => r.merchOrderId))
           );
+
           result.telebirrNotifyArchived = oldNotify.length;
         }
       } catch (err) {
@@ -333,9 +323,20 @@ export const CRON_JOBS: ReadonlyArray<{
       }
 
       try {
-        const oldTickets = await db.delete(schema.supportTickets)
+        const oldTickets = await db.select().from(schema.supportTickets)
           .where(lt(schema.supportTickets.createdAt, SEVEN_YEARS_AGO))
-          .returning({ id: schema.supportTickets.id });
+          .limit(500);
+        if (oldTickets.length > 0) {
+          const ticketIds = oldTickets.map(t => t.id);
+          const messages = await db.select().from(schema.ticketMessages)
+            .where(inArray(schema.ticketMessages.ticketId, ticketIds));
+          if (messages.length > 0) {
+            const jsonl = messages.map(r => JSON.stringify(r)).join('\n');
+            const archiveKey = `archive/ticket_messages/${new Date().toISOString().slice(0, 10)}-${Date.now()}.jsonl`;
+            await s3.putObject(archiveKey, Buffer.from(jsonl, 'utf-8'), 'application/x-jsonlines');
+          }
+          await db.delete(schema.supportTickets).where(inArray(schema.supportTickets.id, ticketIds));
+        }
         result.supportTicketsDeleted = oldTickets.length;
       } catch (err) {
         console.error('[archive-old-records] support_tickets failed:', (err as Error).message);
@@ -346,7 +347,9 @@ export const CRON_JOBS: ReadonlyArray<{
           .where(lt(schema.contractorDocuments.uploadedAt, SEVEN_YEARS_AGO))
           .limit(200);
         for (const doc of oldDocs) {
-          try { await s3.deleteObject(doc.storageKey); } catch {  }
+          try { await s3.deleteObject(doc.storageKey); } catch (err) {
+            console.error('[archive-old-records] failed to delete doc from S3', { storageKey: doc.storageKey, err: (err as Error).message });
+          }
         }
         if (oldDocs.length > 0) {
           await db.delete(schema.contractorDocuments).where(
@@ -402,6 +405,27 @@ export const CRON_JOBS: ReadonlyArray<{
       }
 
       return result;
+    },
+  },
+  {
+    name: 'process-stale-trips',
+    route: 'process-stale-trips',
+    intervalMs: 15 * 60_000,
+    run: async () => {
+      const { and, eq, lt, sql } = await import('drizzle-orm');
+      const stale = await db.update(schema.trips)
+        .set({ status: 'completed', arriveTime: new Date(), updatedAt: new Date() })
+        .where(and(
+          eq(schema.trips.status, 'in_transit'),
+          lt(schema.trips.departTime, sql`now() - interval '4 hours'`),
+        ))
+        .returning({ id: schema.trips.id });
+      for (const trip of stale) {
+        await db.update(schema.rides)
+          .set({ status: 'no_show', updatedAt: new Date() })
+          .where(and(eq(schema.rides.tripId, trip.id), eq(schema.rides.status, 'booked')));
+      }
+      return { staleTripsCompleted: stale.length };
     },
   },
   {

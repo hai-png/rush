@@ -28,13 +28,6 @@ export const idempotencyMiddleware: MiddlewareHandler = async (c, next) => {
 
   const session = c.get('session');
 
-  // SEC-011: ignore Idempotency-Key for unauthenticated requests. The previous
-  // code scoped anon keys to `anon:<requestId>:<key>` — since requestId is
-  // per-request, this never deduplicated anything (each retry got a fresh
-  // scope). Worse, it allowed an attacker to mint arbitrary idempotency
-  // records by sending many requests with the same key. Now we just skip
-  // idempotency for anon requests entirely — every non-exempt POST endpoint
-  // requires auth, so this branch should rarely hit in practice.
   if (!session) {
     return next();
   }
@@ -42,10 +35,11 @@ export const idempotencyMiddleware: MiddlewareHandler = async (c, next) => {
   const scope = session.userId;
   const scopedKey = `${scope}:${key}`;
 
-  const bodyText = await c.req.raw.clone().text();
-  if (bodyText.length > 1_000_000) {
+  const contentLength = Number(c.req.header('content-length') ?? 0);
+  if (contentLength > 1_000_000) {
     return c.json({ error: { code: 'BAD_REQUEST', message: 'Request body too large for idempotency', requestId: c.get('requestId') } }, 413);
   }
+  const bodyText = await c.req.raw.clone().text();
   const bodyHash = createHash('sha256').update(bodyText).digest('hex');
 
   const claimed = await db.insert(schema.idempotencyRecords).values({

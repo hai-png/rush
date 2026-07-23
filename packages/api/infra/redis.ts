@@ -34,8 +34,6 @@ class InMemoryRedis {
     this.store.set(k, { value: String(cur), ...(e?.expiresAt ? { expiresAt: e.expiresAt } : {}) });
     return cur;
   }
-  // FE-006: add get() for the profile-ID cache. The Upstash Redis client
-  // has get(); the in-memory shim was missing it.
   async get(k: string): Promise<string | null> {
     const e = this.cleanup(k);
     if (!e) return null;
@@ -68,6 +66,25 @@ class InMemoryRedis {
     try { return JSON.parse(e.value); } catch { return null; }
   }
   async del(k: string) { this.store.delete(k); return 1; }
+  async exists(k: string) { return this.cleanup(k) ? 1 : 0; }
+  async hget(k: string, field: string) {
+    const e = this.cleanup(k);
+    if (!e) return null;
+    try {
+      const obj = JSON.parse(e.value) as Record<string, unknown>;
+      return (obj[field] as string) ?? null;
+    } catch { return null; }
+  }
+  async hdel(k: string, ...fields: string[]) {
+    const e = this.cleanup(k);
+    if (!e) return 0;
+    try {
+      const obj = JSON.parse(e.value) as Record<string, unknown>;
+      for (const f of fields) delete obj[f];
+      this.store.set(k, { value: JSON.stringify(obj), expiresAt: e.expiresAt });
+      return fields.length;
+    } catch { return 0; }
+  }
   async publish() {  }
   duplicate() { return this; }
   async subscribe() {  }
@@ -77,3 +94,4 @@ class InMemoryRedis {
 export const redis: Redis = env.REDIS_URL
   ? new Redis({ url: env.REDIS_URL, token: process.env.REDIS_TOKEN ?? '' })
   : (new InMemoryRedis() as unknown as Redis);
+

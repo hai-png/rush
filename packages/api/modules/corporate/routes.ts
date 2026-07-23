@@ -3,6 +3,7 @@ import { z } from 'zod';
 import { requireRole } from '../../src/middleware/auth';
 import { corporateService } from './service';
 import { db, schema } from '@addis/db';
+import { verifySignature } from '../../src/pagination';
 
 export const corporateRoutes = new TypedOpenAPIHono();
 
@@ -53,7 +54,6 @@ corporateRoutes.post('/onboard', requireRole('rider'), async (c) => {
 
   let code: string;
 
-  const { timingSafeEqual, createHmac } = await import('node:crypto');
   const { loadEnv } = await import('@addis/shared');
   const env = loadEnv();
   const decoded = Buffer.from(body.invite, 'base64url').toString();
@@ -61,11 +61,7 @@ corporateRoutes.post('/onboard', requireRole('rider'), async (c) => {
   if (lastDot < 0) return c.json({ error: { code: 'BAD_REQUEST', message: 'Invalid invite token', requestId: c.get('requestId') } }, 400);
   const payload = decoded.slice(0, lastDot);
   const sig = decoded.slice(lastDot + 1);
-  const expected = createHmac('sha256', env.NEXTAUTH_SECRET).update(payload).digest('hex');
-  // SEC-012: audit-log invite-signature mismatches so ops can detect
-  // NEXTAUTH_SECRET rotation (which invalidates all outstanding invites)
-  // or an attacker brute-forcing invite tokens.
-  if (sig.length !== expected.length || !timingSafeEqual(Buffer.from(sig), Buffer.from(expected))) {
+  if (!verifySignature(payload, sig, env.NEXTAUTH_SECRET)) {
     try {
       await db.insert(schema.outboxEvents).values({
         channel: 'audit',
@@ -75,7 +71,7 @@ corporateRoutes.post('/onboard', requireRole('rider'), async (c) => {
           after: { payloadPrefix: payload.slice(0, 50) },
         },
       });
-    } catch { /* audit failure must not change the response */ }
+    } catch {}
     return c.json({ error: { code: 'BAD_REQUEST', message: 'Invalid invite signature', requestId: c.get('requestId') } }, 400);
   }
   let parsed: { code?: string; expiresAt?: number };

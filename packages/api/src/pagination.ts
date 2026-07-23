@@ -2,7 +2,7 @@ import { createHmac, timingSafeEqual } from 'node:crypto';
 import { loadEnv } from '@addis/shared';
 
 const env = loadEnv();
-const CURSOR_SECRET = env.NEXTAUTH_SECRET;
+const CURSOR_SECRET = env.CURSOR_SECRET ?? env.NEXTAUTH_SECRET;
 
 function sign(payload: string): string {
   return createHmac('sha256', CURSOR_SECRET).update(payload).digest('hex');
@@ -34,4 +34,13 @@ export function decodeCursor(cursor?: string): string | undefined {
   } catch {
     return undefined;
   }
+}
+
+export function signPayload(payload: string, secret: string): string {
+  return createHmac('sha256', secret).update(payload).digest('hex');
+}
+
+export function verifySignature(payload: string, sig: string, secret: string): boolean {
+  const expected = signPayload(payload, secret);
+  return sig.length === expected.length && timingSafeEqual(Buffer.from(sig), Buffer.from(expected));
 }

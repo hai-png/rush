@@ -1,15 +1,3 @@
-// SEC-002 / SEC-004: IP extraction.
-//
-// Round-1 code returned the RIGHTMOST entry of X-Forwarded-For, which is the
-// value set by the LAST hop — fully attacker-controllable if the attacker can
-// prepend their own XFF header. The correct entry is the LEFTMOST, but only
-// when the immediate connection comes from a trusted proxy (e.g. Caddy,
-// Vercel Edge). When no trusted proxy is configured, we fall back to the TCP
-// peer address. When even that is unavailable (e.g. Vercel Edge runtime where
-// `c.env` is the Vercel env, not a `{remoteAddr}` object), we return
-// 'unknown' — but rate-limit callers MUST refuse to bucket on 'unknown' to
-// avoid a single global bucket DoSing all anonymous users (SEC-004).
-
 const TRUSTED_PROXY_CIDRS: readonly string[] = (() => {
   const raw = process.env.TRUSTED_PROXIES ?? '';
   return raw.split(',').map(s => s.trim()).filter(Boolean);
@@ -41,15 +29,10 @@ export function clientIp(c: { req: { header: (name: string) => string | undefine
   const remote = c.env?.remoteAddr?.address ?? c.env?.remoteAddr?.address;
   const xff = c.req.header('x-forwarded-for');
 
-  // If we have a TCP peer address and it's NOT a trusted proxy, ignore XFF
-  // entirely — the connection is direct from an untrusted source, so XFF is
-  // attacker-controlled.
   if (remote && !isTrustedProxy(remote)) {
     return remote;
   }
 
-  // Either there's no TCP peer (Edge runtime) or the peer is a trusted proxy.
-  // Take the LEFTMOST XFF entry — that's the original client per RFC 7239.
   if (xff) {
     const parts = xff.split(',').map(s => s.trim()).filter(Boolean);
     if (parts.length > 0) {
@@ -57,11 +40,8 @@ export function clientIp(c: { req: { header: (name: string) => string | undefine
     }
   }
 
-  // Fall back to the TCP peer if available (e.g. trusted-proxy case where XFF
-  // was stripped by the proxy).
   if (remote) return remote;
 
-  // SEC-004: no IP determinable — callers MUST NOT bucket rate limits on this.
   return 'unknown';
 }
 

@@ -11,10 +11,6 @@ export const operationsRoutes = new TypedOpenAPIHono();
 
 operationsRoutes.get('/trips', requireRole('contractor'), async (c) => {
   const profileId = await contractorProfileIdFor(c.get('session')!.userId);
-  // API-004: paginate /trips — was returning ALL trips ever for the contractor.
-  // Default to 50, max 200. Cursor pagination would be better but the table
-  // lacks a monotonic cursor; limit + offset is acceptable for this admin-
-  // ish endpoint. Status filter added.
   const limit = Math.min(Math.max(1, Number(c.req.query('limit') ?? 50) || 50), 200);
   const status = c.req.query('status');
   const VALID_STATUSES = ['scheduled', 'in_transit', 'completed', 'cancelled'] as const;
@@ -56,7 +52,6 @@ operationsRoutes.patch('/trips/:id', requireRole('contractor'), async (c) => {
 
 operationsRoutes.get('/rides', requireRole('rider'), async (c) => {
   const profileId = await riderProfileIdFor(c.get('session')!.userId);
-  // API-004: paginate /rides — was returning ALL rides ever for the rider.
   const limit = Math.min(Math.max(1, Number(c.req.query('limit') ?? 50) || 50), 200);
   const status = c.req.query('status');
   const VALID_STATUSES = ['booked', 'boarded', 'completed', 'no_show', 'cancelled'] as const;

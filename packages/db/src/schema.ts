@@ -97,7 +97,7 @@ export const contractorDocuments = pgTable('contractor_documents', {
 }, (t) => ({
   contractorIdx: index().on(t.contractorId, t.type),
 
-  contractorChecksumUniq: uniqueIndex('contractor_documents_contractor_checksum_uniq').on(t.contractorId, t.checksumSha256),
+  contractorTypeChecksumUniq: uniqueIndex('contractor_documents_type_checksum_uniq').on(t.contractorId, t.type, t.checksumSha256),
 }));
 
 export const corporates = pgTable('corporates', {
@@ -153,7 +153,7 @@ export const routes = pgTable('routes', {
   morningWindow: jsonb('morning_window').notNull(),
   eveningWindow: jsonb('evening_window').notNull(),
   fare: money('fare').notNull(),
-  needsShuttle: boolean('needs_shuttle').notNull().default(true),
+  needsShuttle: boolean('needs_shuttle').notNull().default(true), // DEPRECATED — column unused in business logic; kept for backward compat
   isActive: boolean('is_active').notNull().default(true),
   deletedAt: ts('deleted_at'),
   createdAt: ts('created_at').notNull().defaultNow(),
@@ -195,10 +195,6 @@ export const subscriptionPlans = pgTable('subscription_plans', {
 
   durationDaysCheck: check('duration_days_positive', sql`${t.durationDays} > 0`),
   priceNonNeg: check('price_etb_nonneg', sql`${t.priceETB} >= 0`),
-  // DB-005: prevent unlimited trial plans (rides_included = -1 + is_trial = true).
-  // A misconfigured trial plan would let users ride unlimited for the trial
-  // duration — a money leak. The DB constraint is the source of truth; the
-  // admin plan-create endpoint also validates.
   noUnlimitedTrialCheck: check('no_unlimited_trial', sql`NOT (${t.isTrial} = true AND ${t.ridesIncluded} = -1)`),
 }));
 
@@ -484,11 +480,6 @@ export const otpCodes = pgTable('otp_codes', {
   phonePurposeIdx: index().on(t.phone, t.purpose, t.verified, t.expiresAt),
 }));
 
-// DB-007: passwordResetTokens table was REMOVED. Password reset uses
-// otp_codes with purpose='password_reset' — see packages/api/modules/identity/otp.ts.
-// The password_reset_tokens table was dead schema (no code wrote to it);
-// dropped in migration 0007.
-
 export const tosAcceptances = pgTable('tos_acceptances', {
   id: text('id').primaryKey().$defaultFn(createId),
   userId: text('user_id').notNull().references(() => users.id, { onDelete: 'cascade' }),
@@ -525,10 +516,10 @@ export const shuttlePositions = pgTable('shuttle_positions', {
 export const telebirrNotifyEvents = pgTable('telebirr_notify_events', {
   merchOrderId: text('merch_order_id').notNull().references(() => payments.reference, { onDelete: 'restrict' }),
   tradeStatus: text('trade_status').notNull(),
-  outRequestNo: text('out_request_no').notNull(),
+  nonceStr: text('nonce_str').notNull().default(''),
   receivedAt: ts('received_at').notNull().defaultNow(),
 }, (t) => ({
-  pk: primaryKey({ columns: [t.merchOrderId, t.outRequestNo] }),
+  pk: primaryKey({ columns: [t.merchOrderId, t.nonceStr] }),
   merchIdx: index('telebirr_notify_events_merch_order_id_index').on(t.merchOrderId, t.receivedAt),
 }));
 

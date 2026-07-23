@@ -7,6 +7,8 @@ import { adminCatalogRoutes } from '../catalog/routes';
 import { documentService } from '../identity/documents';
 import { corporateService } from '../corporate/service';
 import { scheduleRefund } from '../payment/service';
+import { writeAudit } from './audit';
+import { transitionSubscription } from '../subscription/state';
 import { Money, ALL_ROLES } from '@addis/shared';
 import { and, eq } from 'drizzle-orm';
 import { db, schema } from '@addis/db';
@@ -62,7 +64,7 @@ adminRoutes.get('/subscriptions', async (c) => {
 adminRoutes.get('/payments', async (c) => {
   const status = c.req.query('status');
 
-  const VALID_STATUSES = ['pending', 'completed', 'failed', 'refunded'] as const;
+  const VALID_STATUSES = ['pending', 'completed', 'failed', 'refunded', 'partially_refunded'] as const;
   const statusFilter = status && (VALID_STATUSES as readonly string[]).includes(status) ? (status as typeof VALID_STATUSES[number]) : undefined;
   const rows = await db.select().from(schema.payments)
     .where(statusFilter ? eq(schema.payments.status, statusFilter) : undefined)
@@ -79,10 +81,6 @@ adminRoutes.post('/payments/:id/verify', async (c) => {
   const ipAddress = clientIp(c) ?? null;
 
   const result = await db.transaction(async (tx) => {
-    const { writeAudit } = await import('./audit');
-    const { transitionSubscription } = await import('../subscription/state');
-    const { Money } = await import('@addis/shared');
-
     const [payment] = await tx.update(schema.payments)
       .set({ status: 'completed', updatedAt: new Date() })
       .where(and(eq(schema.payments.id, c.req.param('id')), eq(schema.payments.status, 'pending')))
@@ -150,11 +148,18 @@ adminRoutes.post('/refunds', async (c) => {
   return c.body(null, 202);
 });
 
-const EXPORT_FIELD_DENYLIST: Record<string, string[]> = {
+const EXPORT_FIELD_BLOCKLIST: Record<string, string[]> = {
   users: ['passwordHash', 'twoFactorSecret', 'twoFactorEnabled', 'phone', 'email', 'name'],
   payments: ['prepayId', 'reference', 'refundRequestNo', 'riderId'],
   subscriptions: ['riderId', 'morningSlot', 'eveningSlot'],
   tickets: ['userId', 'subject', 'body'],
+};
+
+const FORMULA_LEAD = /^[=+\-@\t\r]/;
+const escapeCsv = (v: unknown) => {
+  let s = String(v ?? '');
+  if (FORMULA_LEAD.test(s)) s = `'${s}`;
+  return `"${s.replace(/"/g, '""')}"`;
 };
 
 adminRoutes.get('/export/:resource', async (c) => {
@@ -162,39 +167,60 @@ adminRoutes.get('/export/:resource', async (c) => {
   const tableMap: Record<string, any> = { users: schema.users, payments: schema.payments, subscriptions: schema.subscriptions, tickets: schema.supportTickets };
   const table = tableMap[resource];
   if (!table) return c.json({ error: { code: 'BAD_REQUEST', message: 'Unknown export resource', requestId: c.get('requestId') } }, 400);
-  const rawRows = await db.select().from(table).limit(10_000);
-  const denylist = EXPORT_FIELD_DENYLIST[resource] ?? [];
-  const rows = denylist.length ? rawRows.map((r: Record<string, unknown>) => {
-    const copy = { ...r };
-    for (const field of denylist) delete copy[field];
-    return copy;
-  }) : rawRows;
-  const csv = toCsv(rows);
+  const blocklist = EXPORT_FIELD_BLOCKLIST[resource] ?? [];
+  const BATCH_SIZE = 1000;
+  const MAX_ROWS = 10_000;
 
   const adminId = c.get('session')!.userId;
   const ipAddress = clientIp(c) ?? null;
-  try {
-    await db.insert(schema.outboxEvents).values({
-      channel: 'audit',
-      payload: { action: 'admin.csv_export', actorId: adminId, resource, rowCount: rows.length, ipAddress },
-    });
-  } catch (err) {
-    c.get('logger')?.error({ err, resource, rowCount: rows.length }, 'admin.csv_export: audit insert failed — refusing to return CSV without audit trail');
-    return c.json({ error: { code: 'INTERNAL', message: 'Export audit failed — refusing to return CSV without audit trail', requestId: c.get('requestId') } }, 500);
-  }
+  let totalRows = 0;
 
-  return new Response(csv, { headers: { 'Content-Type': 'text/csv', 'Content-Disposition': `attachment; filename="${resource}.csv"` } });
+  const stream = new ReadableStream({
+    async start(controller) {
+      let headersEmitted = false;
+      let offset = 0;
+      while (offset < MAX_ROWS) {
+        const rows = await db.select().from(table).limit(BATCH_SIZE).offset(offset);
+        if (!rows.length) break;
+        const cleaned = blocklist.length
+          ? rows.map((r: Record<string, unknown>) => {
+              const copy = { ...r };
+              for (const f of blocklist) delete copy[f];
+              return copy;
+            })
+          : rows;
+
+        if (!headersEmitted) {
+          const h = Object.keys(cleaned[0]!);
+          controller.enqueue(new TextEncoder().encode(h.join(',') + '\n'));
+          headersEmitted = true;
+        }
+
+        for (const row of cleaned) {
+          const line = Object.values(row as Record<string, unknown>).map(escapeCsv).join(',') + '\n';
+          controller.enqueue(new TextEncoder().encode(line));
+        }
+
+        totalRows += cleaned.length;
+        offset += BATCH_SIZE;
+      }
+      controller.close();
+
+      try {
+        await db.insert(schema.outboxEvents).values({
+          channel: 'audit',
+          payload: { action: 'admin.csv_export', actorId: adminId, resource, rowCount: totalRows, ipAddress },
+        });
+      } catch (err) {
+        c.get('logger')?.error({ err, resource, rowCount: totalRows }, 'admin.csv_export: audit insert failed');
+      }
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      'Content-Type': 'text/csv',
+      'Content-Disposition': `attachment; filename="${resource}.csv"`,
+    },
+  });
 });
-
-function toCsv(rows: Record<string, unknown>[]): string {
-  if (!rows.length) return '';
-  const headers = Object.keys(rows[0]!);
-
-  const FORMULA_LEAD = /^[=+\-@\t\r]/;
-  const escape = (v: unknown) => {
-    let s = String(v ?? '');
-    if (FORMULA_LEAD.test(s)) s = `'${s}`;
-    return `"${s.replace(/"/g, '""')}"`;
-  };
-  return [headers.join(','), ...rows.map((r) => headers.map((h) => escape(r[h])).join(','))].join('\n');
-}

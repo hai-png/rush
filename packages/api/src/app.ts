@@ -41,7 +41,7 @@ app.use('*', async (c, next) => {
   await next();
   const durationSec = (Date.now() - start) / 1000;
   const route = c.req.path
-    .replace(/\/[a-z0-9]{24}/g, '/:id')
+    .replace(/\/[a-z0-9]{20,30}/g, '/:id')
     .replace(/\/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi, '/:id');
   try {
     httpRequestDuration.labels(c.req.method, route, String(c.res.status)).observe(durationSec);

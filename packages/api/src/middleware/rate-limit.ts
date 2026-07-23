@@ -16,9 +16,6 @@ const RULES: { pattern: RegExp; limit: number; windowSec: number; keyFn: (c: any
   { pattern: /\/auth\/password\/reset\/confirm$/, limit: 5, windowSec: 600, keyFn: c => bodyPhone(c) },
 
   { pattern: /\/corporate\/onboard$/, limit: 5, windowSec: 3600, keyFn: c => `user:${c.get('session')?.userId ?? 'anon'}` },
-  // SEC-012: rate-limit corporate invite generation to prevent an admin
-  // (or attacker with a compromised admin session) from minting unlimited
-  // invites.
   { pattern: /\/corporate\/invites$/, limit: 10, windowSec: 3600, keyFn: c => `user:${c.get('session')?.userId ?? 'anon'}` },
 
   { pattern: /\/corporate\/signup$/, limit: 3, windowSec: 3600, keyFn: c => `ip:${clientIp(c)}` },
@@ -48,10 +45,6 @@ export const rateLimitMiddleware: MiddlewareHandler = async (c, next) => {
   const matchingRules = RULES.filter(r => r.pattern.test(path));
   const session = c.get('session');
 
-  // SEC-004: if a rule keys on IP and the IP is 'unknown' (e.g. direct-to-origin
-  // on Vercel Edge with no XFF), refuse to bucket — a single global bucket would
-  // let one attacker DoS all anonymous users. Authenticated requests are keyed on
-  // userId and are unaffected.
   const ip = clientIp(c);
   const ipUnknown = ip === UNKNOWN_IP;
 
@@ -60,7 +53,6 @@ export const rateLimitMiddleware: MiddlewareHandler = async (c, next) => {
     let key: string;
     try {
       const rawKey = await rule.keyFn(c);
-      // If the resolved key references the unknown IP, refuse to bucket.
       if (ipUnknown && rawKey.startsWith('ip:unknown')) {
         c.header('Retry-After', '60');
         throw new RateLimitError(60);
@@ -93,8 +85,6 @@ export const rateLimitMiddleware: MiddlewareHandler = async (c, next) => {
     try {
       const rawKey = await keyFn(c);
       if (ipUnknown && rawKey.startsWith('ip:unknown')) {
-        // For the default anon bucket, also refuse to bucket on unknown IP —
-        // return 429 rather than creating a global bucket.
         c.header('Retry-After', '60');
         throw new RateLimitError(60);
       }

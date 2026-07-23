@@ -37,9 +37,6 @@ export const accountService = {
       }).where(eq(schema.users.id, userId));
       await tx.delete(schema.sessions).where(eq(schema.sessions.userId, userId));
 
-      // DB-004: if this user is a corporate admin with active members, raise
-      // an audit alert. The corporate is now orphaned — members can't be
-      // approved/rejected until a platform admin reassigns ownership.
       if (user.role === 'corporate_admin') {
         const [corp] = await tx.select().from(schema.corporates)
           .where(eq(schema.corporates.adminUserId, userId));
@@ -72,12 +69,6 @@ export const accountService = {
     const [contractorProfile] = await db.select().from(schema.contractorProfiles).where(eq(schema.contractorProfiles.userId, userId));
     const riderId = profile?.id;
 
-    // SEC-013: cap each query at 10000 rows to prevent a user with 7 years
-    // of records from OOMing the process. If truncated, the ZIP contains
-    // only the first 10000 rows per table — for full export, contact
-    // support (rare case). Use Promise.all (not streaming) because archiver
-    // needs the data eagerly; for users with more than 10k rows in any
-    // table, the route returns 413 via the size guard in the route handler.
     const EXPORT_LIMIT = 10_000;
     const [subs, payments, rides, releases, claims, tickets, notifs, tos, contractorDocs,
       ticketMessages, corporateMemberships, devices, notifPrefs,
@@ -107,8 +98,6 @@ export const accountService = {
     const stream = new PassThrough();
     archive.pipe(stream);
 
-    // SEC-013: abort the archive if it grows beyond 50MB (defense in depth
-    // against the 10k-per-table limit being too generous).
     const MAX_ZIP_BYTES = 50 * 1024 * 1024;
     let totalBytes = 0;
     stream.on('data', (chunk: Buffer) => {

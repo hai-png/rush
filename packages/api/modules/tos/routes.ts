@@ -1,25 +1,31 @@
+import { createRoute } from '@hono/zod-openapi';
 import { getSession } from '../../src/context';
-import { TypedHono } from '../../src/typed-hono';
+import { TypedOpenAPIHono } from '../../src/typed-hono';
 import { z } from 'zod';
 import { eq } from 'drizzle-orm';
 import { db, schema } from '@addis/db';
 import { requireAuth } from '../../src/middleware/auth';
 import { clientIp } from '../../src/ip';
-import { CURRENT_TOS_VERSION } from '@addis/shared';
+import { CURRENT_TOS_VERSION, ErrorSchema } from '@addis/shared';
 
-export const tosRoutes = new TypedHono();
+export const tosRoutes = new TypedOpenAPIHono();
 
-tosRoutes.post('/', requireAuth, async (c) => {
+const acceptRoute = createRoute({
+  method: 'post',
+  path: '/',
+  middleware: [requireAuth] as const,
+  request: {
+    body: { content: { 'application/json': { schema: z.object({ version: z.string() }) } } },
+  },
+  responses: {
+    200: { content: { 'application/json': { schema: z.object({ data: z.object({ accepted: z.boolean(), version: z.string() }) }) } }, description: 'Accepted' },
+    400: { content: { 'application/json': { schema: ErrorSchema } }, description: 'Bad request' },
+  },
+});
+
+tosRoutes.openapi(acceptRoute, async (c) => {
   const session = getSession(c);
-
-  const parsed = z.object({ version: z.string() }).safeParse(await c.req.json());
-  if (!parsed.success) {
-    return c.json(
-      { error: { code: 'BAD_REQUEST', message: 'version field is required and must be a string', requestId: c.get('requestId') } },
-      400,
-    );
-  }
-  const { version } = parsed.data;
+  const { version } = c.req.valid('json');
   if (version !== CURRENT_TOS_VERSION) {
     return c.json(
       { error: { code: 'BAD_REQUEST', message: `Unsupported ToS version. Current is ${CURRENT_TOS_VERSION}`, requestId: c.get('requestId') } },
@@ -51,7 +57,16 @@ tosRoutes.post('/', requireAuth, async (c) => {
   return c.json({ data: { accepted: true, version } });
 });
 
-tosRoutes.get('/', requireAuth, async (c) => {
+const getRoute = createRoute({
+  method: 'get',
+  path: '/',
+  middleware: [requireAuth] as const,
+  responses: {
+    200: { content: { 'application/json': { schema: z.object({ data: z.array(z.any()) }) } }, description: 'Acceptance history' },
+  },
+});
+
+tosRoutes.openapi(getRoute, async (c) => {
   const session = getSession(c);
   const rows = await db
     .select()

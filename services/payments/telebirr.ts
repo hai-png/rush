@@ -1,6 +1,19 @@
-import { createSign, createVerify } from 'node:crypto';
+import { createSign, createVerify, constants } from 'node:crypto';
 import { Money, loadEnv } from '@addis/shared';
 import type { PaymentProvider, PaymentIntent, CheckoutResult, PaymentStatusResult, RefundRequest, RefundResult, WebhookEvent } from './provider';
+
+const SNAKE_CASE_MAP: Record<string, string> = {
+  merchOrderId: 'merch_order_id', refundRequestNo: 'refund_request_no',
+  notifyUrl: 'notify_url', redirectUrl: 'redirect_url',
+  amount: 'total_amount',
+};
+function toSnake(payload: Record<string, unknown>): Record<string, unknown> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(payload)) {
+    out[SNAKE_CASE_MAP[k] ?? k] = v;
+  }
+  return out;
+}
 
 const BASE_URLS = {
   testbed: 'https://developerportal.ethiotelebirr.et',
@@ -27,7 +40,8 @@ export class TelebirrProvider implements PaymentProvider {
   private sign(payload: Record<string, unknown>): string {
     const signer = createSign('RSA-SHA256');
     signer.update(this.canonicalize(payload));
-    return signer.sign(this.env.TELEBIRR_PRIVATE_KEY!, 'base64');
+    return signer.sign({ key: this.env.TELEBIRR_PRIVATE_KEY!, padding: constants.RSA_PKCS1_PSS_PADDING, saltLength: 32 }, 'base64');
+  }
   }
 
   private async applyFabricToken(): Promise<string> {
@@ -131,19 +145,21 @@ export class TelebirrProvider implements PaymentProvider {
       const verifier = createVerify('RSA-SHA256');
       verifier.update(this.canonicalize(payload));
       try {
-        signatureValid = verifier.verify(this.env.TELEBIRR_PUBLIC_KEY!, payload.sign, 'base64');
+        signatureValid = verifier.verify({ key: this.env.TELEBIRR_PUBLIC_KEY!, padding: constants.RSA_PKCS1_PSS_PADDING, saltLength: 32 }, payload.sign, 'base64');
       } catch {
         signatureValid = false;
       }
     }
 
+    const nonceStr = typeof payload.nonce_str === 'string' ? payload.nonce_str : '';
+
     if (payload.refund_request_no) {
       return payload.trade_status === 'Success'
-        ? { type: 'refund.succeeded', refundRequestNo: payload.refund_request_no, raw: payload, signatureValid, timestampMs }
-        : { type: 'refund.failed', refundRequestNo: payload.refund_request_no, raw: payload, signatureValid, timestampMs };
+        ? { type: 'refund.succeeded', refundRequestNo: payload.refund_request_no, nonceStr, raw: payload, signatureValid, timestampMs }
+        : { type: 'refund.failed', refundRequestNo: payload.refund_request_no, nonceStr, raw: payload, signatureValid, timestampMs };
     }
     return payload.trade_status === 'Success'
-      ? { type: 'payment.settled', merchOrderId: payload.merch_order_id, amount: Money.fromETBString(payload.total_amount), raw: payload, signatureValid, timestampMs }
-      : { type: 'payment.failed', merchOrderId: payload.merch_order_id, raw: payload, signatureValid, timestampMs };
+      ? { type: 'payment.settled', merchOrderId: payload.merch_order_id, amount: Money.fromETBString(payload.total_amount), nonceStr, raw: payload, signatureValid, timestampMs }
+      : { type: 'payment.failed', merchOrderId: payload.merch_order_id, nonceStr, raw: payload, signatureValid, timestampMs };
   }
 }

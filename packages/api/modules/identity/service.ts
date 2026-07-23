@@ -18,32 +18,22 @@ const MAX_FAILED_ATTEMPTS = 5;
 const LOCKOUT_WINDOW_SEC = 15 * 60;
 const LOCKOUT_DURATION_SEC = 15 * 60;
 
-// SEC-015: a real pre-computed bcrypt hash of a random string, used for
-// timing-attack resistance when the user doesn't exist. The previous
-// dummy `'$2a$12$' + 'x'.repeat(53)` was not a valid bcrypt hash —
-// `bcryptjs.compare` returned immediately, leaking user existence via
-// response time. This hash was generated with bcrypt cost 12 and a
-// random password; it is not a real account credential.
 const DUMMY_HASH = '$2a$12$abcdefghijklmnopqrstuuO3zVYxYxYxYxYxYxYxYxYxYxYxYxYxY';
 
 function failKey(phone: string) { return `auth:fail:${phone}`; }
 function lockKey(phone: string) { return `auth:lock:${phone}`; }
 
 async function recordFailedLogin(phone: string) {
-
   const count = await redis.incr(failKey(phone)).catch(() => 1);
   if (count === 1) {
-
     await redis.expire(failKey(phone), LOCKOUT_WINDOW_SEC).catch(() => {});
   }
   if (count >= MAX_FAILED_ATTEMPTS) {
-
     await redis.set(lockKey(phone), '1', { nx: true, ex: LOCKOUT_DURATION_SEC }).catch(() => {});
   }
 }
 
 async function assertNotLocked(phone: string) {
-
   const ttl = await redis.ttl(lockKey(phone)).catch(() => -1);
   if (ttl > 0) {
     throw new UnauthorizedError(`Account temporarily locked. Try again in ${Math.ceil(ttl / 60)} minutes.`);
@@ -51,7 +41,6 @@ async function assertNotLocked(phone: string) {
 }
 
 async function clearFailedLogins(phone: string) {
-
   await redis.del(failKey(phone)).catch(() => {});
 }
 
@@ -98,12 +87,6 @@ export const identityService = {
       : await verifyPassword(password, DUMMY_HASH);
     if (!user || !user.isActive || user.deletedAt || !passwordOk) {
       await recordFailedLogin(phone);
-      // SEC-007: audit-log every failed login attempt. actorId is null
-      // because we don't know who the real user is (the phone may not
-      // exist, or may belong to someone else). entityId is the phone
-      // for forensic lookup. The writeAudit call is best-effort — if
-      // the DB is down, we still throw UnauthorizedError so the client
-      // gets the right response.
       try {
         await db.transaction(async (tx) => {
           await writeAudit(tx as any, {
@@ -116,7 +99,7 @@ export const identityService = {
             userAgent,
           });
         });
-      } catch { /* audit failure must not block the auth response */ }
+      } catch {}
       throw new UnauthorizedError('Invalid credentials');
     }
 
@@ -145,8 +128,6 @@ export const identityService = {
     const token = await new SignJWT({ id: user.id, role: user.role, phone: user.phone, tokenVersion: user.tokenVersion, jti })
       .setProtectedHeader({ alg: 'HS256' }).setIssuedAt().setExpirationTime(ACCESS_TTL).sign(JWT_SECRET());
 
-    // SEC-007: audit-log successful logins too — needed for forensic
-    // reconstruction if an account is later compromised.
     try {
       await db.transaction(async (tx) => {
         await writeAudit(tx as any, {
@@ -159,7 +140,7 @@ export const identityService = {
           userAgent,
         });
       });
-    } catch { /* audit failure must not block login */ }
+    } catch {}
 
     return { user, accessToken: token, requiresTosAcceptance: user.tosVersion !== CURRENT_TOS_VERSION };
   },
@@ -206,11 +187,6 @@ export const identityService = {
 
   async resetPassword(phone: string, newPassword: string) {
     const [user] = await db.select().from(schema.users).where(eq(schema.users.phone, phone));
-    // SEC-003: refuse to reset passwords for soft-deleted users. The OTP
-    // send is also blocked, but a determined attacker could still call
-    // /password/reset/confirm with a brute-forced code (within the 5-attempt
-    // OTP limit). This belt-and-suspenders check ensures the password is
-    // not changed even if the OTP somehow verifies.
     if (!user || !user.isActive || user.deletedAt) {
       throw new NotFoundError('User not found');
     }

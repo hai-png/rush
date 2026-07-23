@@ -24,19 +24,10 @@ export const csrfProtection: MiddlewareHandler = async (c, next) => {
   const sessionToken = getCookie(c, '__Secure-session-token');
   const bearer = c.req.header('Authorization');
 
-  // SEC-005: only skip CSRF when the request uses bearer auth AND no session
-  // cookie is present. If both are present (e.g. a browser session that also
-  // sets a Bearer header via the SDK), the request is browser-like and CSRF
-  // must be enforced — otherwise an XSS or cross-site navigation could
-  // mutate state with the cookie-authenticated session while the bearer
-  // bypasses CSRF.
   if (!sessionToken && bearer) {
     await next();
     return;
   }
-  // If neither session cookie nor bearer is present, the request is anonymous
-  // — CSRF doesn't apply (no session to abuse). State-changing routes are
-  // gated by requireAuth, which will 401.
   if (!sessionToken && !bearer) {
     await next();
     return;

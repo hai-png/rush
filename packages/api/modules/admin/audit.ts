@@ -1,8 +1,6 @@
 import { createHash } from 'node:crypto';
-import { desc, sql } from 'drizzle-orm';
+import { desc } from 'drizzle-orm';
 import { db, schema } from '@addis/db';
-
-const AUDIT_CHAIN_LOCK_KEY = 'addis_ride_audit_chain';
 
 const SANITIZE_FIELDS = [
   'passwordHash', 'twoFactorSecret', 'twoFactorEnabled',
@@ -38,9 +36,6 @@ export async function writeAudit(tx: any, entry: {
   actorId: string | null; action: string; entityType: string; entityId?: string;
   before?: unknown; after?: unknown; ipAddress?: string | undefined; userAgent?: string | undefined;
 }) {
-
-  await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${AUDIT_CHAIN_LOCK_KEY}))`);
-
   const [last] = await tx.select().from(schema.auditLogs)
     .orderBy(desc(schema.auditLogs.createdAt), desc(schema.auditLogs.id))
     .limit(1);

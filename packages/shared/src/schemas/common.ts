@@ -2,7 +2,7 @@ import { z } from 'zod';
 
 export const Id = z.string().cuid2();
 export const EthiopianPhone = z.string().regex(/^\+251(9|7)\d{8}$/, 'Must be a valid Ethiopian phone (+2519XXXXXXXX)');
-export const MoneyString = z.string().regex(/^\d+(\.\d{2})?$/, 'Must be ETB amount with 2dp');
+export const MoneyString = z.string().regex(/^\d+(\.\d{1,2})?$/, 'Must be ETB amount with up to 2dp');
 export const TimeOfDay = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/, 'HH:MM 24h');
 export const CursorQuery = z.object({
   limit: z.coerce.number().int().min(1).max(100).default(20),

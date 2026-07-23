@@ -56,9 +56,16 @@ async function sha1HexUpper(input: string): Promise<string> {
     .toUpperCase();
 }
 
+const breachCache = new Map<string, { result: boolean; cachedAt: number }>();
+const CACHE_TTL_MS = 3600_000;
+
 export async function isPasswordBreached(pw: string): Promise<boolean> {
   const env = loadEnv();
-  const failOpen = env.NODE_ENV === 'development' || env.NODE_ENV === 'test';
+  const failOpen = env.NODE_ENV === 'development' || env.NODE_ENV === 'test' || env.HIBP_FAIL_OPEN;
+
+  const cached = breachCache.get(pw);
+  if (cached && Date.now() - cached.cachedAt < CACHE_TTL_MS) return cached.result;
+
   try {
     const sha1 = await sha1HexUpper(pw);
     const prefix = sha1.slice(0, 5), suffix = sha1.slice(5);
@@ -67,13 +74,15 @@ export async function isPasswordBreached(pw: string): Promise<boolean> {
       headers: { 'Add-Padding': 'true' },
     });
     if (!res.ok) {
-
-      if (failOpen) return false;
+      if (failOpen) { breachCache.set(pw, { result: false, cachedAt: Date.now() }); return false; }
       throw new Error('HIBP breach check unavailable');
     }
     const body = await res.text();
-    return body.split('\n').some(line => line.trim().split(':')[0] === suffix);
+    const result = body.split('\n').some(line => line.trim().split(':')[0] === suffix);
+    breachCache.set(pw, { result, cachedAt: Date.now() });
+    return result;
   } catch (err) {
+    breachCache.set(pw, { result: false, cachedAt: Date.now() });
     if (failOpen) return false;
 
     console.warn('[password] HIBP check failed, failing closed', (err as Error).message);
