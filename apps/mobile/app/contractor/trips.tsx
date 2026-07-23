@@ -6,14 +6,16 @@ import { useFocusEffect } from '@react-navigation/native';
 
 export default function ContractorTripsScreen() {
   const [trips, setTrips] = useState<any[]>([]);
+  const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
+    setError(null);
     setRefreshing(true);
     try {
       const data = await api.get<any[]>('/contractor/trips');
       setTrips(data || []);
-    } catch {}
+    } catch (e) { setError(e instanceof Error ? e.message : 'Failed to load'); }
     setRefreshing(false);
   }, []);
 
@@ -38,7 +40,12 @@ export default function ContractorTripsScreen() {
   return (
     <View style={styles.container}>
       <Text style={styles.title}>My Trips</Text>
-      <FlatList
+      {error && (
+        <View style={{ backgroundColor: '#fee2e2', padding: 12, marginHorizontal: 16, borderRadius: 8, marginBottom: 8 }}>
+          <Text style={{ color: '#991b1b', textAlign: 'center', fontSize: 14 }}>Couldn't load — pull to retry</Text>
+        </View>
+      )}
+<FlatList
         data={trips}
         keyExtractor={item => item.id}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={load} />}

@@ -5,12 +5,14 @@ import { useFocusEffect } from '@react-navigation/native';
 
 export default function EarningsScreen() {
   const [trips, setTrips] = useState(0);
+  const [error, setError] = useState<string | null>(null);
   const [rides, setRides] = useState<any[]>([]);
   const [assignments, setAssignments] = useState(0);
   const [rating, setRating] = useState(0);
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
+    setError(null);
     setRefreshing(true);
     try {
       const allTrips = await api.get('/contractor/trips') || [];
@@ -21,7 +23,7 @@ export default function EarningsScreen() {
       setRides(completed);
       const me = await api.get('/auth/me');
       setRating(me?.contractorProfile?.rating ?? 0);
-    } catch {}
+    } catch (e) { setError(e instanceof Error ? e.message : 'Failed to load'); }
     setRefreshing(false);
   }, []);
 
@@ -39,7 +41,12 @@ export default function EarningsScreen() {
         <View style={styles.stat}><Text style={styles.statVal}>{rating.toFixed(1)}</Text><Text style={styles.statLabel}>Rating</Text></View>
       </View>
       <Text style={styles.revenue}>Total fare: {totalFare / 100} ETB</Text>
-      <FlatList
+      {error && (
+        <View style={{ backgroundColor: '#fee2e2', padding: 12, marginHorizontal: 16, borderRadius: 8, marginBottom: 8 }}>
+          <Text style={{ color: '#991b1b', textAlign: 'center', fontSize: 14 }}>Couldn't load — pull to retry</Text>
+        </View>
+      )}
+<FlatList
         data={rides}
         keyExtractor={item => item.id}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={load} />}

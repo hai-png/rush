@@ -6,11 +6,13 @@ import { useFocusEffect } from '@react-navigation/native';
 
 export default function ListingsScreen() {
   const [listings, setListings] = useState<any[]>([]);
+  const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
+    setError(null);
     setRefreshing(true);
-    try { setListings(await api.get('/marketplace/my-releases') || []); } catch {}
+    try { setListings(await api.get('/marketplace/my-releases') || []); } catch (e) { setError(e instanceof Error ? e.message : 'Failed to load'); }
     setRefreshing(false);
   }, []);
 
@@ -29,7 +31,12 @@ export default function ListingsScreen() {
   return (
     <View style={styles.container}>
       <Text style={styles.title}>My Seat Listings</Text>
-      <FlatList
+      {error && (
+        <View style={{ backgroundColor: '#fee2e2', padding: 12, marginHorizontal: 16, borderRadius: 8, marginBottom: 8 }}>
+          <Text style={{ color: '#991b1b', textAlign: 'center', fontSize: 14 }}>Couldn't load — pull to retry</Text>
+        </View>
+      )}
+<FlatList
         data={listings}
         keyExtractor={item => item.id}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={load} />}

@@ -5,11 +5,13 @@ import { useFocusEffect } from '@react-navigation/native';
 
 export default function PaymentsScreen() {
   const [payments, setPayments] = useState<any[]>([]);
+  const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
   const load = useCallback(async () => {
+    setError(null);
     setRefreshing(true);
-    try { setPayments(await api.get('/payments') || []); } catch {}
+    try { setPayments(await api.get('/payments') || []); } catch (e) { setError(e instanceof Error ? e.message : 'Failed to load'); }
     setRefreshing(false);
   }, []);
 
@@ -18,7 +20,12 @@ export default function PaymentsScreen() {
   return (
     <View style={styles.container}>
       <Text style={styles.title}>Payment History</Text>
-      <FlatList
+      {error && (
+        <View style={{ backgroundColor: '#fee2e2', padding: 12, marginHorizontal: 16, borderRadius: 8, marginBottom: 8 }}>
+          <Text style={{ color: '#991b1b', textAlign: 'center', fontSize: 14 }}>Couldn't load — pull to retry</Text>
+        </View>
+      )}
+<FlatList
         data={payments}
         keyExtractor={item => item.id}
         refreshControl={<RefreshControl refreshing={refreshing} onRefresh={load} />}

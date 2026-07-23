@@ -6,6 +6,7 @@ import { api } from '../../src/lib/api';
 export default function TicketDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
   const [ticket, setTicket] = useState<any>(null);
+  const [error, setError] = useState<string | null>(null);
   const [messages, setMessages] = useState<any[]>([]);
   const [reply, setReply] = useState('');
   const [loading, setLoading] = useState(false);
@@ -23,7 +24,7 @@ export default function TicketDetailScreen() {
       const msg = await api.post(`/tickets/${id}/messages`, { body: reply });
       setMessages([...messages, msg]);
       setReply('');
-    } catch {}
+    } catch (e) { setError(e instanceof Error ? e.message : 'Failed to load'); }
     setLoading(false);
   }
 
@@ -35,7 +36,12 @@ export default function TicketDetailScreen() {
         <Text style={styles.subject}>{ticket.subject}</Text>
         <Text style={styles.sub}>{ticket.category} · {ticket.priority} · {ticket.status}</Text>
       </View>
-      <FlatList
+      {error && (
+        <View style={{ backgroundColor: '#fee2e2', padding: 12, marginHorizontal: 16, borderRadius: 8, marginBottom: 8 }}>
+          <Text style={{ color: '#991b1b', textAlign: 'center', fontSize: 14 }}>Couldn't load — pull to retry</Text>
+        </View>
+      )}
+<FlatList
         data={messages}
         keyExtractor={item => item.id}
         renderItem={({ item }) => (

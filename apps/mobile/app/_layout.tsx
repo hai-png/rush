@@ -1,5 +1,6 @@
 import { Stack, Tabs } from 'expo-router';
 import { Platform, View, Text } from 'react-native';
+import { SafeAreaProvider } from 'react-native-safe-area-context';
 
 // P0-3 / FE-003: replace the bare <Stack> with a Tabs-based layout for
 // rider and contractor. The original _layout.tsx was just <Stack> with
@@ -19,17 +20,19 @@ import { Platform, View, Text } from 'react-native';
 // with a back button where appropriate.
 export default function Layout() {
   return (
-    <Stack screenOptions={{ headerShown: false }}>
-      <Stack.Screen name="index" />
-      <Stack.Screen name="auth/biometric-gate" />
-      <Stack.Screen name="auth/login" />
-      <Stack.Screen name="auth/signup" />
-      <Stack.Screen name="forgot-password" />
-      {/* Rider tab group — declared here so the nested _layout.tsx in /rider
-          can render the bottom tab bar. */}
-      <Stack.Screen name="rider" options={{ headerShown: false }} />
-      {/* Contractor tab group. */}
-      <Stack.Screen name="contractor" options={{ headerShown: false }} />
-    </Stack>
+    <SafeAreaProvider>
+      <Stack screenOptions={{ headerShown: false }}>
+        <Stack.Screen name="index" />
+        <Stack.Screen name="auth/biometric-gate" />
+        <Stack.Screen name="auth/login" />
+        <Stack.Screen name="auth/signup" />
+        <Stack.Screen name="forgot-password" />
+        {/* Rider tab group — declared here so the nested _layout.tsx in /rider
+            can render the bottom tab bar. */}
+        <Stack.Screen name="rider" options={{ headerShown: false }} />
+        {/* Contractor tab group. */}
+        <Stack.Screen name="contractor" options={{ headerShown: false }} />
+      </Stack>
+    </SafeAreaProvider>
   );
 }
