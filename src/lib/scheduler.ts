@@ -233,7 +233,59 @@ async function hourlyJobs(): Promise<void> {
     retentionJobs(),
     expireStaleSeatClaims(),
     ensureTripsForActiveAssignments(),
+    hardDeleteStaleUsers(),
   ]);
+}
+
+// P1-14 / SEC-017 / Sprint 2 #42: hard-delete soft-deleted users after a
+// 30-day grace period. Nullifies PII (passwordHash, twoFactorSecret, name,
+// phone) and deletes associated data (sessions, notifications, OTP codes,
+// backup codes, idempotency records). Preserves financial records (Payment,
+// Subscription, Ride) with the userId FK — they're needed for audit + tax.
+async function hardDeleteStaleUsers(): Promise<void> {
+  const cutoff = new Date(Date.now() - 30 * 24 * 3600_000);
+  const staleUsers = await db.user.findMany({
+    where: { deletedAt: { lt: cutoff }, isActive: false },
+    select: { id: true, phone: true },
+    take: 50,
+  });
+  if (staleUsers.length === 0) return;
+
+  for (const user of staleUsers) {
+    try {
+      await db.$transaction(async (tx) => {
+        // Nullify PII on the user row.
+        await tx.user.update({
+          where: { id: user.id },
+          data: {
+            passwordHash: 'DELETED',
+            twoFactorSecret: null,
+            twoFactorEnabled: false,
+            name: 'Deleted User',
+            email: null,
+            phoneVerified: false,
+          },
+        });
+        // Delete associated PII data (non-financial).
+        await tx.session.deleteMany({ where: { userId: user.id } });
+        await tx.notification.deleteMany({ where: { userId: user.id } });
+        await tx.otpCode.deleteMany({ where: { userId: user.id } });
+        await tx.twoFactorBackupCode.deleteMany({ where: { userId: user.id } });
+        await tx.idempotencyRecord.deleteMany({ where: { userId: user.id } });
+        await tx.tosAcceptance.deleteMany({ where: { userId: user.id } });
+      });
+      await enqueueNotification({
+        userId: user.id,
+        type: 'general',
+        title: 'Account data deleted',
+        body: 'Your account data has been permanently deleted after the 30-day grace period.',
+        link: '/',
+      }).catch(() => {});
+      logger.info({ userId: user.id, phone: user.phone }, '[scheduler] hard-deleted stale user PII');
+    } catch (err) {
+      logger.error({ err: (err as Error).message, userId: user.id }, '[scheduler] hard-delete failed');
+    }
+  }
 }
 
 // P1-26 / BIZ-021: expire pending seat claims that never got paid.
