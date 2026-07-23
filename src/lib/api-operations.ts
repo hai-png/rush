@@ -12,14 +12,22 @@ const BOARD_WINDOW_MS = 30 * 60_000;
 // How long after departure a trip may still be booked (0 = cannot book after departure).
 const BOOK_AFTER_DEPARTURE_MS = 0;
 
-export async function GET_rides({ session }: any) {
-  const rides = await db.ride.findMany({
-    where: session.role === 'platform_admin' ? {} : { userId: session.id },
-    include: { trip: { include: { route: true, shuttle: true } } },
-    orderBy: { createdAt: 'desc' },
-    take: 50,
-  });
-  return { data: rides };
+export async function GET_rides({ session, query }: any) {
+  const { parsePagination, paginatedResponse } = await import('@/lib/pagination');
+  const page = parsePagination(query);
+  const where: any = session.role === 'platform_admin' ? {} : { userId: session.id };
+  if (query?.status) where.status = query.status;
+  if (query?.tripId) where.tripId = query.tripId;
+  const [rides, total] = await Promise.all([
+    db.ride.findMany({
+      where,
+      include: { trip: { include: { route: true, shuttle: true } } },
+      orderBy: { createdAt: 'desc' },
+      ...page.findManyArgs,
+    }),
+    db.ride.count({ where }),
+  ]);
+  return paginatedResponse(rides, total, page);
 }
 
 // P1 / API-015: single-ride detail endpoint.

@@ -6,14 +6,22 @@ import { audit } from '@/lib/audit';
 import { enqueueNotification } from '@/lib/outbox';
 import { saveFile, FileUploadError } from '@/lib/file-storage';
 
-export async function GET_list({ session }: any) {
-  const tickets = await db.supportTicket.findMany({
-    where: session.role === 'platform_admin' ? {} : { userId: session.id },
-    include: { _count: { select: { messages: true } } },
-    orderBy: { updatedAt: 'desc' },
-    take: 50,
-  });
-  return { data: tickets };
+export async function GET_list({ session, query }: any) {
+  const { parsePagination, paginatedResponse } = await import('@/lib/pagination');
+  const page = parsePagination(query);
+  const where: any = session.role === 'platform_admin' ? {} : { userId: session.id };
+  if (query?.status) where.status = query.status;
+  if (query?.category) where.category = query.category;
+  const [tickets, total] = await Promise.all([
+    db.supportTicket.findMany({
+      where,
+      include: { _count: { select: { messages: true } } },
+      orderBy: { updatedAt: 'desc' },
+      ...page.findManyArgs,
+    }),
+    db.supportTicket.count({ where }),
+  ]);
+  return paginatedResponse(tickets, total, page);
 }
 
 const CreateInput = z.object({

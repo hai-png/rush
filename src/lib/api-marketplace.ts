@@ -7,18 +7,25 @@ import { loadEnv } from '@/lib/env';
 import { createId } from '@/lib/id';
 import { audit } from '@/lib/audit';
 
-export async function GET_releases({ session }: any) {
-  const releases = await db.seatRelease.findMany({
-    where: { status: 'open', expiresAt: { gt: new Date() } },
-    include: {
-      trip: { include: { route: true, shuttle: true } },
-      user: { select: { name: true } },
-    },
-    orderBy: { expiresAt: 'asc' },
-    take: 50,
-  });
-  // Don't show your own releases.
-  return { data: releases.filter(r => r.userId !== session.id) };
+export async function GET_releases({ session, query }: any) {
+  const { parsePagination, paginatedResponse } = await import('@/lib/pagination');
+  const page = parsePagination(query);
+  const where: any = { status: 'open', expiresAt: { gt: new Date() }, userId: { not: session.id } };
+  if (query?.tripId) where.tripId = query.tripId;
+  if (query?.window) where.window = query.window;
+  const [releases, total] = await Promise.all([
+    db.seatRelease.findMany({
+      where,
+      include: {
+        trip: { include: { route: true, shuttle: true } },
+        user: { select: { name: true } },
+      },
+      orderBy: { expiresAt: 'asc' },
+      ...page.findManyArgs,
+    }),
+    db.seatRelease.count({ where }),
+  ]);
+  return paginatedResponse(releases, total, page);
 }
 
 const ReleaseInput = z.object({

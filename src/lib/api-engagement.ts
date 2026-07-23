@@ -2,13 +2,21 @@ import { db } from '@/lib/db';
 import { logger } from '@/lib/logger';
 import { z } from 'zod';
 
-export async function GET_notifications({ session }: any) {
-  const notifs = await db.notification.findMany({
-    where: { userId: session.id },
-    orderBy: { createdAt: 'desc' },
-    take: 50,
-  });
-  return { data: notifs };
+export async function GET_notifications({ session, query }: any) {
+  const { parsePagination, paginatedResponse } = await import('@/lib/pagination');
+  const page = parsePagination(query);
+  const where: any = { userId: session.id };
+  if (query?.type) where.type = query.type;
+  if (query?.unread === 'true') where.readAt = null;
+  const [notifs, total] = await Promise.all([
+    db.notification.findMany({
+      where,
+      orderBy: { createdAt: 'desc' },
+      ...page.findManyArgs,
+    }),
+    db.notification.count({ where }),
+  ]);
+  return paginatedResponse(notifs, total, page);
 }
 
 export async function POST_mark_read({ session, params }: any) {

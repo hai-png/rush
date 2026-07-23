@@ -18,13 +18,21 @@ export function computeCorporateSubsidy(priceCents: number, subsidyPercent: numb
   };
 }
 
-export async function GET_list({ session }: any) {
-  const subs = await db.subscription.findMany({
-    where: { userId: session.id },
-    include: { plan: true, payments: { orderBy: { createdAt: 'desc' }, take: 5 } },
-    orderBy: { createdAt: 'desc' },
-  });
-  return { data: subs };
+export async function GET_list({ session, query }: any) {
+  const { parsePagination, paginatedResponse } = await import('@/lib/pagination');
+  const page = parsePagination(query);
+  const where: any = { userId: session.id };
+  if (query?.status) where.status = query.status;
+  const [subs, total] = await Promise.all([
+    db.subscription.findMany({
+      where,
+      include: { plan: true, payments: { orderBy: { createdAt: 'desc' }, take: 5 } },
+      orderBy: { createdAt: 'desc' },
+      ...page.findManyArgs,
+    }),
+    db.subscription.count({ where }),
+  ]);
+  return paginatedResponse(subs, total, page);
 }
 
 const CreateInput = z.object({
