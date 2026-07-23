@@ -4,6 +4,7 @@ import { NotFoundError, BadRequestError, ForbiddenError, ConflictError, Unauthor
 import { audit } from '@/lib/audit';
 import { issueSession, assertTwoFactorEnabled } from '@/lib/auth';
 import { createId } from '@/lib/id';
+import { logger } from '@/lib/logger';
 
 export async function GET_dashboard() {
   const [users, payments, subs, tickets, auditLogs, contractors, corporates, rides] = await Promise.all([
@@ -42,7 +43,11 @@ export async function PATCH_user({ session, params, body, ipAddress, userAgent }
       }
     }
     await db.user.update({ where: { id: params.id }, data: { isActive: false, tokenVersion: { increment: 1 } } });
-    await db.session.updateMany({ where: { userId: params.id, revokedAt: null }, data: { revokedAt: new Date() } }).catch(() => {});
+    // DB-019: log session-revocation failures instead of silently swallowing.
+    // A failed revoke leaves the suspended user's sessions live — security
+    // needs to know so they can investigate.
+    await db.session.updateMany({ where: { userId: params.id, revokedAt: null }, data: { revokedAt: new Date() } })
+      .catch((err: unknown) => logger.error({ err: (err as Error).message, userId: params.id }, '[admin.suspend] session revoke failed'));
     await audit({ actorId: session.id, action: 'user.suspended', entityType: 'user', entityId: params.id, ipAddress, userAgent });
   } else if (input.action === 'reactivate') {
     await db.user.update({ where: { id: params.id }, data: { isActive: true, deletedAt: null } });
@@ -66,7 +71,9 @@ export async function PATCH_user({ session, params, body, ipAddress, userAgent }
     }
     await db.user.update({ where: { id: params.id }, data: { role: input.role, tokenVersion: { increment: 1 } } });
     // Revoke existing sessions — the new role may have different access.
-    await db.session.updateMany({ where: { userId: params.id, revokedAt: null }, data: { revokedAt: new Date() } }).catch(() => {});
+    // DB-019: log failures instead of silently swallowing.
+    await db.session.updateMany({ where: { userId: params.id, revokedAt: null }, data: { revokedAt: new Date() } })
+      .catch((err: unknown) => logger.error({ err: (err as Error).message, userId: params.id }, '[admin.role_change] session revoke failed'));
     await audit({ actorId: session.id, action: 'user.role_changed', entityType: 'user', entityId: params.id, after: { role: input.role }, ipAddress, userAgent });
   } else {
     throw new BadRequestError('Unknown action');
@@ -385,11 +392,12 @@ export async function POST_bulk_suspend({ session, body, ipAddress, userAgent }:
   });
   // Revoke all active sessions for the suspended users — otherwise their
   // existing JWTs stay valid for up to 30 days.
+  // DB-019: log failures instead of silently swallowing.
   if (result.count > 0) {
     await db.session.updateMany({
       where: { userId: { in: input.userIds }, revokedAt: null },
       data: { revokedAt: new Date() },
-    }).catch(() => {});
+    }).catch((err: unknown) => logger.error({ err: (err as Error).message, userIds: input.userIds }, '[admin.bulk_suspend] session revoke failed'));
   }
   await audit({ actorId: session.id, action: 'admin.bulk_suspend', entityType: 'user', after: { count: result.count }, ipAddress, userAgent });
   return { data: { suspended: result.count } };
@@ -443,4 +451,25 @@ export async function POST_bulk_refund({ session, body, ipAddress, userAgent }: 
   }
   await audit({ actorId: session.id, action: 'admin.bulk_refund', entityType: 'payment', after: { scheduled, skipped, reason: input.reason }, ipAddress, userAgent });
   return { data: { scheduled, skipped, total: payments.length } };
+}
+
+// BIZ-09: cancel a mid-flight refund. Allows an admin to abort a refund that
+// was scheduled by mistake, before processRefundRetries picks it up.
+const CancelRefundInput = z.object({
+  reason: z.string().min(1).max(500),
+});
+
+export async function POST_cancel_refund({ session, params, body, ipAddress, userAgent }: any) {
+  const input = CancelRefundInput.parse(body);
+  const { cancelRefund } = await import('@/lib/payment-service');
+  await cancelRefund(params.id, params.refundId, session.id);
+  await audit({
+    actorId: session.id,
+    action: 'admin.refund_cancelled',
+    entityType: 'payment',
+    entityId: params.id,
+    after: { refundRetryId: params.refundId, reason: input.reason },
+    ipAddress, userAgent,
+  });
+  return { data: { id: params.refundId, cancelled: true } };
 }

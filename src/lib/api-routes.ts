@@ -178,6 +178,8 @@ const ROUTES: RouteEntry[] = [
   r('GET', '/admin/payments', { requireAuth: true, requireRole: ['platform_admin'] }, admin.GET_payments),
   r('GET', '/admin/payments/:id', { requireAuth: true, requireRole: ['platform_admin'] }, admin.GET_payment),
   r('POST', '/admin/payments/:id/refund', { requireAuth: true, requireRole: ['platform_admin'] }, admin.POST_refund),
+  // BIZ-09: cancel a mid-flight refund before processRefundRetries picks it up.
+  r('POST', '/admin/payments/:id/refunds/:refundId/cancel', { requireAuth: true, requireRole: ['platform_admin'] }, adminAdvanced.POST_cancel_refund),
   r('GET', '/admin/audit-logs', { requireAuth: true, requireRole: ['platform_admin'] }, admin.GET_audit_logs),
   r('GET', '/admin/plans', { requireAuth: true, requireRole: ['platform_admin'] }, admin.GET_plans),
   r('POST', '/admin/plans', { requireAuth: true, requireRole: ['platform_admin'] }, admin.POST_plans),
@@ -246,7 +248,9 @@ const ROUTES: RouteEntry[] = [
   r('POST', '/payments/telebirr/mandate/:mctContractNo/cancel', { requireAuth: true }, telebirr.POST_mandate_cancel),
   r('POST', '/payments/telebirr/disburse', { requireAuth: true, requireRole: ['platform_admin'] }, telebirr.POST_disburse),
 
-  r('POST', '/corporate/onboard', { requireAuth: true }, corporate.POST_onboard),
+  // SEC-23: route-level role enforcement — only riders can onboard a new
+  // corporate. Platform admins may also onboard on behalf of a rider.
+  r('POST', '/corporate/onboard', { requireAuth: true, requireRole: ['rider', 'platform_admin'] }, corporate.POST_onboard),
   r('GET',  '/corporate', { requireAuth: true, requireRole: ['corporate_admin', 'platform_admin'] }, corporate.GET_current),
   r('GET',  '/corporate/me', { requireAuth: true, requireRole: ['corporate_admin', 'platform_admin'] }, corporate.GET_me),
   r('PATCH', '/corporate', { requireAuth: true, requireRole: ['corporate_admin', 'platform_admin'] }, corporate.PATCH_corporate),

@@ -85,6 +85,13 @@ const AssignmentInput = z.object({
   schedulePattern: z.object({
     days: z.array(z.enum(['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'])),
     windows: z.array(z.enum(['morning', 'evening'])),
+    // BIZ-13: optional per-window departure times in "HH:MM" format (24h,
+    // server-local time — the Dockerfile pins TZ=Africa/Addis_Ababa). When
+    // omitted, defaults to 07:30 for morning and 17:30 for evening (the
+    // historical hardcoded values). Allows per-route / per-assignment
+    // scheduling without code changes.
+    morningTime: z.string().regex(/^\d{2}:\d{2}$/).optional(),
+    eveningTime: z.string().regex(/^\d{2}:\d{2}$/).optional(),
   }),
 });
 
@@ -116,7 +123,17 @@ export async function POST_assignment({ session, body, ipAddress, userAgent }: a
   // Compute month start/end
   const now = new Date();
   const monthStart = input.monthStart ? new Date(input.monthStart) : new Date(now.getFullYear(), now.getMonth(), 1);
+  const startOfCurrentMonth = new Date(now.getFullYear(), now.getMonth(), 1);
+  if (monthStart < startOfCurrentMonth) throw new BadRequestError('Cannot create assignments for past months');
   const monthEnd = new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 0, 23, 59, 59);
+
+  // BIZ-05: reject past-month assignments — generating trips for historical
+  // dates is wasteful and could trigger retroactive scheduling side effects.
+  // Allow the current month + future months only.
+  const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  if (monthStart < currentMonthStart) {
+    throw new BadRequestError('Cannot create an assignment for a past month. Use the current month or a future month.');
+  }
 
   const existing = await db.routeAssignment.findUnique({
     where: { routeId_contractorId_monthStart: { routeId: input.routeId, contractorId: input.contractorId, monthStart } },
@@ -146,8 +163,19 @@ export async function POST_assignment({ session, body, ipAddress, userAgent }: a
 
 export async function generateTripsFromAssignment(assignment: any): Promise<number> {
   const pattern = JSON.parse(assignment.schedulePattern);
-  const { days, windows } = pattern;
+  const { days, windows, morningTime, eveningTime } = pattern;
   if (!days || !windows || days.length === 0 || windows.length === 0) return 0;
+
+  // BIZ-13: parse configurable departure times. Fall back to historical
+  // defaults of 07:30 (morning) and 17:30 (evening) for backward compat.
+  const parseTime = (t: string | undefined, fallback: [number, number]): [number, number] => {
+    if (!t) return fallback;
+    const [h, m] = t.split(':').map(n => parseInt(n, 10));
+    if (!Number.isFinite(h) || !Number.isFinite(m) || h < 0 || h > 23 || m < 0 || m > 59) return fallback;
+    return [h, m];
+  };
+  const morningHM = parseTime(morningTime, [7, 30]);
+  const eveningHM = parseTime(eveningTime, [17, 30]);
 
   // load active holidays so we skip trip generation on those dates.
   const holidays = await db.holiday.findMany({
@@ -168,12 +196,9 @@ export async function generateTripsFromAssignment(assignment: any): Promise<numb
     if (targetDays.has(cursor.getDay()) && !holidayDates.has(cursor.toDateString())) {
       for (const window of windows) {
         const departureAt = new Date(cursor);
-        // Morning = 7:30 AM, Evening = 5:30 PM
-        if (window === 'morning') {
-          departureAt.setHours(7, 30, 0, 0);
-        } else {
-          departureAt.setHours(17, 30, 0, 0);
-        }
+        // BIZ-13: use configurable times per window when provided.
+        const [h, m] = window === 'morning' ? morningHM : eveningHM;
+        departureAt.setHours(h, m, 0, 0);
         trips.push({
           routeId: assignment.routeId,
           shuttleId: assignment.shuttleId,
@@ -256,11 +281,12 @@ export async function POST_reject_assignment({ session, params, body, ipAddress,
     where: { assignmentId: params.id, status: 'scheduled' },
     select: { id: true },
   });
+  let refundedRides = 0;
   if (tripsToCancel.length > 0) {
     const tripIds = tripsToCancel.map(t => t.id);
     const ridesToCancel = await db.ride.findMany({
       where: { tripId: { in: tripIds }, status: { in: ['booked', 'boarded'] } },
-      select: { id: true, userId: true, tripId: true, subscriptionId: true },
+      select: { id: true, userId: true, tripId: true, subscriptionId: true, seatClaimId: true },
     });
     await db.$transaction(async (tx) => {
       await tx.ride.updateMany({
@@ -272,6 +298,37 @@ export async function POST_reject_assignment({ session, params, body, ipAddress,
         data: { status: 'cancelled', seatsBooked: 0 },
       });
     });
+
+    // BIZ-04: schedule refunds for affected riders who paid via seat claims
+    // (subscription-booked rides don't have a per-ride payment to refund —
+    // their subscription credit will be restored by the existing releaseRide
+    // path). For seat-claim rides, look up the linked Payment + schedule a
+    // full refund of any unrefunded amount.
+    const { scheduleRefund } = await import('@/lib/payment-service');
+    const { Money } = await import('@/lib/money');
+    const seatClaimIds = ridesToCancel.map(r => r.seatClaimId).filter(Boolean) as string[];
+    if (seatClaimIds.length > 0) {
+      const claims = await db.seatClaim.findMany({
+        where: { id: { in: seatClaimIds } },
+        select: { id: true, paymentId: true },
+      });
+      const paymentIds = [...new Set(claims.map(c => c.paymentId))];
+      const payments = await db.payment.findMany({
+        where: { id: { in: paymentIds }, status: 'completed' },
+        select: { id: true, amountCents: true, refundAmountCents: true },
+      });
+      for (const p of payments) {
+        const refundable = p.amountCents - p.refundAmountCents;
+        if (refundable <= 0) continue;
+        try {
+          await scheduleRefund(p.id, Money.fromCents(refundable), `assignment cancelled: ${reason}`);
+          refundedRides++;
+        } catch (err) {
+          logger.error({ err: (err as Error).message, paymentId: p.id }, '[assignment.reject] scheduleRefund failed');
+        }
+      }
+    }
+
     // Notify each affected rider (best-effort).
     const { enqueueNotification } = await import('@/lib/outbox');
     for (const r of ridesToCancel) {
@@ -284,8 +341,8 @@ export async function POST_reject_assignment({ session, params, body, ipAddress,
       }).catch(() => {});
     }
   }
-  await audit({ actorId: session.id, action: 'assignment.rejected', entityType: 'route_assignment', entityId: params.id, after: { reason, cancelledTrips: tripsToCancel.length }, ipAddress, userAgent });
-  return { data: { id: params.id, status: 'cancelled', cancelledTrips: tripsToCancel.length } };
+  await audit({ actorId: session.id, action: 'assignment.rejected', entityType: 'route_assignment', entityId: params.id, after: { reason, cancelledTrips: tripsToCancel.length, refundedRides }, ipAddress, userAgent });
+  return { data: { id: params.id, status: 'cancelled', cancelledTrips: tripsToCancel.length, refundedRides } };
 }
 
 export async function GET_my_assignments({ session }: any) {

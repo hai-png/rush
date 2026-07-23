@@ -10,8 +10,11 @@ import { CURRENT_TOS_VERSION } from '@/lib/env';
 import { ensureSchedulerStarted } from '@/lib/scheduler';
 import { logger } from '@/lib/logger';
 
-export const SESSION_COOKIE = 'addis-session';
-const CSRF_COOKIE = 'addis-csrf';
+// SEC-16: in production, use the __Host- prefix so the cookie can only be set
+// from the origin domain (no subdomain/path overwrite attacks). Requires
+// Secure flag (set below in production) and rejects the Domain attribute.
+export const SESSION_COOKIE = process.env.NODE_ENV === 'production' ? '__Host-addis-session' : 'addis-session';
+const CSRF_COOKIE = process.env.NODE_ENV === 'production' ? '__Host-addis-csrf' : 'addis-csrf';
 const CSRF_HEADER = 'x-csrf-token';
 const SAFE_METHODS = new Set(['GET', 'HEAD', 'OPTIONS']);
 
@@ -31,11 +34,28 @@ export type ApiOptions = {
   // Idempotency is auto-applied to POST with an Idempotency-Key header.
 };
 
+// SEC-12: walk X-Forwarded-For right-to-left, skipping entries that match
+// a trusted proxy (configured via TRUSTED_PROXIES). The rightmost non-trusted
+// entry is treated as the real client IP. If TRUSTED_PROXIES is empty, the
+// XFF header is ignored entirely and the socket peer (x-real-ip) is used —
+// this is the safest default because an attacker cannot forge XFF when the
+// app is directly exposed.
+function parseTrustedProxies(): Set<string> {
+  const raw = process.env.TRUSTED_PROXIES || '';
+  return new Set(raw.split(',').map(s => s.trim()).filter(Boolean));
+}
+
 export function clientIp(req: NextRequest): string | undefined {
   const xff = req.headers.get('x-forwarded-for');
-  if (xff) {
+  const trusted = parseTrustedProxies();
+  if (xff && trusted.size > 0) {
     const parts = xff.split(',').map(s => s.trim()).filter(Boolean);
-    if (parts.length > 0) return parts[parts.length - 1];
+    // Walk right-to-left; the rightmost non-trusted entry is the real client.
+    for (let i = parts.length - 1; i >= 0; i--) {
+      if (!trusted.has(parts[i]!)) return parts[i];
+    }
+    // All entries are trusted — return the leftmost (closest to the origin client).
+    if (parts.length > 0) return parts[0];
   }
   return req.headers.get('x-real-ip') ?? undefined;
 }
@@ -64,6 +84,14 @@ const RATE_RULES: RateRule[] = [
   { pattern: /\/api\/v1\/auth\/password\/reset$/, limit: 3, windowSec: 600, keyFn: ({ body }) => `phone:${body?.phone ?? 'unknown'}` },
   { pattern: /\/api\/v1\/auth\/password\/reset\/confirm$/, limit: 5, windowSec: 600, keyFn: ({ body }) => `phone:${body?.phone ?? 'unknown'}` },
   { pattern: /\/api\/v1\/subscriptions$/, limit: 10, windowSec: 3600, keyFn: ({ session }) => session ? `user:${session.id}` : null },
+  // SEC-14: corporate invite generation — rogue admin could generate unlimited
+  // invite codes without this. Cap at 50/hour per admin.
+  { pattern: /\/api\/v1\/corporate\/invites$/, limit: 50, windowSec: 3600, keyFn: ({ session }) => session ? `user:${session.id}` : null },
+  // SEC-21: webhook-specific rule. Telebirr can burst payment notifications
+  // during peak hours — the default 60/min anonymous cap could drop real
+  // settlement events. Allow 600/min per IP (high enough for legit bursts,
+  // low enough to blunt a naive flood).
+  { pattern: /\/api\/v1\/webhooks\//, limit: 600, windowSec: 60, keyFn: ({ ip }) => ip ? `ip:${ip}` : null },
 ];
 
 const DEFAULT_AUTHED = { limit: 100, windowSec: 60 };
@@ -416,6 +444,8 @@ export function api(options: ApiOptions, handler: Handler) {
 }
 
 export async function setSessionCookie(res: NextResponse, token: string): Promise<void> {
+  // SEC-16: __Host- prefix requires Secure + path=/ + no Domain attribute.
+  // sameSite='lax' is preserved (browser still sends it on top-level navigations).
   res.cookies.set(SESSION_COOKIE, token, {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',

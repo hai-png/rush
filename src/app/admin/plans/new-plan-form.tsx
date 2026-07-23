@@ -33,13 +33,13 @@ export function NewPlanForm() {
     <Card>
       <CardContent className="py-4">
         <form onSubmit={submit} className="grid grid-cols-2 gap-3">
-          <div><Label>Slug</Label><Input value={form.slug} onChange={e => setForm({ ...form, slug: e.target.value })} required /></div>
-          <div><Label>Name</Label><Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required /></div>
-          <div className="col-span-2"><Label>Description</Label><Textarea value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} rows={2} /></div>
-          <div><Label>Price (cents)</Label><Input type="number" value={form.priceCents} onChange={e => setForm({ ...form, priceCents: Number(e.target.value) })} required /></div>
-          <div><Label>Rides (-1 = unlimited)</Label><Input type="number" value={form.ridesIncluded} onChange={e => setForm({ ...form, ridesIncluded: Number(e.target.value) })} required /></div>
-          <div><Label>Duration (days)</Label><Input type="number" value={form.durationDays} onChange={e => setForm({ ...form, durationDays: Number(e.target.value) })} required /></div>
-          <div><Label>Sort order</Label><Input type="number" value={form.sortOrder} onChange={e => setForm({ ...form, sortOrder: Number(e.target.value) })} /></div>
+          <div><Label htmlFor="plan-slug">Slug</Label><Input id="plan-slug" value={form.slug} onChange={e => setForm({ ...form, slug: e.target.value })} required /></div>
+          <div><Label htmlFor="plan-name">Name</Label><Input id="plan-name" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} required /></div>
+          <div className="col-span-2"><Label htmlFor="plan-description">Description</Label><Textarea id="plan-description" value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} rows={2} /></div>
+          <div><Label htmlFor="plan-price">Price (cents)</Label><Input id="plan-price" type="number" value={form.priceCents} onChange={e => setForm({ ...form, priceCents: Number(e.target.value) })} required /></div>
+          <div><Label htmlFor="plan-rides">Rides (-1 = unlimited)</Label><Input id="plan-rides" type="number" value={form.ridesIncluded} onChange={e => setForm({ ...form, ridesIncluded: Number(e.target.value) })} required /></div>
+          <div><Label htmlFor="plan-duration">Duration (days)</Label><Input id="plan-duration" type="number" value={form.durationDays} onChange={e => setForm({ ...form, durationDays: Number(e.target.value) })} required /></div>
+          <div><Label htmlFor="plan-sort">Sort order</Label><Input id="plan-sort" type="number" value={form.sortOrder} onChange={e => setForm({ ...form, sortOrder: Number(e.target.value) })} /></div>
           <div className="col-span-2 flex items-center gap-2">
             <Checkbox id="trial" checked={form.isTrial} onCheckedChange={(v) => setForm({ ...form, isTrial: v === true })} />
             <Label htmlFor="trial">Trial plan (cannot be unlimited)</Label>

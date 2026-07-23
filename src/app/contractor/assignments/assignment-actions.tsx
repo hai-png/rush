@@ -53,8 +53,8 @@ export function AssignmentActions({ id }: { id: string }) {
             <DialogDescription>Provide a reason for rejecting this route assignment.</DialogDescription>
           </DialogHeader>
           <div className="py-2">
-            <Label>Reason</Label>
-            <Input value={reason} onChange={e => setReason(e.target.value)} placeholder="e.g. Shuttle in maintenance" />
+            <Label htmlFor="reject-reason">Reason</Label>
+            <Input id="reject-reason" value={reason} onChange={e => setReason(e.target.value)} placeholder="e.g. Shuttle in maintenance" />
           </div>
           <DialogFooter>
             <Button variant="outline" onClick={() => setRejectOpen(false)}>Cancel</Button>

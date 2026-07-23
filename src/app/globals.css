@@ -119,4 +119,10 @@
   body {
     @apply bg-background text-foreground;
   }
+  /* FE-034: explicit :focus-visible styling so keyboard users get a clear
+     outline on every interactive element. Mouse clicks still use :focus
+     (no outline) so the design stays clean for pointer users. */
+  :focus-visible {
+    @apply outline-2 outline-offset-2 outline-ring;
+  }
 }

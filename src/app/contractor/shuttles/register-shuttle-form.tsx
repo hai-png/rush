@@ -34,20 +34,20 @@ export function RegisterShuttleForm() {
       <DialogContent>
         <DialogHeader><DialogTitle>Register a shuttle</DialogTitle></DialogHeader>
         <div className="space-y-3 py-2">
-          <div><Label>Plate number</Label><Input value={form.plate} onChange={e => setForm({ ...form, plate: e.target.value })} placeholder="AA-12345" /></div>
-          <div><Label>Model</Label><Input value={form.model} onChange={e => setForm({ ...form, model: e.target.value })} placeholder="Toyota Coaster" /></div>
+          <div><Label htmlFor="shuttle-plate">Plate number</Label><Input id="shuttle-plate" value={form.plate} onChange={e => setForm({ ...form, plate: e.target.value })} placeholder="AA-12345" /></div>
+          <div><Label htmlFor="shuttle-model">Model</Label><Input id="shuttle-model" value={form.model} onChange={e => setForm({ ...form, model: e.target.value })} placeholder="Toyota Coaster" /></div>
           <div className="grid grid-cols-2 gap-3">
-            <div><Label>Type</Label>
+            <div><Label htmlFor="shuttle-type">Type</Label>
               <Select value={form.vehicleType} onValueChange={v => setForm({ ...form, vehicleType: v })}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectTrigger id="shuttle-type"><SelectValue /></SelectTrigger>
                 <SelectContent>
                   {['coaster', 'minibus', 'van', 'sedan'].map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
                 </SelectContent>
               </Select>
             </div>
-            <div><Label>Capacity</Label><Input type="number" min={1} max={100} value={form.capacity} onChange={e => setForm({ ...form, capacity: Number(e.target.value) })} /></div>
+            <div><Label htmlFor="shuttle-capacity">Capacity</Label><Input id="shuttle-capacity" type="number" min={1} max={100} value={form.capacity} onChange={e => setForm({ ...form, capacity: Number(e.target.value) })} /></div>
           </div>
-          <div><Label>Year</Label><Input type="number" min={1990} max={new Date().getFullYear() + 1} value={form.year} onChange={e => setForm({ ...form, year: Number(e.target.value) })} /></div>
+          <div><Label htmlFor="shuttle-year">Year</Label><Input id="shuttle-year" type="number" min={1990} max={new Date().getFullYear() + 1} value={form.year} onChange={e => setForm({ ...form, year: Number(e.target.value) })} /></div>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>

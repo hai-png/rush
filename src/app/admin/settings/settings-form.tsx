@@ -42,8 +42,8 @@ export function SettingsForm() {
       )}
       <div className="space-y-2 border-t pt-4">
         <div className="text-sm font-medium">Add/update setting</div>
-        <div><Label>Key</Label><Input value={newKey} onChange={e => setNewKey(e.target.value)} placeholder="e.g. max_rides_per_day" /></div>
-        <div><Label>Value</Label><Input value={newValue} onChange={e => setNewValue(e.target.value)} placeholder="e.g. 40" /></div>
+        <div><Label htmlFor="setting-key">Key</Label><Input id="setting-key" value={newKey} onChange={e => setNewKey(e.target.value)} placeholder="e.g. max_rides_per_day" /></div>
+        <div><Label htmlFor="setting-value">Value</Label><Input id="setting-value" value={newValue} onChange={e => setNewValue(e.target.value)} placeholder="e.g. 40" /></div>
         <Button onClick={save} disabled={loading || !newKey}>{loading ? 'Saving…' : 'Save'}</Button>
       </div>
     </div>

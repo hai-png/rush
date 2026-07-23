@@ -13,14 +13,27 @@ export function AcceptTosForm() {
   async function accept() {
     setLoading(true);
     try {
+      // FE-04 / ARCH-05e: fetch /auth/me to get the user's role, then redirect
+      // to the role-specific dashboard. The previous implementation read a
+      // non-existent `addis-role` cookie and always pushed to '/'.
+      const me = await api.get<{ role: string }>('/api/v1/auth/me');
       await api.post('/api/v1/tos/accept');
       toast.success('Terms accepted');
-      const role = (document.cookie.match(/addis-role=([^;]+)/) || [])[1];
-    // We don't have the role cookie — just go to / and let the redirect logic handle it.
-    router.push('/');
+      const route = roleDashboard(me.role);
+      router.push(route);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed');
     } finally { setLoading(false); }
+  }
+
+  function roleDashboard(role: string): string {
+    switch (role) {
+      case 'contractor': return '/dashboard/contractor';
+      case 'corporate_admin': return '/dashboard/corporate';
+      case 'platform_admin': return '/dashboard/admin';
+      case 'rider':
+      default: return '/dashboard/rider';
+    }
   }
 
   return <Button onClick={accept} disabled={loading} className="w-full">{loading ? 'Accepting…' : 'Accept and continue'}</Button>;

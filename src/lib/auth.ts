@@ -88,6 +88,11 @@ export async function verifySession(token: string): Promise<SessionUser> {
     throw new UnauthorizedError('Session invalidated — please log in again');
   }
 
+  // DB-056: update lastSeenAt so admins can spot stale-but-unexpired sessions.
+  // Best-effort — never fail the request if this write fails (e.g. under heavy
+  // load or single-writer contention).
+  db.session.update({ where: { jti }, data: { lastSeenAt: new Date() } }).catch(() => {});
+
   return {
     id: user.id,
     phone: user.phone,

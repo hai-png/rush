@@ -28,12 +28,12 @@ export function CorporateSettingsForm({ corp }: { corp: any }) {
 
   return (
     <div className="space-y-3">
-      <div><Label>Company name</Label><Input value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></div>
-      <div><Label>Contact email</Label><Input type="email" value={form.contactEmail} onChange={e => setForm({ ...form, contactEmail: e.target.value })} /></div>
-      <div><Label>Contact phone</Label><Input value={form.contactPhone} onChange={e => setForm({ ...form, contactPhone: e.target.value })} /></div>
+      <div><Label htmlFor="corp-name">Company name</Label><Input id="corp-name" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></div>
+      <div><Label htmlFor="corp-email">Contact email</Label><Input id="corp-email" type="email" value={form.contactEmail} onChange={e => setForm({ ...form, contactEmail: e.target.value })} /></div>
+      <div><Label htmlFor="corp-phone">Contact phone</Label><Input id="corp-phone" value={form.contactPhone} onChange={e => setForm({ ...form, contactPhone: e.target.value })} /></div>
       <div className="grid grid-cols-2 gap-3">
-        <div><Label>Subsidy (%)</Label><Input type="number" min={0} max={100} value={form.subsidyPercent} onChange={e => setForm({ ...form, subsidyPercent: Number(e.target.value) })} /></div>
-        <div><Label>Monthly allowance</Label><Input type="number" min={1} value={form.monthlySeatAllowance} onChange={e => setForm({ ...form, monthlySeatAllowance: Number(e.target.value) })} /></div>
+        <div><Label htmlFor="corp-subsidy">Subsidy (%)</Label><Input id="corp-subsidy" type="number" min={0} max={100} value={form.subsidyPercent} onChange={e => setForm({ ...form, subsidyPercent: Number(e.target.value) })} /></div>
+        <div><Label htmlFor="corp-allowance">Monthly allowance</Label><Input id="corp-allowance" type="number" min={1} value={form.monthlySeatAllowance} onChange={e => setForm({ ...form, monthlySeatAllowance: Number(e.target.value) })} /></div>
       </div>
       <Button onClick={save} disabled={loading}>{loading ? 'Saving…' : 'Save settings'}</Button>
     </div>

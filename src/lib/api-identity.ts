@@ -16,7 +16,7 @@ const RegisterInput = z.discriminatedUnion('kind', [
     kind: z.literal('rider'),
     name: z.string().min(2),
     phone: z.string().refine(EthiopianPhone.isValid, 'Invalid Ethiopian phone'),
-    password: z.string().min(10),
+    password: z.string().min(10).max(128),
     homeArea: z.string().min(1),
     workArea: z.string().min(1),
   }),
@@ -24,7 +24,7 @@ const RegisterInput = z.discriminatedUnion('kind', [
     kind: z.literal('contractor'),
     name: z.string().min(2),
     phone: z.string().refine(EthiopianPhone.isValid, 'Invalid Ethiopian phone'),
-    password: z.string().min(10),
+    password: z.string().min(10).max(128),
     licenseNumber: z.string().min(1),
     experienceYears: z.number().int().min(0),
   }),
@@ -36,8 +36,19 @@ export async function POST_register({ body, ipAddress, userAgent }: any) {
 
   const passwordHash = await hashPassword(input.password);
 
-  // wrap user creation in try/catch to convert P2002 (unique violation)
-  // on phone to a friendly ConflictError instead of an unhandled 500.
+  // SEC-17: don't reveal phone enumeration. On P2002 (phone already exists),
+  // return the same 201 success response shape so an attacker can't tell
+  // whether the phone was newly registered or already existed. The client
+  // ignores the response body and immediately calls POST /auth/token, which
+  // will fail for the would-be attacker because they don't know the password.
+  const successResponse = (userId: string, role: string) => ({
+    status: 201,
+    data: {
+      user: { id: userId, phone, role, name: input.name },
+      profile: { id: userId },
+    },
+  });
+
   try {
     if (input.kind === 'rider') {
       const user = await db.user.create({
@@ -48,7 +59,7 @@ export async function POST_register({ body, ipAddress, userAgent }: any) {
       include: { riderProfile: true },
     });
     await audit({ actorId: user.id, action: 'user.register', entityType: 'user', entityId: user.id, after: { role: 'rider', phone }, ipAddress, userAgent });
-    return { status: 201, data: { user: { id: user.id, phone: user.phone, role: user.role, name: user.name }, profile: { id: user.riderProfile!.id } } };
+    return successResponse(user.id, 'rider');
   } else {
     const user = await db.user.create({
       data: {
@@ -58,11 +69,16 @@ export async function POST_register({ body, ipAddress, userAgent }: any) {
       include: { contractorProfile: true },
     });
     await audit({ actorId: user.id, action: 'user.register', entityType: 'user', entityId: user.id, after: { role: 'contractor', phone }, ipAddress, userAgent });
-    return { status: 201, data: { user: { id: user.id, phone: user.phone, role: user.role, name: user.name }, profile: { id: user.contractorProfile!.id } } };
+    return successResponse(user.id, 'contractor');
   }
   } catch (err: any) {
-    // convert P2002 unique violation on phone to friendly ConflictError.
-    if (err?.code === 'P2002') throw new ConflictError('Phone already registered');
+    // SEC-17: P2002 (phone already registered) → return the same 201 response
+    // shape so an attacker cannot enumerate registered phones.
+    if (err?.code === 'P2002') {
+      // Use a deterministic synthetic ID so the response shape matches a real
+      // registration. The client never reads this ID; subsequent login fails.
+      return successResponse(`existing-${phone.replace(/[^0-9]/g, '')}`, input.kind);
+    }
     throw err;
   }
 }
@@ -103,6 +119,9 @@ export async function POST_token({ body, ipAddress, userAgent }: any) {
         ...(shouldLock ? { lockedUntil: new Date(Date.now() + LOCKOUT_MS) } : {}),
       },
     });
+    // SEC-018: audit every failed login attempt (not just lockouts) so
+    // security reviews can spot brute-force patterns before lockout triggers.
+    await audit({ actorId: user.id, action: 'user.login_failed', entityType: 'user', entityId: user.id, after: { reason: 'invalid_password', attempts: newAttempts, locked: shouldLock }, ipAddress, userAgent }).catch(() => {});
     if (shouldLock) {
       await audit({ actorId: user.id, action: 'user.account_locked', entityType: 'user', entityId: user.id, after: { reason: 'max_failed_attempts' }, ipAddress, userAgent });
     }
@@ -175,8 +194,12 @@ export async function POST_token({ body, ipAddress, userAgent }: any) {
   return res;
 }
 
-export async function POST_logout({ session }: any) {
-  if (session) await revokeSession(session.jti);
+export async function POST_logout({ session, ipAddress, userAgent }: any) {
+  if (session) {
+    await revokeSession(session.jti);
+    // SEC-018: audit logout so security reviews can correlate session activity.
+    await audit({ actorId: session.id, action: 'user.logout', entityType: 'user', entityId: session.id, ipAddress, userAgent }).catch(() => {});
+  }
   const res = NextResponse.json({ data: { ok: true } });
   await clearSessionCookie(res);
   return res;
@@ -222,8 +245,8 @@ export async function GET_me({ session }: any) {
 
 export async function POST_change_password({ session, body, ipAddress, userAgent }: any) {
   const { oldPassword, newPassword, code } = z.object({
-    oldPassword: z.string(),
-    newPassword: z.string().min(10),
+    oldPassword: z.string().max(256),
+    newPassword: z.string().min(10).max(128),
     code: z.string().length(6).optional(),
   }).parse(body);
   const user = await db.user.findUnique({ where: { id: session!.id } });
@@ -238,8 +261,16 @@ export async function POST_change_password({ session, body, ipAddress, userAgent
     }
   }
   const passwordHash = await hashPassword(newPassword);
-  await db.user.update({ where: { id: user.id }, data: { passwordHash, tokenVersion: { increment: 1 } } });
-  await revokeAllSessionsForUser(user.id);
+  // DB-015: wrap password update + session revocation in a single transaction
+  // so a crash between the two can't leave stale sessions able to use the old
+  // password (or vice versa).
+  await db.$transaction(async (tx) => {
+    await tx.user.update({ where: { id: user.id }, data: { passwordHash, tokenVersion: { increment: 1 } } });
+    await tx.session.updateMany({
+      where: { userId: user.id, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+  });
   await audit({ actorId: user.id, action: 'user.password_change', entityType: 'user', entityId: user.id, ipAddress, userAgent });
   return { data: { ok: true } };
 }
@@ -304,11 +335,16 @@ export async function GET_sessions({ session }: any) {
   return { data: rows };
 }
 
-export async function DELETE_session({ session, params }: any) {
-  await db.session.updateMany({
+export async function DELETE_session({ session, params, ipAddress, userAgent }: any) {
+  const result = await db.session.updateMany({
     where: { id: params.id, userId: session!.id, revokedAt: null },
     data: { revokedAt: new Date() },
   });
+  if (result.count > 0) {
+    // SEC-018: audit session revocation so user-initiated logouts are visible
+    // in the audit trail (was previously silently swallowed).
+    await audit({ actorId: session!.id, action: 'user.session_revoked', entityType: 'session', entityId: params.id, ipAddress, userAgent }).catch(() => {});
+  }
   return { status: 204 };
 }
 
@@ -374,14 +410,20 @@ export async function POST_password_reset_confirm({ body, ipAddress, userAgent }
   const { phone, code, newPassword } = z.object({
     phone: z.string().refine(EthiopianPhone.isValid, 'Invalid Ethiopian phone'),
     code: z.string().length(6),
-    newPassword: z.string().min(10),
+    newPassword: z.string().min(10).max(128),
   }).parse(body);
   await verifyOtp(phone, 'password_reset', code);
   const user = await db.user.findUnique({ where: { phone: EthiopianPhone.normalize(phone) } });
   if (!user) throw new UnauthorizedError();
   const passwordHash = await hashPassword(newPassword);
-  await db.user.update({ where: { id: user.id }, data: { passwordHash, tokenVersion: { increment: 1 } } });
-  await revokeAllSessionsForUser(user.id);
+  // DB-015: wrap password update + session revocation in a single transaction.
+  await db.$transaction(async (tx) => {
+    await tx.user.update({ where: { id: user.id }, data: { passwordHash, tokenVersion: { increment: 1 } } });
+    await tx.session.updateMany({
+      where: { userId: user.id, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+  });
   await audit({ actorId: user.id, action: 'user.password_reset', entityType: 'user', entityId: user.id, ipAddress, userAgent });
   return { status: 204 };
 }

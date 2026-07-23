@@ -75,7 +75,7 @@ export default async function AdminAssignmentsPage() {
                         'destructive'
                       }>{a.status}</Badge>
                       {a.maxSeats > 0 && (
-                        <span className="text-xs text-muted-foreground">{a.seatsBooked}/{a.maxSeats} seats</span>
+                        <span className="text-xs text-muted-foreground">{a._count.rides}/{a.maxSeats} seats</span>
                       )}
                     </div>
                   </div>

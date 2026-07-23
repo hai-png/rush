@@ -8,6 +8,14 @@ import { logger } from '@/lib/logger';
 
 let started = false;
 
+// BIZ-12: SINGLE-INSTANCE LIMITATION. The scheduler runs in-process and has
+// no distributed lock (Redlock, PG advisory locks, etc.). On a multi-instance
+// deployment, every instance races the same outbox/refund/expire jobs —
+// causing duplicate push notifications, double-refund attempts, etc. Until a
+// distributed lock is added, deployments MUST run with SCHEDULER_DISABLED=1
+// on all but one instance (the designated worker), or run a single instance.
+// Tracked as future work pending Redis Redlock integration.
+
 export function ensureSchedulerStarted(): void {
   if (started) return;
   started = true;
@@ -96,13 +104,16 @@ async function drainOutbox(): Promise<void> {
   }
 
   let processed = 0;
-  // Loop until the queue is empty (or we hit a safety cap).
-  for (let i = 0; i < 5; i++) {
+  // SCHED-03a: loop 10 iterations × 50 events per tick (was 5 × 20 = 100
+  // events per 30s tick). At the new cap of 500 events per tick the drain
+  // can keep up with ~1000 events/min sustained, which covers typical burst
+  // load (mass notification fan-out, refund retries) without growing backlog.
+  for (let i = 0; i < 10; i++) {
     const claimed = await db.$transaction(async (tx) => {
       const rows = await tx.outboxEvent.findMany({
         where: { status: 'pending', nextAttemptAt: { lte: new Date() } },
         orderBy: { nextAttemptAt: 'asc' },
-        take: 20,
+        take: 50,
       });
       if (rows.length === 0) return [];
       // re-check status:'pending' in the updateMany where-clause so concurrent
@@ -198,9 +209,13 @@ async function drainOutbox(): Promise<void> {
 async function expireStale(): Promise<void> {
   const now = new Date();
   // Capture the IDs of subs that are about to expire so we can cascade-cancel their future rides.
+  // SCHED-03b: cap at 100 per run so the scheduler can't OOM if thousands of
+  // subs expire at once (e.g. a mass expiry event). Subsequent ticks pick up
+  // the rest.
   const expiringSubs = await db.subscription.findMany({
     where: { status: 'active', endDate: { lt: now } },
     select: { id: true, userId: true },
+    take: 100,
   });
 
   const expiredSubs = await db.subscription.updateMany({
@@ -241,9 +256,11 @@ async function expireStale(): Promise<void> {
   // Before marking releases as expired, collect them so we can restore
   // each seller's ride + trip capacity. A release that expired without a
   // buyer means the seller gets their seat back.
+  // SCHED-03c: cap at 100 per run — same rationale as expiringSubs above.
   const expiringReleases = await db.seatRelease.findMany({
     where: { status: 'open', expiresAt: { lt: now } },
     select: { id: true, tripId: true, userId: true },
+    take: 100,
   });
   const expiredReleases = await db.seatRelease.updateMany({
     where: { status: 'open', expiresAt: { lt: now } },
@@ -311,7 +328,8 @@ async function hourlyJobs(): Promise<void> {
 // backup codes, idempotency records). Preserves financial records (Payment,
 // Subscription, Ride) with the userId FK — they're needed for audit + tax.
 async function hardDeleteStaleUsers(): Promise<void> {
-  const cutoff = new Date(Date.now() - 30 * 24 * 3600_000);
+  const now = new Date();
+  const cutoff = new Date(now.getFullYear(), now.getMonth() - 1, now.getDate());
   const staleUsers = await db.user.findMany({
     where: { deletedAt: { lt: cutoff }, isActive: false },
     select: { id: true, phone: true },
@@ -401,8 +419,14 @@ async function expireStaleSeatClaims(): Promise<void> {
 
 // ensure trips exist for all active assignments.
 // If trip generation failed at assignment creation/acceptance time, this job
-// catches up by generating any missing trips for the current month. Also
-// there's nothing to do (next month's assignment must be created manually
+// catches up by generating any missing trips for the current month.
+//
+// DB-048: CROSS-MONTH ROLLOVER IS FUTURE WORK. This job only ensures trips
+// for the current active assignment's [monthStart, monthEnd] window. There is
+// no logic to auto-create next month's RouteAssignment when the current one
+// expires — admins must create it manually each month. A future enhancement
+// should auto-renew assignments whose contractor has no cancellations and
+// whose shuttle is still active.
 async function ensureTripsForActiveAssignments(): Promise<void> {
   const now = new Date();
   const activeAssignments = await db.routeAssignment.findMany({
@@ -434,6 +458,17 @@ async function ensureTripsForActiveAssignments(): Promise<void> {
 
 // OutboxEvent, IdempotencyRecord, OtpCode, TelebirrNotifyEvent, and RefundRetry
 // and queries slow down. We delete rows older than the retention window.
+//
+// SCHED-06: ARCHIVAL IS FUTURE WORK. These jobs hard-delete rows past their
+// retention window. For audit/dispute/compliance purposes, a future
+// enhancement should move aged rows to cold storage (S3 + Glacier, or a
+// dedicated analytics DB) BEFORE deleting them, so historical data isn't
+// permanently lost. Tracked as future work pending an archival pipeline.
+//
+// DB-033: AuditLog is intentionally NOT included in these jobs. The audit
+// chain is append-only and must be retained for 7 years for compliance / tax
+// / dispute-resolution purposes. A future archival job should move aged
+// AuditLog rows to cold storage (S3 + Glacier) instead of deleting them.
 async function retentionJobs(): Promise<void> {
   const now = new Date();
   const THIRTY_DAYS = new Date(now.getTime() - 30 * 24 * 3600_000);
@@ -470,33 +505,42 @@ async function retentionJobs(): Promise<void> {
 }
 
 async function resetCorporateMonthlyCounters(): Promise<void> {
-  const cutoff = new Date(Date.now() - 30 * 24 * 3600_000);
+  // DB-049: reset on calendar-month boundaries, not a rolling 30-day window.
+  // A rolling window is off by up to ~15 days from the corporate billing
+  // cycle and makes "monthly seat allowance" semantics ambiguous. We compute
+  // the start of the current calendar month (local server time, which the
+  // Dockerfile pins to Africa/Addis_Ababa) and reset any member whose
+  // lastResetAt is before that timestamp.
+  const now = new Date();
+  const monthStart = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
   const result = await db.corporateMember.updateMany({
     where: {
       isActive: true,
       deletedAt: null,
-      lastResetAt: { lt: cutoff },
+      lastResetAt: { lt: monthStart },
       ridesUsedThisMonth: { gt: 0 },
     },
     data: {
       ridesUsedThisMonth: 0,
-      lastResetAt: new Date(),
+      lastResetAt: now,
     },
   });
   if (result.count > 0) {
-    logger.info({ count: result.count }, '[scheduler] reset monthly counters');
+    logger.info({ count: result.count, monthStart: monthStart.toISOString() }, '[scheduler] reset monthly counters (calendar month)');
   }
 }
 
 async function sendSubscriptionExpiryWarnings(): Promise<void> {
   const threeDaysFromNow = new Date(Date.now() + 3 * 24 * 3600_000);
   const oneDayFromNow = new Date(Date.now() + 24 * 3600_000);
+  // SCHED-03c: cap at 100 per run so the scheduler can't OOM under load.
   const soonExpiring = await db.subscription.findMany({
     where: {
       status: 'active',
       endDate: { gt: oneDayFromNow, lt: threeDaysFromNow },
     },
     select: { id: true, userId: true, endDate: true },
+    take: 100,
   });
 
   let notified = 0;

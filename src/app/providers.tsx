@@ -19,7 +19,7 @@ export function Providers({ children }: { children: React.ReactNode }) {
         <CsrfInitializer />
         {children}
       </QueryClientProvider>
-      <Toaster richColors position="top-right" />
+      <Toaster richColors position="top-right" toastOptions={{ duration: 6000 }} />
     </ThemeProvider>
   );
 }

@@ -44,12 +44,12 @@ export function CreateInviteButton() {
         </DialogHeader>
         <div className="space-y-3 py-2">
           <div>
-            <Label>Note (optional)</Label>
-            <Input value={note} onChange={e => setNote(e.target.value)} placeholder="For Engineering team" maxLength={200} />
+            <Label htmlFor="invite-note">Note (optional)</Label>
+            <Input id="invite-note" value={note} onChange={e => setNote(e.target.value)} placeholder="For Engineering team" maxLength={200} />
           </div>
           <div>
-            <Label>Max uses</Label>
-            <Input type="number" min={1} max={1000} value={maxUses} onChange={e => setMaxUses(Number(e.target.value))} />
+            <Label htmlFor="invite-max-uses">Max uses</Label>
+            <Input id="invite-max-uses" type="number" min={1} max={1000} value={maxUses} onChange={e => setMaxUses(Number(e.target.value))} />
           </div>
         </div>
         <DialogFooter>

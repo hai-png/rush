@@ -35,17 +35,17 @@ export function FaqForm() {
       <DialogContent>
         <DialogHeader><DialogTitle>Create FAQ article</DialogTitle></DialogHeader>
         <div className="space-y-3 py-2">
-          <div><Label>Category</Label>
+          <div><Label htmlFor="faq-category">Category</Label>
             <Select value={form.category} onValueChange={v => setForm({ ...form, category: v })}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectTrigger id="faq-category"><SelectValue /></SelectTrigger>
               <SelectContent>
                 {['general', 'billing', 'routes', 'shuttle', 'account', 'corporate'].map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
-          <div><Label>Question</Label><Input value={form.question} onChange={e => setForm({ ...form, question: e.target.value })} /></div>
-          <div><Label>Answer</Label><Textarea value={form.answer} onChange={e => setForm({ ...form, answer: e.target.value })} rows={4} /></div>
-          <div><Label>Sort order</Label><Input type="number" value={form.sortOrder} onChange={e => setForm({ ...form, sortOrder: Number(e.target.value) })} /></div>
+          <div><Label htmlFor="faq-question">Question</Label><Input id="faq-question" value={form.question} onChange={e => setForm({ ...form, question: e.target.value })} /></div>
+          <div><Label htmlFor="faq-answer">Answer</Label><Textarea id="faq-answer" value={form.answer} onChange={e => setForm({ ...form, answer: e.target.value })} rows={4} /></div>
+          <div><Label htmlFor="faq-sort-order">Sort order</Label><Input id="faq-sort-order" type="number" value={form.sortOrder} onChange={e => setForm({ ...form, sortOrder: Number(e.target.value) })} /></div>
         </div>
         <DialogFooter>
           <Button variant="outline" onClick={() => setOpen(false)}>Cancel</Button>

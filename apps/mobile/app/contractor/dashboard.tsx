@@ -10,12 +10,24 @@ type Trip = { id: string; departureAt: string; window: string; status: string; r
 export default function ContractorDashboard() {
   const [trips, setTrips] = useState<Trip[]>([]);
   const [assignments, setAssignments] = useState<any[]>([]);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
+    // MOB-02: surface load errors instead of silently swallowing them.
+    // Previously both .catch(() => {}) hid network/401 failures — the user
+    // saw an empty list with no indication anything went wrong.
+    let cancelled = false;
+    setLoadError(null);
     Promise.all([
-      apiClient.get<Trip[]>('/contractor/trips').then(d => setTrips(d || [])).catch(() => {}),
-      apiClient.get<any[]>('/contractor/assignments').then(d => setAssignments(d || [])).catch(() => {}),
-    ]);
+      apiClient.get<Trip[]>('/contractor/trips').then(d => { if (!cancelled) setTrips(d || []); }),
+      apiClient.get<any[]>('/contractor/assignments').then(d => { if (!cancelled) setAssignments(d || []); }),
+    ]).catch((e) => {
+      if (cancelled) return;
+      setLoadError(e instanceof Error ? e.message : 'Failed to load dashboard');
+      setTrips([]);
+      setAssignments([]);
+    });
+    return () => { cancelled = true; };
   }, []);
 
   async function boardTrip(tripId: string) {
@@ -41,6 +53,12 @@ export default function ContractorDashboard() {
         </TouchableOpacity>
       </View>
       <Text style={styles.section}>Assignments: {assignments.length}</Text>
+      {loadError && (
+        <View style={styles.errorBox}>
+          <Text style={styles.errorText}>Couldn&apos;t load: {loadError}</Text>
+          <Text style={styles.errorHint}>Pull down or reopen the screen to retry.</Text>
+        </View>
+      )}
       <FlatList
         data={trips}
         keyExtractor={(item) => item.id}

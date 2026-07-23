@@ -144,6 +144,10 @@ model Session {
   expiresAt DateTime
   createdAt DateTime @default(now())
   revokedAt DateTime?
+  // DB-056: last time the session was used to authenticate a request. Updated
+  // (best-effort) by verifySession so stale-but-unexpired sessions are visible
+  // to admins reviewing active sessions.
+  lastSeenAt DateTime?
 
   @@index([userId])
   @@index([userId, revokedAt, expiresAt])   // P1: revokeAllSessionsForUser + GET /auth/sessions
@@ -316,6 +320,11 @@ model RouteAssignment {
 
   // Capacity tracking
   maxSeats      Int      @default(0)  // copied from shuttle.capacity for quick reference
+  // DB-05/027 / ARCH-05f: DEPRECATED — seatsBooked on RouteAssignment is never
+  // updated by any code path. The authoritative per-trip seat count lives on
+  // Trip.seatsBooked (kept accurate via CAS-guarded increment/decrement).
+  // For per-assignment ride totals, use `_count.rides`. This column is kept
+  // for schema stability but is always 0; will be dropped in a future migration.
   seatsBooked   Int      @default(0)
 
   assignedById  String?  // admin who assigned
@@ -339,7 +348,7 @@ model RouteAssignment {
 model Subscription {
   id           String   @id @default(cuid())
   userId       String
-  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user         User     @relation(fields: [userId], references: [id], onDelete: Restrict)  // DB-01: never cascade-delete a user's subscription history
   planId       String
   plan         SubscriptionPlan @relation(fields: [planId], references: [id], onDelete: Restrict)
   corporateId  String?
@@ -365,7 +374,7 @@ model Payment {
   id               String   @id @default(cuid())
   reference        String   @unique // merchOrderId for Telebirr
   userId           String
-  user             User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user             User     @relation(fields: [userId], references: [id], onDelete: Restrict)  // DB-01: never cascade-delete a user's payment history
   subscriptionId   String?
   subscription     Subscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
   seatClaimId      String?
@@ -479,6 +488,10 @@ model Ride {
   // Link to the monthly assignment (for reporting — which assignment generated this ride).
   assignmentId   String?
   assignment     RouteAssignment? @relation(fields: [assignmentId], references: [id], onDelete: SetNull)
+  // DB-04: snapshot the fare (in cents) the rider paid at booking time so
+  // historical records aren't skewed by later route price changes — needed
+  // for invoicing, dispute resolution, and audit. Populated in POST_ride.
+  farePaidCents   Int?
   status          String   @default("booked") // booked | boarded | completed | no_show | cancelled | released
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt

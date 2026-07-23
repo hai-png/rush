@@ -24,7 +24,9 @@ export default function ForgotPasswordPage() {
     setLoading(true);
     try {
       await api.post('/api/v1/auth/password/reset', { phone });
-      toast.success('Reset code sent (check server console for dev code)');
+      // FE-045: don't leak dev OTP details in the user-facing toast. The dev
+      // code is only logged server-side (and only when OTP_DEBUG=1).
+      toast.success('If that phone is registered, a reset code has been sent.');
       setStep('verify');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed');

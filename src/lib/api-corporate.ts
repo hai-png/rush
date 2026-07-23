@@ -212,10 +212,27 @@ export async function POST_signup({ session, body, ipAddress, userAgent }: any) 
   }
   const input = SignupInput.parse(body);
 
+  // Pre-flight invite lookup (re-validated inside the tx below).
   const invite = await db.corporateInvite.findUnique({ where: { code: input.inviteCode } });
   if (!invite || !invite.isActive) throw new BadRequestError('Invalid invite code');
   if (invite.expiresAt && invite.expiresAt < new Date()) throw new BadRequestError('Invite expired');
-  if (invite.usesCount >= invite.maxUses) throw new BadRequestError('Invite is full');
+
+  // BIZ-06: enforce single corporate membership — a user may only belong to one
+  // corporate at a time. The (corporateId, userId) unique constraint allows
+  // multiple corporates, so we enforce the single-membership rule here.
+  const existingAnyCorp = await db.corporateMember.findFirst({
+    where: { userId: session.id, deletedAt: null, approvalStatus: { in: ['pending', 'approved'] } },
+    select: { id: true, corporateId: true, approvalStatus: true },
+  });
+  if (existingAnyCorp) {
+    if (existingAnyCorp.approvalStatus === 'rejected') {
+      // rejected members can re-apply to a different corporate
+    } else if (existingAnyCorp.approvalStatus === 'approved') {
+      throw new ConflictError('You are already an approved member of a corporate. Leave that corporate before joining another.');
+    } else {
+      throw new ConflictError('You already have a pending membership request. Wait for it to be reviewed.');
+    }
+  }
 
   const existing = await db.corporateMember.findUnique({
     where: { corporateId_userId: { corporateId: invite.corporateId, userId: session.id } },
@@ -226,7 +243,15 @@ export async function POST_signup({ session, body, ipAddress, userAgent }: any) 
     throw new ConflictError('You already have a pending request');
   }
 
+  // DB-016: move the maxUses check INSIDE the transaction with a CAS guard so
+  // two concurrent signups can't both pass the check and exceed maxUses. The
+  // updateMany only succeeds if usesCount is still below maxUses; otherwise
+  // we throw and the member row (created in the same tx) is rolled back.
   const member = await db.$transaction(async (tx) => {
+    const freshInvite = await tx.corporateInvite.findUnique({ where: { id: invite.id } });
+    if (!freshInvite || !freshInvite.isActive) throw new BadRequestError('Invalid invite code');
+    if (freshInvite.expiresAt && freshInvite.expiresAt < new Date()) throw new BadRequestError('Invite expired');
+
     const m = await tx.corporateMember.create({
       data: {
         corporateId: invite.corporateId,
@@ -235,10 +260,11 @@ export async function POST_signup({ session, body, ipAddress, userAgent }: any) 
         approvalStatus: 'pending',
       },
     });
-    await tx.corporateInvite.update({
-      where: { id: invite.id },
+    const cas = await tx.corporateInvite.updateMany({
+      where: { id: invite.id, usesCount: { lt: freshInvite.maxUses } },
       data: { usesCount: { increment: 1 } },
     });
+    if (cas.count === 0) throw new BadRequestError('Invite is full');
     return m;
   });
 
@@ -384,11 +410,33 @@ export async function DELETE_member({ session, params, query, ipAddress, userAge
   const member = await db.corporateMember.findUnique({ where: { id: params.id } });
   if (!member || member.corporateId !== corp.id) throw new NotFoundError('Member not found');
 
-  await db.corporateMember.update({
-    where: { id: params.id },
-    data: { isActive: false, deletedAt: new Date() },
+  // BIZ-07: cancel the removed member's corporate-linked subscriptions so they
+  // can no longer ride at the subsidized rate. Non-corporate subscriptions are
+  // untouched. Use a CAS so concurrent removals don't double-cancel.
+  await db.$transaction(async (tx) => {
+    await tx.corporateMember.update({
+      where: { id: params.id },
+      data: { isActive: false, deletedAt: new Date() },
+    });
+    await tx.subscription.updateMany({
+      where: {
+        userId: member.userId,
+        corporateId: corp.id,
+        status: 'active',
+      },
+      data: { status: 'cancelled', cancelledAt: new Date() },
+    });
   });
-  await audit({ actorId: session.id, action: 'corporate.member_removed', entityType: 'corporate_member', entityId: params.id, ipAddress, userAgent });
+  // Notify the removed member (best-effort).
+  const { enqueueNotification } = await import('@/lib/outbox');
+  enqueueNotification({
+    userId: member.userId,
+    type: 'corporate_member_removed',
+    title: 'Corporate membership ended',
+    body: 'Your corporate membership has been removed. Any corporate-linked subscriptions have been cancelled.',
+    link: '/dashboard/rider',
+  }).catch(() => {});
+  await audit({ actorId: session.id, action: 'corporate.member_removed', entityType: 'corporate_member', entityId: params.id, after: { userId: member.userId }, ipAddress, userAgent });
   return { data: { id: params.id, isActive: false } };
 }
 

@@ -6,6 +6,13 @@ import { toErrorEnvelope } from '@/lib/errors';
 import { logger } from '@/lib/logger';
 import { Prisma } from '@prisma/client';
 
+// SEC-20: Telebirr webhook security currently relies solely on signature
+// verification. A defence-in-depth IP allowlist (Telebirr's documented egress
+// ranges) should be added before production — implement by populating
+// env.TELEBIRR_WEBHOOK_IPS (comma-separated CIDRs) and rejecting requests
+// whose real client IP (per clientIp() in api.ts) is not in the list.
+// Tracked as future work pending confirmation of Telebirr's published CIDRs.
+
 export async function handleTelebirrNotify(req: NextRequest, _session: any, _params: any, ctx: { requestId: string }): Promise<NextResponse> {
   const requestId = ctx.requestId ?? crypto.randomUUID();
   try {

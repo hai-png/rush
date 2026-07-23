@@ -327,20 +327,25 @@ export async function GET_my_trips({ session }: any) {
 }
 
 export async function recomputeContractorRating(contractorId: string): Promise<void> {
-  const completedRides = await db.ride.count({
-    where: { status: 'completed', trip: { driverId: contractorId } },
-  });
-  if (completedRides === 0) return;
-  const cancelledRides = await db.ride.count({
-    where: { status: 'cancelled', trip: { driverId: contractorId } },
-  });
-  const totalRides = completedRides + cancelledRides;
-  if (totalRides === 0) return;
-  const ratio = cancelledRides / totalRides;
-  const rating = Math.max(3.0, Math.min(5.0, 5.0 - ratio * 2));
-  await db.contractorProfile.update({
-    where: { id: contractorId },
-    data: { rating },
+  // DB-021: wrap the count reads + rating write in a single transaction so a
+  // concurrent ride-state transition can't slip in between the read and the
+  // write, producing a rating computed from a stale snapshot.
+  await db.$transaction(async (tx) => {
+    const completedRides = await tx.ride.count({
+      where: { status: 'completed', trip: { driverId: contractorId } },
+    });
+    if (completedRides === 0) return;
+    const cancelledRides = await tx.ride.count({
+      where: { status: 'cancelled', trip: { driverId: contractorId } },
+    });
+    const totalRides = completedRides + cancelledRides;
+    if (totalRides === 0) return;
+    const ratio = cancelledRides / totalRides;
+    const rating = Math.max(3.0, Math.min(5.0, 5.0 - ratio * 2));
+    await tx.contractorProfile.update({
+      where: { id: contractorId },
+      data: { rating },
+    });
   });
 }
 

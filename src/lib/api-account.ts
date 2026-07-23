@@ -40,6 +40,7 @@ export async function POST_delete({ session, ipAddress, userAgent }: any) {
       phone: `deleted-${session.id}`,
       email: null,
       name: 'Deleted User',
+      passwordHash: 'DELETED',
       tokenVersion: { increment: 1 },
       // also scrub 2FA secret + disable 2FA + clear lockout state.
       twoFactorSecret: null,

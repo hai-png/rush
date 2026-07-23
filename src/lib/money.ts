@@ -11,9 +11,19 @@ export class Money {
   }
   static fromETBString(s: string | null | undefined): Money | undefined {
     if (!s) return undefined;
-    const n = Number(s);
-    if (!Number.isFinite(n)) return undefined;
-    return Money.fromETB(n);
+    // DB-051: avoid floating-point precision loss. Parse the string directly
+    // into integer cents by splitting on '.' rather than going through
+    // Number(s) * 100 (which can introduce binary-float rounding errors for
+    // values like "0.1" or large amounts).
+    const trimmed = s.trim();
+    if (!/^-?\d+(\.\d+)?$/.test(trimmed)) return undefined;
+    const negative = trimmed.startsWith('-');
+    const abs = negative ? trimmed.slice(1) : trimmed;
+    const [whole, frac = ''] = abs.split('.');
+    if (frac.length > 2) return undefined; // sub-cent precision not allowed
+    const paddedFrac = (frac + '00').slice(0, 2);
+    const cents = parseInt(whole, 10) * 100 + parseInt(paddedFrac, 10);
+    return new Money(negative ? -cents : cents);
   }
   static ZERO = new Money(0);
 

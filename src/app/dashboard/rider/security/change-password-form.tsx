@@ -25,12 +25,12 @@ export function ChangePasswordForm() {
   return (
     <div className="space-y-2">
       <div>
-        <Label>Current password</Label>
-        <Input type="password" value={oldPw} onChange={e => setOldPw(e.target.value)} />
+        <Label htmlFor="old-password">Current password</Label>
+        <Input id="old-password" type="password" value={oldPw} onChange={e => setOldPw(e.target.value)} />
       </div>
       <div>
-        <Label>New password (min 10 chars)</Label>
-        <Input type="password" value={newPw} onChange={e => setNewPw(e.target.value)} />
+        <Label htmlFor="new-password">New password (min 10 chars)</Label>
+        <Input id="new-password" type="password" value={newPw} onChange={e => setNewPw(e.target.value)} maxLength={128} />
       </div>
       <Button onClick={submit} disabled={loading || !oldPw || newPw.length < 10}>{loading ? 'Changing…' : 'Change password'}</Button>
     </div>

@@ -67,7 +67,7 @@ export default async function AssignmentsPage() {
                           Schedule: {pattern.days?.join(', ')} · {pattern.windows?.join(', ')}
                         </div>
                         <div className="text-xs text-muted-foreground">
-                          Fare: {(a.route.fareCents / 100).toFixed(2)} ETB · {a._count.rides} rides booked · {a.seatsBooked}/{a.maxSeats} seats used
+                          Fare: {(a.route.fareCents / 100).toFixed(2)} ETB · {a._count.rides} rides booked · {a._count.rides}/{a.maxSeats} seats used
                         </div>
                       </div>
                       <Badge>active</Badge>

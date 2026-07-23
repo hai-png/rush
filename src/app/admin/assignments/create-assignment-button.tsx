@@ -94,39 +94,39 @@ export function CreateAssignmentButton() {
         </DialogHeader>
         <div className="space-y-3 py-2 max-h-[60vh] overflow-y-auto">
           <div>
-            <Label>Route</Label>
+            <Label htmlFor="asg-route">Route</Label>
             <Select value={routeId} onValueChange={setRouteId}>
-              <SelectTrigger><SelectValue placeholder="Select route" /></SelectTrigger>
+              <SelectTrigger id="asg-route"><SelectValue placeholder="Select route" /></SelectTrigger>
               <SelectContent>
                 {routes.map(r => <SelectItem key={r.id} value={r.id}>{r.origin} → {r.destination}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
           <div>
-            <Label>Contractor</Label>
+            <Label htmlFor="asg-contractor">Contractor</Label>
             <Select value={contractorId} onValueChange={(v) => { setContractorId(v); setShuttleId(''); }}>
-              <SelectTrigger><SelectValue placeholder="Select contractor" /></SelectTrigger>
+              <SelectTrigger id="asg-contractor"><SelectValue placeholder="Select contractor" /></SelectTrigger>
               <SelectContent>
                 {contractors.map(c => <SelectItem key={c.userId} value={c.userId}>{c.user?.name ?? 'Unknown'} ({c.licenseNumber})</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
           <div>
-            <Label>Shuttle</Label>
+            <Label htmlFor="asg-shuttle">Shuttle</Label>
             <Select value={shuttleId} onValueChange={setShuttleId} disabled={!contractorId}>
-              <SelectTrigger><SelectValue placeholder={contractorId ? 'Select shuttle' : 'Select contractor first'} /></SelectTrigger>
+              <SelectTrigger id="asg-shuttle"><SelectValue placeholder={contractorId ? 'Select shuttle' : 'Select contractor first'} /></SelectTrigger>
               <SelectContent>
                 {contractorShuttles.map(s => <SelectItem key={s.id} value={s.id}>{s.plate} ({s.capacity} seats)</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
           <div>
-            <Label>Month</Label>
-            <Input type="month" value={month} onChange={e => setMonth(e.target.value)} />
+            <Label htmlFor="asg-month">Month</Label>
+            <Input id="asg-month" type="month" value={month} onChange={e => setMonth(e.target.value)} />
           </div>
           <div>
-            <Label>Days</Label>
-            <div className="flex flex-wrap gap-2 mt-1">
+            <Label id="asg-days-label">Days</Label>
+            <div className="flex flex-wrap gap-2 mt-1" role="group" aria-labelledby="asg-days-label">
               {DAYS.map(d => (
                 <div key={d.id} className="flex items-center gap-1">
                   <Checkbox id={`day-${d.id}`} checked={days.includes(d.id)} onCheckedChange={() => toggleDay(d.id)} />
@@ -136,8 +136,8 @@ export function CreateAssignmentButton() {
             </div>
           </div>
           <div>
-            <Label>Windows</Label>
-            <div className="flex gap-4 mt-1">
+            <Label id="asg-windows-label">Windows</Label>
+            <div className="flex gap-4 mt-1" role="group" aria-labelledby="asg-windows-label">
               <div className="flex items-center gap-1">
                 <Checkbox id="win-morning" checked={windows.includes('morning')} onCheckedChange={() => toggleWindow('morning')} />
                 <Label htmlFor="win-morning" className="text-sm cursor-pointer">Morning (7:30 AM)</Label>

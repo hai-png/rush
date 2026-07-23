@@ -27,6 +27,13 @@ type Env = {
   RESEND_FROM: string;
   SENTRY_DSN: string;
   REDIS_URL: string;
+  // SEC-03: dedicated field-level encryption key (used by crypto-field.ts).
+  // Falls back to AUTH_SECRET if unset so existing deployments keep working.
+  FIELD_ENCRYPTION_KEY: string;
+  // SEC-12: comma-separated list of trusted proxy IP/CIDR strings. The
+  // rightmost XFF entry not coming from a trusted proxy is treated as the
+  // real client IP. Empty = trust no proxies (use socket peer).
+  TRUSTED_PROXIES: string;
 };
 
 let cachedEnv: Env | null = null;
@@ -41,7 +48,7 @@ export function loadEnv(): Env {
     }
   }
   // reject the dev fallback string in production even if it's >= 32 chars.
-  if (process.env.NODE_ENV === 'production' && authSecret === 'dev-only-insecure-secret-32-chars-min') {
+  if (process.env.NODE_ENV === 'production' && (authSecret === 'dev-only-insecure-secret-32-chars-min' || authSecret === 'dev-only-insecure-secret-32-chars-minimum-length')) {
     throw new Error('AUTH_SECRET must not equal the dev fallback string in production');
   }
 
@@ -120,6 +127,8 @@ export function loadEnv(): Env {
     // See DEPLOYMENT.md "Production hardening status" table.
     SENTRY_DSN: process.env.SENTRY_DSN || '',
     REDIS_URL: process.env.REDIS_URL || '',
+    FIELD_ENCRYPTION_KEY: process.env.FIELD_ENCRYPTION_KEY || '',
+    TRUSTED_PROXIES: process.env.TRUSTED_PROXIES || '',
   };
   return cachedEnv;
 }

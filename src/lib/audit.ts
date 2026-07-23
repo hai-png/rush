@@ -41,12 +41,39 @@ function computeHash(input: AuditInput, prevHash: string | null): string {
 
 let auditQueue: Promise<void> = Promise.resolve();
 
+// DB-046: audit actions classified as security-critical MUST propagate write
+// failures to the caller (instead of being swallowed by the queue's catch).
+// Without this, a failed audit write for e.g. `user.role_changed` would
+// silently vanish — security reviews would have no record of the change.
+const SECURITY_CRITICAL_ACTIONS = new Set([
+  'user.role_changed',
+  'user.suspended',
+  'user.reactivated',
+  'user.deleted',
+  'user.impersonated',
+  'user.password_change',
+  'user.password_reset',
+  'admin.session_revoked',
+  'admin.bulk_suspend',
+  'admin.bulk_refund',
+  'refund.admin_triggered',
+  'refund.scheduled',
+  'corporate.member_removed',
+  'system.settings',
+]);
+
 export function audit(input: AuditInput): Promise<void> {
+  const isSecurityCritical = SECURITY_CRITICAL_ACTIONS.has(input.action);
   auditQueue = auditQueue.then(() => auditInternal(input)).catch((err) => {
-    // Audit failures are security-relevant — log loudly but don't block the
-    // caller (the request has already succeeded). A metric/alerting system
-    // should pick this up.
+    // Always log loudly so an alerting system can pick this up.
     logger.error({ err: (err as Error).message, action: input.action }, '[audit] write failed');
+    // DB-046: for security-critical actions, re-throw so the caller's request
+    // fails — better to refuse the operation than to silently lose the audit
+    // trail. Non-critical actions are still swallowed (best-effort) so the
+    // request can succeed.
+    if (isSecurityCritical) {
+      throw err;
+    }
   });
   return auditQueue;
 }

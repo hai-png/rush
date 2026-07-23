@@ -63,7 +63,7 @@ export default async function ContractorAssignmentsPage() {
                           Schedule: {pattern.days?.join(', ')} · {pattern.windows?.join(', ')}
                         </div>
                         <div className="text-xs text-muted-foreground">
-                          {a._count.trips} trips generated · {a._count.rides} rides booked · {a.seatsBooked}/{a.maxSeats} seats
+                          {a._count.trips} trips generated · {a._count.rides} rides booked · {a._count.rides}/{a.maxSeats} seats
                         </div>
                       </div>
                       <Badge variant={

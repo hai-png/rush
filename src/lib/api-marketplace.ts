@@ -109,6 +109,8 @@ export async function POST_claim({ session, body, params, ipAddress, userAgent }
   if (!release) throw new NotFoundError('Seat release not found');
   if (release.status !== 'open') throw new ConflictError('Seat release no longer available');
   if (release.expiresAt < new Date()) throw new BadRequestError('Seat release expired');
+  const trip = await db.trip.findUnique({ where: { id: release.tripId } });
+  if (trip && trip.departureAt < new Date()) throw new BadRequestError('Cannot cancel a release after trip departure');
   if (release.userId === session.id) throw new BadRequestError('Cannot claim your own release');
 
   const fare = release.trip.route.fareCents;
@@ -211,10 +213,19 @@ export async function GET_my_releases({ session }: any) {
 }
 
 export async function POST_cancel_release({ session, params, ipAddress, userAgent }: any) {
-  const release = await db.seatRelease.findUnique({ where: { id: params.id } });
+  const release = await db.seatRelease.findUnique({
+    where: { id: params.id },
+    include: { trip: true },
+  });
   if (!release) throw new NotFoundError('Seat release not found');
   if (release.userId !== session.id) throw new NotFoundError('Seat release not found');
   if (release.status !== 'open') throw new BadRequestError(`Cannot cancel a ${release.status} release`);
+  // BIZ-024: refuse to cancel a release after the trip has departed. Without
+  // this, a seller could "restore" their seat on a trip that's already left,
+  // getting credit for a ride they didn't take.
+  if (release.trip && release.trip.departureAt.getTime() < Date.now()) {
+    throw new BadRequestError('Cannot cancel a release after the trip has departed');
+  }
 
   await db.$transaction(async (tx) => {
     await tx.seatRelease.update({

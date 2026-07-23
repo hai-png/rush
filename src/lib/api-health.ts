@@ -1,6 +1,5 @@
 
 import { db } from '@/lib/db';
-import { loadEnv } from '@/lib/env';
 
 // / OPS-011: enhanced health checks.
 //
@@ -23,7 +22,6 @@ const READY_REFUND_THRESHOLD = 100;  // pending refund retries = degraded
 
 export async function GET_health() {
   const start = Date.now();
-  const env = loadEnv();
 
   let dbOk = true;
   let dbLatencyMs = 0;
@@ -35,6 +33,9 @@ export async function GET_health() {
     dbOk = false;
   }
 
+  // SEC-019: do not expose Telebirr configured state — an unauthenticated
+  // caller could learn whether the deployment is wired for live payments
+  // (and thus whether forged webhooks might land). Only DB health is reported.
   return {
     data: {
       status: dbOk ? 'ok' : 'degraded',
@@ -43,8 +44,6 @@ export async function GET_health() {
       checks: {
         // don't leak DB error message — just ok + latency.
         db: { ok: dbOk, latencyMs: dbLatencyMs },
-        // report 'configured' or 'not_configured' instead of the raw mode.
-        telebirr: { configured: env.TELEBIRR_ENV !== 'mock' },
       },
       version: process.env.npm_package_version ?? 'dev',
     },

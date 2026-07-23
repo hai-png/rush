@@ -70,15 +70,24 @@ export async function POST_ride({ session, body, ipAddress, userAgent }: any) {
     if (sub.userId !== session.id) throw new ForbiddenError('Not your subscription');
     if (sub.status !== 'active') throw new BadRequestError('Subscription not active');
   }
+  // DB-04: capture the fare paid at booking time so historical records aren't
+  // skewed by later route price changes. For subscription-booked rides, this
+  // is the route's canonical fare. For seat-claim rides, the actual paid
+  // amount is on the linked Payment (resolved at claim time); we use the
+  // route fare as the snapshot here too (the seat-claim payment amount is
+  // preserved on the Payment row itself).
+  let farePaidCents: number | null = trip.route?.fareCents ?? null;
   if (input.seatClaimId) {
     const claim = await db.seatClaim.findUnique({
       where: { id: input.seatClaimId },
-      include: { seatRelease: true },
+      include: { seatRelease: true, payment: { select: { amountCents: true } } },
     });
     if (!claim) throw new NotFoundError('Seat claim not found');
     if (claim.claimantUserId !== session.id) throw new ForbiddenError('Not your seat claim');
     if (claim.status !== 'confirmed') throw new BadRequestError('Seat claim is not confirmed');
     if (claim.seatRelease.tripId !== input.tripId) throw new BadRequestError('Seat claim is for a different trip');
+    // For seat claims, prefer the actual paid amount as the fare snapshot.
+    if (claim.payment?.amountCents) farePaidCents = claim.payment.amountCents;
   }
 
   const ride = await db.$transaction(async (tx) => {
@@ -119,6 +128,8 @@ export async function POST_ride({ session, body, ipAddress, userAgent }: any) {
         seatClaimId: input.seatClaimId,
         pickupLocationId: input.pickupLocationId,
         assignmentId: trip.assignmentId,
+        // DB-04: snapshot the fare at booking time.
+        farePaidCents,
         status: 'booked',
       },
     });
@@ -193,12 +204,26 @@ export async function POST_complete({ session, params, ipAddress, userAgent }: a
     throw new ForbiddenError('Not your trip');
   }
 
+  // BIZ-01: refuse to complete a trip with zero boarded rides. Without this,
+  // a contractor could mark an empty trip as completed and still get credit
+  // for the run. Allow a no-show (boarded → completed with no-shows) but
+  // require at least one rider to have actually boarded.
+  const boardedCount = await db.ride.count({
+    where: { tripId: trip.id, status: 'boarded' },
+  });
+  if (boardedCount === 0) {
+    throw new BadRequestError('Cannot complete a trip with no boarded rides. Cancel the trip instead.');
+  }
+
   await db.$transaction(async (tx) => {
     const tripCas = await tx.trip.updateMany({
       where: { id: trip.id, status: 'in_transit' },
       data: { status: 'completed' },
     });
     if (tripCas.count === 0) throw new ConflictError('Trip is no longer in transit');
+
+    const boardedCount = await tx.ride.count({ where: { tripId: trip.id, status: 'boarded' } });
+    if (boardedCount === 0) throw new BadRequestError('Cannot complete a trip with no boarded rides');
 
     // Boarded rides complete; booked rides (no-shows) cascade to no_show.
     await tx.ride.updateMany({ where: { tripId: trip.id, status: 'boarded' }, data: { status: 'completed' } });
@@ -454,6 +479,22 @@ export async function POST_trip({ session, body, ipAddress, userAgent }: any) {
   if (session.role === 'contractor' && shuttle.contractorId !== session.id) {
     throw new BadRequestError('You can only create trips on your own shuttles');
   }
+  if (session.role === 'contractor') {
+    const profile = await db.contractorProfile.findUnique({ where: { userId: session.id }, select: { verificationStatus: true } });
+    if (!profile || profile.verificationStatus !== 'verified') throw new BadRequestError('Contractor must be verified to create trips');
+  }
+  // BIZ-060: contractors must be verified before they can create trips. This
+  // prevents an unverified contractor from creating trips and accepting rider
+  // bookings before the admin has reviewed their documents.
+  if (session.role === 'contractor') {
+    const profile = await db.contractorProfile.findUnique({
+      where: { userId: session.id },
+      select: { verificationStatus: true },
+    });
+    if (!profile || profile.verificationStatus !== 'verified') {
+      throw new ForbiddenError('Your contractor account is not verified. You cannot create trips until an admin approves your documents.');
+    }
+  }
   const route = await db.route.findUnique({ where: { id: input.routeId } });
   if (!route || !route.isActive) throw new NotFoundError('Route not found');
 
@@ -513,12 +554,26 @@ export async function POST_shuttle_position({ session, body }: any) {
     throw new ForbiddenError('Contractor only');
   }
   // verify the contractor owns at least one active shuttle.
+  // SCHED-04: key positions by shuttleId (not userId) — a contractor with
+  // multiple shuttles would otherwise overwrite the position of one shuttle
+  // when posting from another. The position belongs to the SHUTTLE, not the
+  // driver (a relief driver using the same shuttle should update the same
+  // position entry).
+  let shuttleId: string | null = null;
   if (session.role === 'contractor') {
     const owns = await db.shuttle.findFirst({
       where: { contractorId: session.id, isActive: true },
       select: { id: true },
     });
     if (!owns) throw new ForbiddenError('You have no active shuttle');
+    shuttleId = owns.id;
+  } else {
+    // platform_admin — require an explicit shuttleId in the body so the
+    // position is associated with the correct shuttle.
+    shuttleId = body.shuttleId ?? null;
+    if (!shuttleId) throw new BadRequestError('shuttleId is required for platform_admin');
+    const exists = await db.shuttle.findUnique({ where: { id: shuttleId }, select: { id: true } });
+    if (!exists) throw new NotFoundError('Shuttle not found');
   }
   const pos = {
     lat: input.lat,
@@ -526,13 +581,14 @@ export async function POST_shuttle_position({ session, body }: any) {
     heading: input.heading ?? 0,
     speed: input.speed ?? 0,
     updatedAt: Date.now(),
+    shuttleId,
   };
   // Try Redis first; fall back to in-memory.
   try {
     const { redisSetPosition } = await import('@/lib/redis');
-    await redisSetPosition(session.id, pos, 300); // 5-min TTL
+    await redisSetPosition(shuttleId, pos, 300); // 5-min TTL
   } catch {
-    positions.set(session.id, pos);
+    positions.set(shuttleId, pos);
   }
   return { data: { ok: true } };
 }

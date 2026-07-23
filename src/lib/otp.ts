@@ -16,32 +16,41 @@ export async function sendOtp(rawPhone: string, purpose: OtpPurpose): Promise<{ 
     data: { expiresAt: new Date(0) },
   });
 
-  const recent = await db.otpCode.count({
-    where: {
-      phone,
-      purpose,
-      createdAt: { gt: new Date(Date.now() - 10 * 60_000) },
-    },
-  });
-  if (recent >= 3) {
-    throw new RateLimitError(60, 'Too many OTP requests. Wait 10 minutes.');
-  }
-
   const code = (100000 + randomInt(900000)).toString();
-  const codeHash = await hashPassword(code);
-  await db.otpCode.create({
-    data: {
-      phone,
-      purpose,
-      codeHash,
-      expiresAt: new Date(Date.now() + OTP_TTL_MIN * 60_000),
-    },
+
+  // DB-017: wrap the rate-limit check + OTP creation in a single transaction
+  // so two concurrent sendOtp calls can't both pass the count check and
+  // exceed the 3-per-10-min limit. SQLite's serialized writer means the
+  // COUNT and CREATE inside one tx are atomic.
+  await db.$transaction(async (tx) => {
+    const recent = await tx.otpCode.count({
+      where: {
+        phone,
+        purpose,
+        createdAt: { gt: new Date(Date.now() - 10 * 60_000) },
+      },
+    });
+    if (recent >= 3) {
+      throw new RateLimitError(60, 'Too many OTP requests. Wait 10 minutes.');
+    }
+    const codeHash = await hashPassword(code);
+    await tx.otpCode.create({
+      data: {
+        phone,
+        purpose,
+        codeHash,
+        expiresAt: new Date(Date.now() + OTP_TTL_MIN * 60_000),
+      },
+    });
   });
 
-  if (process.env.NODE_ENV !== 'production') {
+  // SEC-24: gate OTP logging behind an explicit OTP_DEBUG env var (instead of
+  // just !production) so staging/UAT environments don't leak real OTPs into logs.
+  // In production OTP_DEBUG is always treated as false regardless of env value.
+  if (process.env.NODE_ENV !== 'production' && process.env.OTP_DEBUG === '1') {
     console.log(`[OTP] ${phone} (${purpose}): ${code}`);
   }
-  return { devCode: process.env.NODE_ENV === 'production' ? undefined : code };
+  return { devCode: (process.env.NODE_ENV !== 'production' && process.env.OTP_DEBUG === '1') ? code : undefined };
 }
 
 export async function verifyOtp(rawPhone: string, purpose: OtpPurpose, code: string): Promise<void> {

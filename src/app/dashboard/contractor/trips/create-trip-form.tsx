@@ -43,27 +43,27 @@ export function CreateTripForm({ shuttles, routes }: { shuttles: any[]; routes: 
       <CardContent className="py-4">
         <form onSubmit={submit} className="grid grid-cols-1 md:grid-cols-4 gap-3">
           <div>
-            <Label>Shuttle</Label>
+            <Label htmlFor="trip-shuttle">Shuttle</Label>
             <Select value={shuttleId} onValueChange={setShuttleId}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectTrigger id="trip-shuttle"><SelectValue /></SelectTrigger>
               <SelectContent>
                 {shuttles.map(s => <SelectItem key={s.id} value={s.id}>{s.plate} ({s.capacity} seats)</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
           <div>
-            <Label>Route</Label>
+            <Label htmlFor="trip-route">Route</Label>
             <Select value={routeId} onValueChange={setRouteId}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectTrigger id="trip-route"><SelectValue /></SelectTrigger>
               <SelectContent>
                 {routes.map(r => <SelectItem key={r.id} value={r.id}>{r.origin} → {r.destination}</SelectItem>)}
               </SelectContent>
             </Select>
           </div>
           <div>
-            <Label>Window</Label>
+            <Label htmlFor="trip-window">Window</Label>
             <Select value={tripWindow} onValueChange={(v) => setTripWindow(v as any)}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectTrigger id="trip-window"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value="morning">morning</SelectItem>
                 <SelectItem value="evening">evening</SelectItem>
@@ -71,8 +71,8 @@ export function CreateTripForm({ shuttles, routes }: { shuttles: any[]; routes: 
             </Select>
           </div>
           <div>
-            <Label>Departure</Label>
-            <Input type="datetime-local" value={departureAt} onChange={e => setDepartureAt(e.target.value)} required />
+            <Label htmlFor="trip-departure">Departure</Label>
+            <Input id="trip-departure" type="datetime-local" value={departureAt} onChange={e => setDepartureAt(e.target.value)} required />
           </div>
           <div className="md:col-span-4">
             <Button type="submit" disabled={loading || !shuttleId || !routeId}>{loading ? 'Scheduling…' : 'Schedule trip'}</Button>

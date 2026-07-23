@@ -52,13 +52,13 @@ export function RefundButton({ paymentId, maxAmount }: { paymentId: string; maxA
         </DialogHeader>
         <div className="space-y-3 py-2">
           <div>
-            <Label>Amount (ETB)</Label>
-            <Input type="number" min={0.01} max={maxAmount} step="0.01" value={amount} onChange={e => setAmount(Number(e.target.value))} />
+            <Label htmlFor="refund-amount">Amount (ETB)</Label>
+            <Input id="refund-amount" type="number" min={0.01} max={maxAmount} step="0.01" value={amount} onChange={e => setAmount(Number(e.target.value))} />
             <p className="text-xs text-muted-foreground mt-1">Max: {maxAmount.toFixed(2)} ETB</p>
           </div>
           <div>
-            <Label>Reason</Label>
-            <Textarea value={reason} onChange={e => setReason(e.target.value)} rows={3} placeholder="Customer request / duplicate charge / service issue" />
+            <Label htmlFor="refund-reason">Reason</Label>
+            <Textarea id="refund-reason" value={reason} onChange={e => setReason(e.target.value)} rows={3} placeholder="Customer request / duplicate charge / service issue" />
           </div>
         </div>
         <DialogFooter>

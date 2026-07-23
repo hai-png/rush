@@ -255,6 +255,59 @@ export async function scheduleRefund(paymentId: string, amount: Money, reason: s
   }
 }
 
+// BIZ-09: cancel a mid-flight refund. Only refunds still in 'pending' state
+// (not yet picked up by processRefundRetries) can be cancelled. Reverses the
+// refundAmountCents reservation made by scheduleRefund so the payment's
+// available-for-refund balance is restored.
+export async function cancelRefund(paymentId: string, refundRetryId: string, actorId: string): Promise<void> {
+  const sideEffects: Array<() => Promise<void>> = [];
+
+  await db.$transaction(async (tx) => {
+    const retry = await tx.refundRetry.findUnique({ where: { id: refundRetryId } });
+    if (!retry) throw new NotFoundError(`RefundRetry ${refundRetryId} not found`);
+    if (retry.paymentId !== paymentId) throw new BadRequestError('RefundRetry does not belong to this payment');
+    if (retry.status !== 'pending') {
+      throw new BadRequestError(`Refund is already ${retry.status} and cannot be cancelled`);
+    }
+
+    // CAS the status to 'cancelled' so concurrent cancel attempts or the
+    // scheduler picking it up don't double-process.
+    const cas = await tx.refundRetry.updateMany({
+      where: { id: refundRetryId, status: 'pending' },
+      data: { status: 'permanent_failure', lastError: 'cancelled by admin' },
+    });
+    if (cas.count === 0) {
+      throw new BadRequestError('Refund is no longer pending (already picked up for processing)');
+    }
+
+    // Reverse the refundAmountCents reservation.
+    const payment = await tx.payment.findUnique({ where: { id: paymentId } });
+    if (!payment) throw new NotFoundError(`Payment ${paymentId} not found`);
+    const newRefundAmount = Math.max(0, payment.refundAmountCents - retry.amountCents);
+    await tx.payment.update({
+      where: { id: paymentId },
+      data: {
+        refundAmountCents: newRefundAmount,
+        status: newRefundAmount === 0 ? 'completed' : 'partially_refunded',
+      },
+    });
+
+    sideEffects.push(async () => {
+      await audit({
+        actorId,
+        action: 'refund.cancelled',
+        entityType: 'payment',
+        entityId: paymentId,
+        after: { refundRetryId, refundRequestNo: retry.refundRequestNo, amountCents: retry.amountCents },
+      });
+    });
+  });
+
+  for (const fx of sideEffects) {
+    try { await fx(); } catch (e) { logger.error({ err: (e as Error).message }, '[cancelRefund] side effect failed'); }
+  }
+}
+
 const BACKOFF_MIN = [1, 5, 15, 60, 240]; // shorter for dev
 
 export async function processRefundRetries(limit = 10): Promise<{ processed: number }> {

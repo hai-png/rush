@@ -3,6 +3,7 @@ import { requireSession } from '@/lib/session-server';
 import { db } from '@/lib/db';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { DownloadDataExportButton } from './download-data-export-button';
 
 export const dynamic = 'force-dynamic';
 
@@ -29,6 +30,9 @@ export default async function AccountExportPage() {
     notifications,
     sessions,
   };
+  // FE-06: pre-serialize so the client download button can embed the JSON in
+  // a Blob without re-fetching or re-serializing server-side data.
+  const json = JSON.stringify(exportData, null, 2);
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -39,9 +43,14 @@ export default async function AccountExportPage() {
         </div>
       </header>
       <main className="flex-1 container mx-auto px-4 py-8 max-w-3xl">
-        <h1 className="text-2xl font-bold mb-4">Your data export</h1>
+        <div className="flex items-center justify-between mb-4">
+          <h1 className="text-2xl font-bold">Your data export</h1>
+          {/* FE-06: download button — generates a JSON file client-side so the
+              user can save a copy for their records (GDPR data portability). */}
+          <DownloadDataExportButton json={json} filename={`addis-ride-export-${session.id}.json`} />
+        </div>
         <pre className="text-xs bg-muted p-4 rounded-md overflow-x-auto max-h-[60vh]">
-{JSON.stringify(exportData, null, 2)}
+{json}
         </pre>
       </main>
     </div>
