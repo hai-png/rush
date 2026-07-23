@@ -54,6 +54,7 @@ import * as documents from '@/lib/api-documents';
 import * as files from '@/lib/api-files';
 import * as telebirr from '@/lib/api-telebirr';
 import * as health from '@/lib/api-health';
+import * as metrics from '@/lib/api-metrics';
 import * as assignments from '@/lib/api-assignments';
 
 // Note: the catch-all mounts at /api/v1, so paths here are relative to that.
@@ -226,6 +227,9 @@ const ROUTES: RouteEntry[] = [
   r('GET', '/health', { exemptFromTosGate: true }, health.GET_health),
   r('GET', '/healthz', { exemptFromTosGate: true }, health.GET_healthz),
   r('GET', '/ready', { exemptFromTosGate: true }, health.GET_ready),
+
+  // P2-66: Prometheus metrics endpoint (public — no PII, just counts).
+  r('GET', '/metrics', { exemptFromTosGate: true }, metrics.GET_metrics),
 
   r('POST', '/cron/run', { exemptFromTosGate: true }, cron.POST_run),
   r('GET', '/cron', { exemptFromTosGate: true }, cron.GET_cron_jobs),

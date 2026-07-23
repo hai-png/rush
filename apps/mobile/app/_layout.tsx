@@ -1,6 +1,8 @@
 import { Stack, Tabs } from 'expo-router';
 import { Platform, View, Text } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+import { useEffect } from 'react';
+import { initConnectivity } from '../src/lib/offline-queue';
 
 // P0-3 / FE-003: replace the bare <Stack> with a Tabs-based layout for
 // rider and contractor. The original _layout.tsx was just <Stack> with
@@ -19,6 +21,14 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 // each role's _layout.tsx. For now, this root layout just adds a header
 // with a back button where appropriate.
 export default function Layout() {
+  // P1-46 / FE-023: initialize NetInfo connectivity listener on app startup.
+  // When the device comes back online, the offline queue is drained automatically.
+  useEffect(() => {
+    let unsub: (() => void) | undefined;
+    initConnectivity().then(u => { unsub = u; });
+    return () => { if (unsub) unsub(); };
+  }, []);
+
   return (
     <SafeAreaProvider>
       <Stack screenOptions={{ headerShown: false }}>
