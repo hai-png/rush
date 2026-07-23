@@ -65,6 +65,7 @@ const LoginInput = z.object({
   phone: z.string().refine(EthiopianPhone.isValid, 'Invalid Ethiopian phone'),
   password: z.string().min(1),
   code: z.string().length(6).optional(),
+  backupCode: z.string().optional(), // P3-25: 10-char hex backup code
 });
 
 export async function POST_token({ body, ipAddress, userAgent }: any) {
@@ -103,23 +104,45 @@ export async function POST_token({ body, ipAddress, userAgent }: any) {
   }
 
   if (user.twoFactorEnabled) {
-    if (!input.code) throw new TwoFactorRequiredError();
-    if (!user.twoFactorSecret) throw new ForbiddenError('2FA enabled but no secret. Contact support.');
-    // P1-6 / SEC-013: decrypt the secret before verifying the TOTP code.
-    const secret = decryptField(user.twoFactorSecret);
-    if (!secret) throw new ForbiddenError('2FA secret could not be decrypted. Contact support.');
-    if (!verifySync({ secret, token: input.code })) {
-      // 2FA failure also counts toward lockout.
-      const newAttempts = user.failedLoginAttempts + 1;
-      const shouldLock = newAttempts >= MAX_FAILED_ATTEMPTS;
-      await db.user.update({
-        where: { id: user.id },
-        data: {
-          failedLoginAttempts: newAttempts,
-          ...(shouldLock ? { lockedUntil: new Date(Date.now() + LOCKOUT_MS) } : {}),
-        },
+    // P3-25: check for backup code first, then TOTP code.
+    if (input.backupCode) {
+      // Try to match a backup code.
+      const candidates = await db.twoFactorBackupCode.findMany({
+        where: { userId: user.id, usedAt: null },
       });
-      throw new UnauthorizedError('Invalid 2FA code');
+      let matched = false;
+      for (const bc of candidates) {
+        if (await verifyPassword(input.backupCode.toUpperCase(), bc.codeHash)) {
+          // Mark as used.
+          await db.twoFactorBackupCode.update({ where: { id: bc.id }, data: { usedAt: new Date() } });
+          matched = true;
+          break;
+        }
+      }
+      if (!matched) {
+        const newAttempts = user.failedLoginAttempts + 1;
+        const shouldLock = newAttempts >= MAX_FAILED_ATTEMPTS;
+        await db.user.update({
+          where: { id: user.id },
+          data: { failedLoginAttempts: newAttempts, ...(shouldLock ? { lockedUntil: new Date(Date.now() + LOCKOUT_MS) } : {}) },
+        });
+        throw new UnauthorizedError('Invalid backup code');
+      }
+    } else if (input.code) {
+      if (!user.twoFactorSecret) throw new ForbiddenError('2FA enabled but no secret. Contact support.');
+      const secret = decryptField(user.twoFactorSecret);
+      if (!secret) throw new ForbiddenError('2FA secret could not be decrypted. Contact support.');
+      if (!verifySync({ secret, token: input.code })) {
+        const newAttempts = user.failedLoginAttempts + 1;
+        const shouldLock = newAttempts >= MAX_FAILED_ATTEMPTS;
+        await db.user.update({
+          where: { id: user.id },
+          data: { failedLoginAttempts: newAttempts, ...(shouldLock ? { lockedUntil: new Date(Date.now() + LOCKOUT_MS) } : {}) },
+        });
+        throw new UnauthorizedError('Invalid 2FA code');
+      }
+    } else {
+      throw new TwoFactorRequiredError();
     }
   }
 
@@ -355,8 +378,25 @@ export async function POST_2fa_enable({ session, body }: any) {
   // backup, SQL injection, CSV export) cannot recover the raw TOTP seed.
   const encrypted = encryptField(secret);
   await db.user.update({ where: { id: session!.id }, data: { twoFactorSecret: encrypted, twoFactorEnabled: true } });
+
+  // P3-25 / SEC-025: generate 10 single-use backup codes. Stored bcrypt-hashed.
+  const backupCodes: string[] = [];
+  const { randomBytes } = await import('node:crypto');
+  for (let i = 0; i < 10; i++) {
+    const raw = randomBytes(5).toString('hex').toUpperCase();
+    backupCodes.push(raw);
+  }
+  // Hash all codes in parallel.
+  const hashedCodes = await Promise.all(backupCodes.map(c => hashPassword(c)));
+  await db.twoFactorBackupCode.createMany({
+    data: hashedCodes.map(hash => ({
+      userId: session!.id,
+      codeHash: hash,
+    })),
+  });
+
   await audit({ actorId: session!.id, action: 'user.2fa_enabled', entityType: 'user', entityId: session!.id });
-  return { data: { enabled: true } };
+  return { data: { enabled: true, backupCodes } };
 }
 
 export async function POST_2fa_disable({ session, body }: any) {

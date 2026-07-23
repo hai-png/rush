@@ -1,6 +1,6 @@
 import { db } from '@/lib/db';
 import { z } from 'zod';
-import { NotFoundError, BadRequestError, ForbiddenError, ConflictError } from '@/lib/errors';
+import { NotFoundError, BadRequestError, ForbiddenError, ConflictError, UnauthorizedError } from '@/lib/errors';
 import { audit } from '@/lib/audit';
 import { issueSession, assertTwoFactorEnabled } from '@/lib/auth';
 import { createId } from '@/lib/id';
@@ -72,15 +72,43 @@ export async function PATCH_user({ session, params, body, ipAddress, userAgent }
   return { data: { id: params.id, action: input.action } };
 }
 
-export async function POST_impersonate({ session, params, ipAddress, userAgent }: any) {
+export async function POST_impersonate({ session, params, body, ipAddress, userAgent }: any) {
   if (session.role !== 'platform_admin') throw new ForbiddenError('Admin only');
   const target = await db.user.findUnique({ where: { id: params.id } });
   if (!target) throw new NotFoundError('User not found');
   if (target.role === 'platform_admin') throw new BadRequestError('Cannot impersonate another admin');
-  const { token, jti } = await issueSession(target, { userAgent, ipAddress });
-  await db.session.update({ where: { jti }, data: { userAgent: `impersonated-by:${session.id}` } });
-  await audit({ actorId: session.id, action: 'user.impersonated', entityType: 'user', entityId: params.id, after: { jti }, ipAddress, userAgent });
-  return { data: { accessToken: token, impersonated: true, targetUser: { id: target.id, phone: target.phone, role: target.role } } };
+
+  // P1-4 / SEC-008: require admin 2FA re-verification for impersonation.
+  // This prevents a compromised admin session from impersonating privileged users.
+  const { code } = z.object({ code: z.string().length(6).optional() }).parse(body ?? {});
+  if (!code) {
+    throw new BadRequestError('2FA code required for impersonation. Provide your TOTP code in the "code" field.');
+  }
+  const adminUser = await db.user.findUnique({ where: { id: session.id }, select: { twoFactorEnabled: true, twoFactorSecret: true } });
+  if (!adminUser?.twoFactorEnabled) {
+    throw new ForbiddenError('You must have 2FA enabled to impersonate users.');
+  }
+  const { verifySync } = await import('otplib');
+  const { decryptField } = await import('@/lib/crypto-field');
+  const adminSecret = decryptField(adminUser.twoFactorSecret);
+  if (!adminSecret || !verifySync({ secret: adminSecret, token: code })) {
+    throw new UnauthorizedError('Invalid 2FA code');
+  }
+
+  // P1-4: short-lived session (1 hour instead of 30 days).
+  const { token, jti } = await issueSession(target, { userAgent: `impersonated-by:${session.id}`, ipAddress });
+  // Override the session expiry to 1 hour by revoking it after 1h via the scheduler.
+  // (We can't set a custom TTL in issueSession without refactoring — the session
+  // row's expiresAt is set to 30d. Instead, we set a short expiresAt via update.)
+  await db.session.update({
+    where: { jti },
+    data: {
+      expiresAt: new Date(Date.now() + 60 * 60_000), // 1 hour
+      userAgent: `impersonated-by:${session.id}`,
+    },
+  });
+  await audit({ actorId: session.id, action: 'user.impersonated', entityType: 'user', entityId: params.id, after: { jti, ttl: '1h' }, ipAddress, userAgent });
+  return { data: { accessToken: token, impersonated: true, expiresAt: new Date(Date.now() + 60 * 60_000).toISOString(), targetUser: { id: target.id, phone: target.phone, role: target.role } } };
 }
 
 export async function GET_pending_contractors() {

@@ -58,6 +58,7 @@ model User {
   uploadedFiles      UploadedFile[]       @relation("FileUploader")
   corporateInvites   CorporateInvite[]    @relation("InviteCreator")
   mandates           Mandate[]
+  twoFactorBackupCodes TwoFactorBackupCode[]
 
   @@index([isActive, deletedAt])
   @@index([role, isActive])           // P1-15: admin lookups (notify all admins)
@@ -701,4 +702,18 @@ model Mandate {
   @@index([userId])
   @@index([subscriptionId])
   @@index([status])
+}
+
+// ─── 2FA backup codes ────────────────────────────────────────────────────────
+// P3-25 / SEC-025: single-use recovery codes for users who lose their TOTP
+// device. 10 codes generated at 2FA enable time, stored bcrypt-hashed.
+model TwoFactorBackupCode {
+  id        String   @id @default(cuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  codeHash  String
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+
+  @@index([userId])
 }
