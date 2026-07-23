@@ -1,40 +1,94 @@
-import { View, Text, TouchableOpacity, StyleSheet } from 'react-native';
-import { useState, useEffect } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, Alert } from 'react-native';
+import { useState, useEffect, useRef } from 'react';
 import { api } from '../../src/lib/api';
 
+// P2-34 / FE-039: real GPS tracking using expo-location.
+// Previously this screen posted random coordinates around Addis Ababa center
+// — riders tracking their shuttle saw nonsense. Now uses actual device GPS.
 export default function GpsTrackerScreen() {
   const [posting, setPosting] = useState(false);
   const [lastPosted, setLastPosted] = useState<string | null>(null);
   const [error, setError] = useState('');
+  const [permissionStatus, setPermissionStatus] = useState<string | null>(null);
+  const [currentCoords, setCurrentCoords] = useState<{ lat: number; lng: number; heading: number; speed: number } | null>(null);
+  const subscriptionRef = useRef<any>(null);
 
-  async function postPosition() {
+  useEffect(() => {
+    requestPermissionAndStart();
+    return () => {
+      if (subscriptionRef.current) {
+        subscriptionRef.current.remove();
+      }
+    };
+  }, []);
+
+  async function requestPermissionAndStart() {
+    try {
+      const Location = require('expo-location');
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      setPermissionStatus(status);
+      if (status !== 'granted') {
+        setError('Location permission denied — riders cannot track your shuttle.');
+        return;
+      }
+
+      // Start watching position.
+      subscriptionRef.current = await Location.watchPositionAsync(
+        {
+          accuracy: Location.Accuracy.High,
+          timeInterval: 10000, // 10s
+          distanceInterval: 10, // 10m
+        },
+        (location: any) => {
+          const coords = {
+            lat: location.coords.latitude,
+            lng: location.coords.longitude,
+            heading: location.coords.heading ?? 0,
+            speed: Math.round((location.coords.speed ?? 0) * 3.6), // m/s → km/h
+          };
+          setCurrentCoords(coords);
+          postPosition(coords);
+        },
+      );
+    } catch (e) {
+      // expo-location not installed — fall back to manual posting with error.
+      setError('GPS not available: ' + (e instanceof Error ? e.message : 'unknown'));
+    }
+  }
+
+  async function postPosition(coords?: { lat: number; lng: number; heading: number; speed: number }) {
     setPosting(true); setError('');
     try {
-      // In a real app, use expo-location to get actual GPS coords.
-      // For now, use Addis Ababa center as placeholder.
-      const lat = 9.03 + (Math.random() - 0.5) * 0.02;
-      const lng = 38.74 + (Math.random() - 0.5) * 0.02;
-      await api.post('/shuttle-positions', { lat, lng, heading: Math.floor(Math.random() * 360), speed: Math.floor(Math.random() * 60) });
+      const pos = coords ?? currentCoords;
+      if (!pos) {
+        setError('No GPS coordinates available yet');
+        return;
+      }
+      await api.post('/shuttle-positions', pos);
       setLastPosted(new Date().toLocaleTimeString());
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to post position');
     } finally { setPosting(false); }
   }
 
-  useEffect(() => {
-    const interval = setInterval(postPosition, 10000);
-    return () => clearInterval(interval);
-  }, []);
-
   return (
     <View style={styles.container}>
       <Text style={styles.title}>GPS Tracker</Text>
       <View style={styles.card}>
+        <Text style={styles.label}>GPS Permission: {permissionStatus ?? 'checking…'}</Text>
+        {currentCoords && (
+          <Text style={styles.label}>
+            Current: {currentCoords.lat.toFixed(4)}, {currentCoords.lng.toFixed(4)}
+            {currentCoords.speed > 0 ? ` · ${currentCoords.speed} km/h` : ''}
+          </Text>
+        )}
         <Text style={styles.label}>Status: {posting ? 'Posting…' : 'Idle'}</Text>
         {lastPosted && <Text style={styles.label}>Last posted: {lastPosted}</Text>}
         {error ? <Text style={styles.error}>{error}</Text> : null}
-        <Text style={styles.hint}>Auto-posts every 10 seconds while on this screen</Text>
-        <TouchableOpacity style={styles.button} onPress={postPosition} disabled={posting}>
+        <Text style={styles.hint}>
+          Auto-posts every 10 seconds while on this screen (requires foreground location permission).
+        </Text>
+        <TouchableOpacity style={styles.button} onPress={() => postPosition()} disabled={posting || !currentCoords}>
           <Text style={styles.buttonText}>Post position now</Text>
         </TouchableOpacity>
       </View>
