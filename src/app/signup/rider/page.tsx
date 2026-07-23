@@ -21,7 +21,6 @@ export default function RiderSignupPage() {
     setLoading(true);
     try {
       await api.post('/api/v1/auth/register', { kind: 'rider', ...form });
-      // Auto-login after signup
       await api.post('/api/v1/auth/token', { phone: form.phone, password: form.password });
       toast.success('Account created');
       router.push('/tos/accept');

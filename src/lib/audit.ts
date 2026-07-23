@@ -1,13 +1,5 @@
-// Hash-chained append-only audit log. Each entry's hash covers the full
-// payload (actor, action, entity, before/after, ipAddress, userAgent) plus
-// the previous entry's hash — tampering with any field breaks the chain.
-//
-// P1-3 / DB-044 + DB-045: previously, audit writes ordered by `createdAt`
-// (millisecond precision), which forked the hash chain when two writes
-// landed in the same millisecond or when multiple process instances raced.
-// Now we use a monotonic `seq` integer that's assigned inside the same
-// transaction as the row insert, so ordering is deterministic regardless
-// of clock skew or concurrency.
+// Hash-chained append-only audit log. Uses monotonic `seq` for ordering
+// (not createdAt) so the chain is deterministic regardless of clock skew.
 import { db } from '@/lib/db';
 import { createHash } from 'node:crypto';
 import { logger } from '@/lib/logger';

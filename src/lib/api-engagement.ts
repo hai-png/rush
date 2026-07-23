@@ -1,17 +1,18 @@
-import { db } from '@/lib/db';
-import { logger } from '@/lib/logger';
-import { z } from 'zod';
+import { db } from "@/lib/db";
+import { logger } from "@/lib/logger";
+import { z } from "zod";
 
 export async function GET_notifications({ session, query }: any) {
-  const { parsePagination, paginatedResponse } = await import('@/lib/pagination');
+  const { parsePagination, paginatedResponse } =
+    await import("@/lib/pagination");
   const page = parsePagination(query);
   const where: any = { userId: session.id };
   if (query?.type) where.type = query.type;
-  if (query?.unread === 'true') where.readAt = null;
+  if (query?.unread === "true") where.readAt = null;
   const [notifs, total] = await Promise.all([
     db.notification.findMany({
       where,
-      orderBy: { createdAt: 'desc' },
+      orderBy: { createdAt: "desc" },
       ...page.findManyArgs,
     }),
     db.notification.count({ where }),
@@ -36,7 +37,9 @@ export async function POST_mark_all_read({ session }: any) {
 }
 
 export async function GET_unread_count({ session }: any) {
-  const count = await db.notification.count({ where: { userId: session.id, readAt: null } });
+  const count = await db.notification.count({
+    where: { userId: session.id, readAt: null },
+  });
   return { data: { count } };
 }
 
@@ -55,8 +58,6 @@ export async function DELETE_notification({ session, params }: any) {
   return { data: { ok: true } };
 }
 
-// ─── Notification preferences ─────────────────────────────────────────────
-// Persisted per-user via the Setting model (key: `notif-prefs:<userId>`).
 const DEFAULT_PREFS = {
   emailEnabled: true,
   smsEnabled: true,
@@ -74,7 +75,9 @@ const PreferencesInput = z.object({
 });
 
 async function readPrefs(userId: string): Promise<typeof DEFAULT_PREFS> {
-  const row = await db.setting.findUnique({ where: { key: `notif-prefs:${userId}` } });
+  const row = await db.setting.findUnique({
+    where: { key: `notif-prefs:${userId}` },
+  });
   if (!row) return { ...DEFAULT_PREFS };
   try {
     return { ...DEFAULT_PREFS, ...JSON.parse(row.value) };
@@ -100,14 +103,9 @@ export async function GET_preferences({ session }: any) {
   return { data: { userId: session.id, ...prefs } };
 }
 
-// ─── Device registration (for push notifications) ─────────────────────────
-// Persisted per-user via Setting (key: `device:<userId>:<platform>`).
-// A real implementation would use a dedicated Device table + a push provider
-// (FCM/APNs). This is a working stub that at least survives server restarts,
-// unlike the previous in-memory log.
 const DeviceInput = z.object({
   pushToken: z.string().min(1),
-  platform: z.enum(['ios', 'android', 'web']),
+  platform: z.enum(["ios", "android", "web"]),
   userAgent: z.string().optional(),
 });
 
@@ -116,18 +114,35 @@ export async function POST_device({ session, body }: any) {
   const key = `device:${session.id}:${input.platform}`;
   await db.setting.upsert({
     where: { key },
-    update: { value: JSON.stringify({ pushToken: input.pushToken, userAgent: input.userAgent, registeredAt: new Date().toISOString() }) },
-    create: { key, value: JSON.stringify({ pushToken: input.pushToken, userAgent: input.userAgent, registeredAt: new Date().toISOString() }) },
+    update: {
+      value: JSON.stringify({
+        pushToken: input.pushToken,
+        userAgent: input.userAgent,
+        registeredAt: new Date().toISOString(),
+      }),
+    },
+    create: {
+      key,
+      value: JSON.stringify({
+        pushToken: input.pushToken,
+        userAgent: input.userAgent,
+        registeredAt: new Date().toISOString(),
+      }),
+    },
   });
-  logger.info({ userId: session.id, platform: input.platform }, '[device] registered');
+  logger.info(
+    { userId: session.id, platform: input.platform },
+    "[device] registered",
+  );
   return { status: 201, data: { ok: true } };
 }
 
 export async function DELETE_device({ session, body }: any) {
   const { pushToken } = z.object({ pushToken: z.string() }).parse(body);
-  // Find the device by token across all platforms for this user.
   const prefix = `device:${session.id}:`;
-  const rows = await db.setting.findMany({ where: { key: { startsWith: prefix } } });
+  const rows = await db.setting.findMany({
+    where: { key: { startsWith: prefix } },
+  });
   for (const r of rows) {
     try {
       const parsed = JSON.parse(r.value);

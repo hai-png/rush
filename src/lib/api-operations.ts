@@ -1,28 +1,33 @@
-import { db } from '@/lib/db';
-import { z } from 'zod';
-import { NextRequest, NextResponse } from 'next/server';
-import { BadRequestError, NotFoundError, ConflictError, ForbiddenError } from '@/lib/errors';
-import { consumeRide, releaseRide } from '@/lib/subscription';
-import { audit } from '@/lib/audit';
-import { logger } from '@/lib/logger';
-import { enqueueNotification } from '@/lib/outbox';
+import { db } from "@/lib/db";
+import { z } from "zod";
+import { NextRequest, NextResponse } from "next/server";
+import {
+  BadRequestError,
+  NotFoundError,
+  ConflictError,
+  ForbiddenError,
+} from "@/lib/errors";
+import { consumeRide, releaseRide } from "@/lib/subscription";
+import { audit } from "@/lib/audit";
+import { logger } from "@/lib/logger";
+import { enqueueNotification } from "@/lib/outbox";
 
-// How long before departure a trip may be boarded (e.g. driver can board up to 30min early).
 const BOARD_WINDOW_MS = 30 * 60_000;
-// How long after departure a trip may still be booked (0 = cannot book after departure).
 const BOOK_AFTER_DEPARTURE_MS = 0;
 
 export async function GET_rides({ session, query }: any) {
-  const { parsePagination, paginatedResponse } = await import('@/lib/pagination');
+  const { parsePagination, paginatedResponse } =
+    await import("@/lib/pagination");
   const page = parsePagination(query);
-  const where: any = session.role === 'platform_admin' ? {} : { userId: session.id };
+  const where: any =
+    session.role === "platform_admin" ? {} : { userId: session.id };
   if (query?.status) where.status = query.status;
   if (query?.tripId) where.tripId = query.tripId;
   const [rides, total] = await Promise.all([
     db.ride.findMany({
       where,
       include: { trip: { include: { route: true, shuttle: true } } },
-      orderBy: { createdAt: 'desc' },
+      orderBy: { createdAt: "desc" },
       ...page.findManyArgs,
     }),
     db.ride.count({ where }),
@@ -30,311 +35,391 @@ export async function GET_rides({ session, query }: any) {
   return paginatedResponse(rides, total, page);
 }
 
-// P1 / API-015: single-ride detail endpoint.
 export async function GET_ride({ session, params }: any) {
   const ride = await db.ride.findUnique({
     where: { id: params.id },
     include: { trip: { include: { route: true, shuttle: true } } },
   });
-  if (!ride) throw new NotFoundError('Ride not found');
-  // Owner check: rider themselves, platform_admin, or the trip's driver.
-  if (ride.userId !== session.id && session.role !== 'platform_admin') {
+  if (!ride) throw new NotFoundError("Ride not found");
+  if (ride.userId !== session.id && session.role !== "platform_admin") {
     if (ride.trip?.driverId !== session.id) {
-      throw new NotFoundError('Ride not found');
+      throw new NotFoundError("Ride not found");
     }
   }
   return { data: ride };
 }
 
-const RideInput = z.object({
-  tripId: z.string().min(1),
-  subscriptionId: z.string().optional(),
-  seatClaimId: z.string().optional(),
-  pickupLocationId: z.string().optional(),
-}).refine(v => v.subscriptionId || v.seatClaimId, 'Either subscriptionId or seatClaimId is required');
+const RideInput = z
+  .object({
+    tripId: z.string().min(1),
+    subscriptionId: z.string().optional(),
+    seatClaimId: z.string().optional(),
+    pickupLocationId: z.string().optional(),
+  })
+  .refine(
+    (v) => v.subscriptionId || v.seatClaimId,
+    "Either subscriptionId or seatClaimId is required",
+  );
 
 export async function POST_ride({ session, body, ipAddress, userAgent }: any) {
   const input = RideInput.parse(body);
-  const trip = await db.trip.findUnique({ where: { id: input.tripId }, include: { shuttle: true, route: true } });
-  if (!trip) throw new NotFoundError('Trip not found');
-  if (trip.status !== 'scheduled') throw new BadRequestError('Trip is not schedulable');
-  // P0-2: cannot book a trip that has already departed.
+  const trip = await db.trip.findUnique({
+    where: { id: input.tripId },
+    include: { shuttle: true, route: true },
+  });
+  if (!trip) throw new NotFoundError("Trip not found");
+  if (trip.status !== "scheduled")
+    throw new BadRequestError("Trip is not schedulable");
   if (trip.departureAt.getTime() + BOOK_AFTER_DEPARTURE_MS < Date.now()) {
-    throw new BadRequestError('Trip has already departed');
+    throw new BadRequestError("Trip has already departed");
   }
 
-  // Pre-flight checks (re-validated inside the tx).
   if (input.subscriptionId) {
-    const sub = await db.subscription.findUnique({ where: { id: input.subscriptionId } });
-    if (!sub) throw new NotFoundError('Subscription not found');
-    if (sub.userId !== session.id) throw new ForbiddenError('Not your subscription');
-    if (sub.status !== 'active') throw new BadRequestError('Subscription not active');
+    const sub = await db.subscription.findUnique({
+      where: { id: input.subscriptionId },
+    });
+    if (!sub) throw new NotFoundError("Subscription not found");
+    if (sub.userId !== session.id)
+      throw new ForbiddenError("Not your subscription");
+    if (sub.status !== "active")
+      throw new BadRequestError("Subscription not active");
   }
   if (input.seatClaimId) {
     const claim = await db.seatClaim.findUnique({
       where: { id: input.seatClaimId },
       include: { seatRelease: true },
     });
-    if (!claim) throw new NotFoundError('Seat claim not found');
-    if (claim.claimantUserId !== session.id) throw new ForbiddenError('Not your seat claim');
-    if (claim.status !== 'confirmed') throw new BadRequestError('Seat claim is not confirmed');
-    if (claim.seatRelease.tripId !== input.tripId) throw new BadRequestError('Seat claim is for a different trip');
+    if (!claim) throw new NotFoundError("Seat claim not found");
+    if (claim.claimantUserId !== session.id)
+      throw new ForbiddenError("Not your seat claim");
+    if (claim.status !== "confirmed")
+      throw new BadRequestError("Seat claim is not confirmed");
+    if (claim.seatRelease.tripId !== input.tripId)
+      throw new BadRequestError("Seat claim is for a different trip");
   }
 
-  const ride = await db.$transaction(async (tx) => {
-    // P0-1: prevent double-booking the same trip by the same user.
-    const existing = await tx.ride.findFirst({
-      where: {
-        tripId: input.tripId,
-        userId: session.id,
-        status: { in: ['booked', 'boarded'] },
-      },
-      select: { id: true },
-    });
-    if (existing) throw new ConflictError('You already have a booked ride on this trip');
-
-    // Atomically increment seatsBooked if there's room (CAS UPDATE).
-    const updated = await tx.trip.updateMany({
-      where: { id: trip.id, seatsBooked: { lt: trip.shuttle.capacity } },
-      data: { seatsBooked: { increment: 1 } },
-    });
-    if (updated.count === 0) throw new ConflictError('Trip is full');
-
-    if (input.subscriptionId) {
-      await consumeRide(tx, input.subscriptionId);
-    }
-    if (input.seatClaimId) {
-      // P1-20: CAS the seat-claim status to prevent double-use of the same claim.
-      const claimUpdate = await tx.seatClaim.updateMany({
-        where: { id: input.seatClaimId, status: 'confirmed' },
-        data: { status: 'used' },
+  const ride = await db.$transaction(
+    async (tx) => {
+      const existing = await tx.ride.findFirst({
+        where: {
+          tripId: input.tripId,
+          userId: session.id,
+          status: { in: ["booked", "boarded"] },
+        },
+        select: { id: true },
       });
-      if (claimUpdate.count === 0) throw new ConflictError('Seat claim is no longer confirmed');
-    }
-    return tx.ride.create({
-      data: {
-        tripId: input.tripId,
-        userId: session.id,
-        subscriptionId: input.subscriptionId,
-        seatClaimId: input.seatClaimId,
-        pickupLocationId: input.pickupLocationId,
-        assignmentId: trip.assignmentId,
-        status: 'booked',
-      },
-    });
-  }, { timeout: 15000, maxWait: 20000 });
+      if (existing)
+        throw new ConflictError("You already have a booked ride on this trip");
+
+      // Atomically increment seatsBooked if there's room (CAS UPDATE).
+      const updated = await tx.trip.updateMany({
+        where: { id: trip.id, seatsBooked: { lt: trip.shuttle.capacity } },
+        data: { seatsBooked: { increment: 1 } },
+      });
+      if (updated.count === 0) throw new ConflictError("Trip is full");
+
+      if (input.subscriptionId) {
+        await consumeRide(tx, input.subscriptionId);
+      }
+      if (input.seatClaimId) {
+        const claimUpdate = await tx.seatClaim.updateMany({
+          where: { id: input.seatClaimId, status: "confirmed" },
+          data: { status: "used" },
+        });
+        if (claimUpdate.count === 0)
+          throw new ConflictError("Seat claim is no longer confirmed");
+      }
+      return tx.ride.create({
+        data: {
+          tripId: input.tripId,
+          userId: session.id,
+          subscriptionId: input.subscriptionId,
+          seatClaimId: input.seatClaimId,
+          pickupLocationId: input.pickupLocationId,
+          assignmentId: trip.assignmentId,
+          status: "booked",
+        },
+      });
+    },
+    { timeout: 15000, maxWait: 20000 },
+  );
 
   await audit({
     actorId: session.id,
-    action: 'ride.booked',
-    entityType: 'ride',
+    action: "ride.booked",
+    entityType: "ride",
     entityId: ride.id,
     after: { tripId: input.tripId },
-    ipAddress, userAgent,
+    ipAddress,
+    userAgent,
   });
   return { status: 201, data: ride };
 }
 
-export async function POST_board({ session, params, ipAddress, userAgent }: any) {
+export async function POST_board({
+  session,
+  params,
+  ipAddress,
+  userAgent,
+}: any) {
   const trip = await db.trip.findUnique({ where: { id: params.id } });
-  if (!trip) throw new NotFoundError('Trip not found');
-  if (trip.status !== 'scheduled') throw new BadRequestError('Trip is not scheduled');
-  // P0-5: cannot board a trip more than 30 minutes before departure.
+  if (!trip) throw new NotFoundError("Trip not found");
+  if (trip.status !== "scheduled")
+    throw new BadRequestError("Trip is not scheduled");
   if (trip.departureAt.getTime() - Date.now() > BOARD_WINDOW_MS) {
-    throw new BadRequestError('Too early to board — boarding opens 30 minutes before departure');
+    throw new BadRequestError(
+      "Too early to board — boarding opens 30 minutes before departure",
+    );
   }
-  if (session.role !== 'platform_admin' && trip.driverId !== session.id) {
-    throw new ForbiddenError('Not your trip');
+  if (session.role !== "platform_admin" && trip.driverId !== session.id) {
+    throw new ForbiddenError("Not your trip");
   }
 
-  // P0-5: wrap in a transaction; use CAS on trip.status to prevent concurrent boards.
-  await db.$transaction(async (tx) => {
-    const tripCas = await tx.trip.updateMany({
-      where: { id: trip.id, status: 'scheduled' },
-      data: { status: 'in_transit' },
-    });
-    if (tripCas.count === 0) throw new ConflictError('Trip is no longer in a boardable state');
-
-    // P1-19 / P0-3+P0-4 cascade: only board rides whose subscription is still active
-    // (or whose ride is via a seat claim). Cancel-on-board for expired subs is handled
-    // by the scheduler; here we simply skip them so they don't get marked 'boarded'.
-    // We do a best-effort filter using a sub-query through relation — Prisma's updateMany
-    // doesn't support relation filters, so we look up the affected ride IDs first.
-    const boardableRideIds = await tx.ride.findMany({
-      where: { tripId: trip.id, status: 'booked' },
-      select: { id: true, subscriptionId: true, subscription: { select: { status: true } } },
-    });
-    const validRideIds = boardableRideIds
-      .filter(r => !r.subscriptionId || r.subscription?.status === 'active')
-      .map(r => r.id);
-
-    if (validRideIds.length > 0) {
-      await tx.ride.updateMany({
-        where: { id: { in: validRideIds } },
-        data: { status: 'boarded' },
+  await db.$transaction(
+    async (tx) => {
+      const tripCas = await tx.trip.updateMany({
+        where: { id: trip.id, status: "scheduled" },
+        data: { status: "in_transit" },
       });
-    }
-  }, { timeout: 15000, maxWait: 20000 });
+      if (tripCas.count === 0)
+        throw new ConflictError("Trip is no longer in a boardable state");
+
+      const boardableRideIds = await tx.ride.findMany({
+        where: { tripId: trip.id, status: "booked" },
+        select: {
+          id: true,
+          subscriptionId: true,
+          subscription: { select: { status: true } },
+        },
+      });
+      const validRideIds = boardableRideIds
+        .filter((r) => !r.subscriptionId || r.subscription?.status === "active")
+        .map((r) => r.id);
+
+      if (validRideIds.length > 0) {
+        await tx.ride.updateMany({
+          where: { id: { in: validRideIds } },
+          data: { status: "boarded" },
+        });
+      }
+    },
+    { timeout: 15000, maxWait: 20000 },
+  );
   await audit({
     actorId: session.id,
-    action: 'trip.boarded',
-    entityType: 'trip',
+    action: "trip.boarded",
+    entityType: "trip",
     entityId: trip.id,
-    ipAddress, userAgent,
+    ipAddress,
+    userAgent,
   });
-  return { data: { id: trip.id, status: 'in_transit' } };
+  return { data: { id: trip.id, status: "in_transit" } };
 }
 
-export async function POST_complete({ session, params, ipAddress, userAgent }: any) {
+export async function POST_complete({
+  session,
+  params,
+  ipAddress,
+  userAgent,
+}: any) {
   const trip = await db.trip.findUnique({ where: { id: params.id } });
-  if (!trip) throw new NotFoundError('Trip not found');
-  if (trip.status !== 'in_transit') throw new BadRequestError('Trip is not in transit');
-  if (session.role !== 'platform_admin' && trip.driverId !== session.id) {
-    throw new ForbiddenError('Not your trip');
+  if (!trip) throw new NotFoundError("Trip not found");
+  if (trip.status !== "in_transit")
+    throw new BadRequestError("Trip is not in transit");
+  if (session.role !== "platform_admin" && trip.driverId !== session.id) {
+    throw new ForbiddenError("Not your trip");
   }
 
-  await db.$transaction(async (tx) => {
-    const tripCas = await tx.trip.updateMany({
-      where: { id: trip.id, status: 'in_transit' },
-      data: { status: 'completed' },
-    });
-    if (tripCas.count === 0) throw new ConflictError('Trip is no longer in transit');
-
-    // Boarded rides complete; booked rides (no-shows) cascade to no_show.
-    await tx.ride.updateMany({ where: { tripId: trip.id, status: 'boarded' }, data: { status: 'completed' } });
-    const noShowResult = await tx.ride.updateMany({ where: { tripId: trip.id, status: 'booked' }, data: { status: 'no_show' } });
-    // P2 FIX: decrement seatsBooked by the no-show count so trip capacity is accurate.
-    if (noShowResult.count > 0) {
-      await tx.trip.updateMany({
-        where: { id: trip.id, seatsBooked: { gte: noShowResult.count } },
-        data: { seatsBooked: { decrement: noShowResult.count } },
+  await db.$transaction(
+    async (tx) => {
+      const tripCas = await tx.trip.updateMany({
+        where: { id: trip.id, status: "in_transit" },
+        data: { status: "completed" },
       });
-    }
-    // Also transition any 'released' rides to 'cancelled' (trip is over).
-    await tx.ride.updateMany({ where: { tripId: trip.id, status: 'released' }, data: { status: 'cancelled' } });
-  }, { timeout: 15000, maxWait: 20000 });
+      if (tripCas.count === 0)
+        throw new ConflictError("Trip is no longer in transit");
+
+      await tx.ride.updateMany({
+        where: { tripId: trip.id, status: "boarded" },
+        data: { status: "completed" },
+      });
+      const noShowResult = await tx.ride.updateMany({
+        where: { tripId: trip.id, status: "booked" },
+        data: { status: "no_show" },
+      });
+      // P2 FIX: decrement seatsBooked by the no-show count so trip capacity is accurate.
+      if (noShowResult.count > 0) {
+        await tx.trip.updateMany({
+          where: { id: trip.id, seatsBooked: { gte: noShowResult.count } },
+          data: { seatsBooked: { decrement: noShowResult.count } },
+        });
+      }
+      await tx.ride.updateMany({
+        where: { tripId: trip.id, status: "released" },
+        data: { status: "cancelled" },
+      });
+    },
+    { timeout: 15000, maxWait: 20000 },
+  );
   await audit({
     actorId: session.id,
-    action: 'trip.completed',
-    entityType: 'trip',
+    action: "trip.completed",
+    entityType: "trip",
     entityId: trip.id,
-    ipAddress, userAgent,
+    ipAddress,
+    userAgent,
   });
-  // Recompute the contractor's rating after trip completion.
   if (trip.driverId) {
     try {
-      const { recomputeContractorRating } = await import('@/lib/api-admin');
-      const profile = await db.contractorProfile.findUnique({ where: { userId: trip.driverId } });
+      const { recomputeContractorRating } = await import("@/lib/api-admin");
+      const profile = await db.contractorProfile.findUnique({
+        where: { userId: trip.driverId },
+      });
       if (profile) await recomputeContractorRating(profile.id);
     } catch (err) {
-      logger.error({ err: (err as Error).message }, '[trip.complete] recompute rating failed');
+      logger.error(
+        { err: (err as Error).message },
+        "[trip.complete] recompute rating failed",
+      );
     }
   }
-  return { data: { id: trip.id, status: 'completed' } };
+  return { data: { id: trip.id, status: "completed" } };
 }
 
-// P1-16: dedicated trip-cancel endpoint that cascades to rides + notifications.
-export async function POST_trip_cancel({ session, params, body, ipAddress, userAgent }: any) {
+export async function POST_trip_cancel({
+  session,
+  params,
+  body,
+  ipAddress,
+  userAgent,
+}: any) {
   const trip = await db.trip.findUnique({
     where: { id: params.id },
     include: { route: true },
   });
-  if (!trip) throw new NotFoundError('Trip not found');
-  if (session.role !== 'platform_admin' && trip.driverId !== session.id) {
-    throw new ForbiddenError('Not your trip');
+  if (!trip) throw new NotFoundError("Trip not found");
+  if (session.role !== "platform_admin" && trip.driverId !== session.id) {
+    throw new ForbiddenError("Not your trip");
   }
-  if (trip.status === 'completed' || trip.status === 'cancelled') {
+  if (trip.status === "completed" || trip.status === "cancelled") {
     throw new BadRequestError(`Trip is already ${trip.status}`);
   }
 
-  const reason = (body?.reason && typeof body.reason === 'string' && body.reason.length <= 500)
-    ? body.reason
-    : 'Trip cancelled';
+  const reason =
+    body?.reason && typeof body.reason === "string" && body.reason.length <= 500
+      ? body.reason
+      : "Trip cancelled";
 
-  // Cascade-cancel every booked ride, restore seats, restore subscription credits.
-  const affected = await db.$transaction(async (tx) => {
-    const tripCas = await tx.trip.updateMany({
-      where: { id: trip.id, status: { in: ['scheduled', 'in_transit'] } },
-      data: { status: 'cancelled' },
-    });
-    if (tripCas.count === 0) throw new ConflictError('Trip is no longer in a cancellable state');
-
-    // Find all rides that need cascading.
-    const rides = await tx.ride.findMany({
-      where: { tripId: trip.id, status: { in: ['booked', 'boarded'] } },
-      select: { id: true, userId: true, subscriptionId: true, seatClaimId: true, status: true },
-    });
-
-    // Mark them cancelled.
-    if (rides.length > 0) {
-      await tx.ride.updateMany({
-        where: { id: { in: rides.map(r => r.id) } },
-        data: { status: 'cancelled' },
+  const affected = await db.$transaction(
+    async (tx) => {
+      const tripCas = await tx.trip.updateMany({
+        where: { id: trip.id, status: { in: ["scheduled", "in_transit"] } },
+        data: { status: "cancelled" },
       });
-    }
+      if (tripCas.count === 0)
+        throw new ConflictError("Trip is no longer in a cancellable state");
 
-    // Restore trip capacity to 0 (the trip is cancelled — no seats are bookable).
-    await tx.trip.update({ where: { id: trip.id }, data: { seatsBooked: 0 } });
+      const rides = await tx.ride.findMany({
+        where: { tripId: trip.id, status: { in: ["booked", "boarded"] } },
+        select: {
+          id: true,
+          userId: true,
+          subscriptionId: true,
+          seatClaimId: true,
+          status: true,
+        },
+      });
 
-    return rides;
-  }, { timeout: 15000, maxWait: 20000 });
+      if (rides.length > 0) {
+        await tx.ride.updateMany({
+          where: { id: { in: rides.map((r) => r.id) } },
+          data: { status: "cancelled" },
+        });
+      }
 
-  // Restore subscription credits for cancelled subscription-booked rides.
+      await tx.trip.update({
+        where: { id: trip.id },
+        data: { seatsBooked: 0 },
+      });
+
+      return rides;
+    },
+    { timeout: 15000, maxWait: 20000 },
+  );
+
   for (const r of affected) {
     if (r.subscriptionId) {
-      try { await releaseRide(r.subscriptionId); } catch (err) {
-        logger.error({ err: (err as Error).message, subscriptionId: r.subscriptionId }, '[trip.cancel] releaseRide failed');
+      try {
+        await releaseRide(r.subscriptionId);
+      } catch (err) {
+        logger.error(
+          { err: (err as Error).message, subscriptionId: r.subscriptionId },
+          "[trip.cancel] releaseRide failed",
+        );
       }
     }
-    // Notify the rider.
     try {
       await enqueueNotification({
         userId: r.userId,
-        type: 'trip_cancelled',
-        title: 'Trip cancelled',
-        body: `Your trip on ${trip.route?.origin ?? 'route'} → ${trip.route?.destination ?? ''} was cancelled. ${reason}`,
-        link: '/dashboard/rider',
+        type: "trip_cancelled",
+        title: "Trip cancelled",
+        body: `Your trip on ${trip.route?.origin ?? "route"} → ${trip.route?.destination ?? ""} was cancelled. ${reason}`,
+        link: "/dashboard/rider",
       });
     } catch (err) {
-      logger.error({ err: (err as Error).message }, '[trip.cancel] notify failed');
+      logger.error(
+        { err: (err as Error).message },
+        "[trip.cancel] notify failed",
+      );
     }
   }
 
   await audit({
     actorId: session.id,
-    action: 'trip.cancelled',
-    entityType: 'trip',
+    action: "trip.cancelled",
+    entityType: "trip",
     entityId: trip.id,
     after: { reason, affectedRides: affected.length },
-    ipAddress, userAgent,
+    ipAddress,
+    userAgent,
   });
-  return { data: { id: trip.id, status: 'cancelled', affectedRides: affected.length } };
+  return {
+    data: { id: trip.id, status: "cancelled", affectedRides: affected.length },
+  };
 }
 
 const TripUpdateInput = z.object({
-  status: z.enum(['scheduled', 'in_transit', 'completed', 'cancelled']).optional(),
+  status: z
+    .enum(["scheduled", "in_transit", "completed", "cancelled"])
+    .optional(),
   departureAt: z.string().datetime().optional(),
   driverId: z.string().optional(),
 });
 
-export async function PATCH_trip({ session, params, body, ipAddress, userAgent }: any) {
+export async function PATCH_trip({
+  session,
+  params,
+  body,
+  ipAddress,
+  userAgent,
+}: any) {
   const input = TripUpdateInput.parse(body);
   const trip = await db.trip.findUnique({ where: { id: params.id } });
-  if (!trip) throw new NotFoundError('Trip not found');
-  if (session.role !== 'platform_admin' && trip.driverId !== session.id) {
-    throw new ForbiddenError('Not your trip');
+  if (!trip) throw new NotFoundError("Trip not found");
+  if (session.role !== "platform_admin" && trip.driverId !== session.id) {
+    throw new ForbiddenError("Not your trip");
   }
   // P2-48: validate driverId references an active contractor if changing.
   if (input.driverId && input.driverId !== trip.driverId) {
-    if (session.role !== 'platform_admin') {
-      throw new ForbiddenError('Only platform admins can reassign drivers');
+    if (session.role !== "platform_admin") {
+      throw new ForbiddenError("Only platform admins can reassign drivers");
     }
     const contractor = await db.contractorProfile.findUnique({
       where: { userId: input.driverId },
       select: { verificationStatus: true },
     });
-    if (!contractor || contractor.verificationStatus !== 'verified') {
-      throw new BadRequestError('New driver is not a verified contractor');
+    if (!contractor || contractor.verificationStatus !== "verified") {
+      throw new BadRequestError("New driver is not a verified contractor");
     }
   }
   const before = trip;
@@ -347,18 +432,26 @@ export async function PATCH_trip({ session, params, body, ipAddress, userAgent }
     },
     include: { route: true, shuttle: true },
   });
-  await audit({ actorId: session.id, action: 'trip.updated', entityType: 'trip', entityId: params.id, before, after: input, ipAddress, userAgent });
+  await audit({
+    actorId: session.id,
+    action: "trip.updated",
+    entityType: "trip",
+    entityId: params.id,
+    before,
+    after: input,
+    ipAddress,
+    userAgent,
+  });
   return { data: updated };
 }
 
-// Forward-only ride state machine. Prevents illegal transitions.
 const RIDE_TRANSITIONS: Record<string, Set<string>> = {
-  booked: new Set(['boarded', 'no_show', 'cancelled', 'released']),
-  boarded: new Set(['completed']),
-  no_show: new Set(),          // terminal
-  completed: new Set(),        // terminal
-  cancelled: new Set(),        // terminal
-  released: new Set(['booked', 'cancelled']),  // release can expire back to booked, or be cancelled
+  booked: new Set(["boarded", "no_show", "cancelled", "released"]),
+  boarded: new Set(["completed"]),
+  no_show: new Set(),
+  completed: new Set(),
+  cancelled: new Set(),
+  released: new Set(["booked", "cancelled"]),
 };
 
 function assertRideTransition(from: string, to: string): void {
@@ -369,20 +462,35 @@ function assertRideTransition(from: string, to: string): void {
 }
 
 const RideUpdateInput = z.object({
-  status: z.enum(['booked', 'boarded', 'completed', 'no_show', 'cancelled', 'released']).optional(),
+  status: z
+    .enum([
+      "booked",
+      "boarded",
+      "completed",
+      "no_show",
+      "cancelled",
+      "released",
+    ])
+    .optional(),
 });
 
-export async function PATCH_ride({ session, params, body, ipAddress, userAgent }: any) {
+export async function PATCH_ride({
+  session,
+  params,
+  body,
+  ipAddress,
+  userAgent,
+}: any) {
   const input = RideUpdateInput.parse(body);
   const ride = await db.ride.findUnique({ where: { id: params.id } });
-  if (!ride) throw new NotFoundError('Ride not found');
+  if (!ride) throw new NotFoundError("Ride not found");
 
   // AuthZ: rider themselves, trip's driver, or admin.
   let isDriver = false;
-  if (session.role !== 'platform_admin' && ride.userId !== session.id) {
+  if (session.role !== "platform_admin" && ride.userId !== session.id) {
     const trip = await db.trip.findUnique({ where: { id: ride.tripId } });
     if (!trip || trip.driverId !== session.id) {
-      throw new ForbiddenError('Not your ride');
+      throw new ForbiddenError("Not your ride");
     }
     isDriver = true;
   }
@@ -392,12 +500,14 @@ export async function PATCH_ride({ session, params, body, ipAddress, userAgent }
     assertRideTransition(ride.status, input.status);
 
     // Riders can only cancel their own booked rides.
-    if (!isDriver && session.role !== 'platform_admin') {
-      if (input.status !== 'cancelled') {
-        throw new ForbiddenError('Riders can only cancel their own rides');
+    if (!isDriver && session.role !== "platform_admin") {
+      if (input.status !== "cancelled") {
+        throw new ForbiddenError("Riders can only cancel their own rides");
       }
-      if (ride.status !== 'booked') {
-        throw new BadRequestError('Riders can only cancel rides that have not yet boarded');
+      if (ride.status !== "booked") {
+        throw new BadRequestError(
+          "Riders can only cancel rides that have not yet boarded",
+        );
       }
     }
   }
@@ -407,55 +517,85 @@ export async function PATCH_ride({ session, params, body, ipAddress, userAgent }
   // P0-6: if transitioning to cancelled from booked/boarded, release the seat
   // and restore subscription credit. releaseRide uses db (not tx) so it must
   // run OUTSIDE the transaction to avoid SQLite single-writer lock conflicts.
-  const shouldReleaseSeat = input.status === 'cancelled' && (ride.status === 'booked' || ride.status === 'boarded');
+  const shouldReleaseSeat =
+    input.status === "cancelled" &&
+    (ride.status === "booked" || ride.status === "boarded");
 
-  const updated = await db.$transaction(async (tx) => {
-    if (shouldReleaseSeat) {
-      await tx.trip.updateMany({
-        where: { id: ride.tripId, seatsBooked: { gt: 0 } },
-        data: { seatsBooked: { decrement: 1 } },
+  const updated = await db.$transaction(
+    async (tx) => {
+      if (shouldReleaseSeat) {
+        await tx.trip.updateMany({
+          where: { id: ride.tripId, seatsBooked: { gt: 0 } },
+          data: { seatsBooked: { decrement: 1 } },
+        });
+      }
+      return tx.ride.update({
+        where: { id: params.id },
+        data: input,
+        include: { trip: { include: { route: true } } },
       });
-    }
-    return tx.ride.update({
-      where: { id: params.id },
-      data: input,
-      include: { trip: { include: { route: true } } },
-    });
-  }, { timeout: 15000, maxWait: 20000 });
+    },
+    { timeout: 15000, maxWait: 20000 },
+  );
 
-  // Restore subscription credit outside the tx (releaseRide uses db).
   if (shouldReleaseSeat && ride.subscriptionId) {
-    try { await releaseRide(ride.subscriptionId); } catch (err) {
-      logger.error({ err: (err as Error).message }, '[ride.patch] releaseRide failed');
+    try {
+      await releaseRide(ride.subscriptionId);
+    } catch (err) {
+      logger.error(
+        { err: (err as Error).message },
+        "[ride.patch] releaseRide failed",
+      );
     }
   }
 
-  await audit({ actorId: session.id, action: 'ride.updated', entityType: 'ride', entityId: params.id, before, after: input, ipAddress, userAgent });
+  await audit({
+    actorId: session.id,
+    action: "ride.updated",
+    entityType: "ride",
+    entityId: params.id,
+    before,
+    after: input,
+    ipAddress,
+    userAgent,
+  });
   return { data: updated };
 }
 
-// Dedicated rider-cancel endpoint (cleaner UX than PATCH with body).
-export async function POST_ride_cancel({ session, params, ipAddress, userAgent }: any) {
-  return PATCH_ride({ session, params, body: { status: 'cancelled' }, ipAddress, userAgent });
+export async function POST_ride_cancel({
+  session,
+  params,
+  ipAddress,
+  userAgent,
+}: any) {
+  return PATCH_ride({
+    session,
+    params,
+    body: { status: "cancelled" },
+    ipAddress,
+    userAgent,
+  });
 }
 
 const TripCreateInput = z.object({
   routeId: z.string().min(1),
   shuttleId: z.string().min(1),
   departureAt: z.string().datetime(),
-  window: z.enum(['morning', 'evening']),
+  window: z.enum(["morning", "evening"]),
 });
 
 export async function POST_trip({ session, body, ipAddress, userAgent }: any) {
   const input = TripCreateInput.parse(body);
-  const shuttle = await db.shuttle.findUnique({ where: { id: input.shuttleId } });
-  if (!shuttle) throw new NotFoundError('Shuttle not found');
-  if (!shuttle.isActive) throw new BadRequestError('Shuttle is not active');
-  if (session.role === 'contractor' && shuttle.contractorId !== session.id) {
-    throw new BadRequestError('You can only create trips on your own shuttles');
+  const shuttle = await db.shuttle.findUnique({
+    where: { id: input.shuttleId },
+  });
+  if (!shuttle) throw new NotFoundError("Shuttle not found");
+  if (!shuttle.isActive) throw new BadRequestError("Shuttle is not active");
+  if (session.role === "contractor" && shuttle.contractorId !== session.id) {
+    throw new BadRequestError("You can only create trips on your own shuttles");
   }
   const route = await db.route.findUnique({ where: { id: input.routeId } });
-  if (!route || !route.isActive) throw new NotFoundError('Route not found');
+  if (!route || !route.isActive) throw new NotFoundError("Route not found");
 
   // P2-3: prevent double-booking the same shuttle at overlapping times.
   const departureTime = new Date(input.departureAt);
@@ -463,7 +603,7 @@ export async function POST_trip({ session, body, ipAddress, userAgent }: any) {
   const overlap = await db.trip.findFirst({
     where: {
       shuttleId: input.shuttleId,
-      status: { in: ['scheduled', 'in_transit'] },
+      status: { in: ["scheduled", "in_transit"] },
       departureAt: {
         gt: new Date(departureTime.getTime() - bufferMs),
         lt: new Date(departureTime.getTime() + bufferMs),
@@ -471,7 +611,10 @@ export async function POST_trip({ session, body, ipAddress, userAgent }: any) {
     },
     select: { id: true },
   });
-  if (overlap) throw new ConflictError('Shuttle already has a trip near this departure time');
+  if (overlap)
+    throw new ConflictError(
+      "Shuttle already has a trip near this departure time",
+    );
 
   const trip = await db.trip.create({
     data: {
@@ -480,20 +623,33 @@ export async function POST_trip({ session, body, ipAddress, userAgent }: any) {
       driverId: shuttle.contractorId,
       departureAt: departureTime,
       window: input.window,
-      status: 'scheduled',
+      status: "scheduled",
     },
     include: { route: true, shuttle: true },
   });
-  await audit({ actorId: session.id, action: 'trip.created', entityType: 'trip', entityId: trip.id, after: input, ipAddress, userAgent });
+  await audit({
+    actorId: session.id,
+    action: "trip.created",
+    entityType: "trip",
+    entityId: trip.id,
+    after: input,
+    ipAddress,
+    userAgent,
+  });
   return { status: 201, data: trip };
 }
 
-// ─── Shuttle positions ──────────────────────────────────────────────────────
-// P1-9 / OPS-012: uses Redis when available (shared across instances), falls
-// back to in-memory Map for single-instance deployments.
-const positions = new Map<string, { lat: number; lng: number; heading: number; speed: number; updatedAt: number }>();
+const positions = new Map<
+  string,
+  {
+    lat: number;
+    lng: number;
+    heading: number;
+    speed: number;
+    updatedAt: number;
+  }
+>();
 
-// Periodic cleanup so the Map doesn't grow unbounded (P2-78).
 setInterval(() => {
   const cutoff = Date.now() - 5 * 60_000;
   for (const [k, v] of positions) {
@@ -510,16 +666,15 @@ const PositionInput = z.object({
 
 export async function POST_shuttle_position({ session, body }: any) {
   const input = PositionInput.parse(body);
-  if (session.role !== 'contractor' && session.role !== 'platform_admin') {
-    throw new ForbiddenError('Contractor only');
+  if (session.role !== "contractor" && session.role !== "platform_admin") {
+    throw new ForbiddenError("Contractor only");
   }
-  // P3-42: verify the contractor owns at least one active shuttle.
-  if (session.role === 'contractor') {
+  if (session.role === "contractor") {
     const owns = await db.shuttle.findFirst({
       where: { contractorId: session.id, isActive: true },
       select: { id: true },
     });
-    if (!owns) throw new ForbiddenError('You have no active shuttle');
+    if (!owns) throw new ForbiddenError("You have no active shuttle");
   }
   const pos = {
     lat: input.lat,
@@ -528,10 +683,9 @@ export async function POST_shuttle_position({ session, body }: any) {
     speed: input.speed ?? 0,
     updatedAt: Date.now(),
   };
-  // Try Redis first; fall back to in-memory.
   try {
-    const { redisSetPosition } = await import('@/lib/redis');
-    await redisSetPosition(session.id, pos, 300); // 5-min TTL
+    const { redisSetPosition } = await import("@/lib/redis");
+    await redisSetPosition(session.id, pos, 300);
   } catch {
     positions.set(session.id, pos);
   }
@@ -539,15 +693,25 @@ export async function POST_shuttle_position({ session, body }: any) {
 }
 
 export async function GET_shuttle_positions({ session }: any) {
-  // Try Redis first; fall back to in-memory.
   try {
-    const { redisGetAllPositions } = await import('@/lib/redis');
-    const redisResult = await redisGetAllPositions('pos:*');
-    if (redisResult.length > 0 || (await import('@/lib/redis')).isRedisAvailable()) {
+    const { redisGetAllPositions } = await import("@/lib/redis");
+    const redisResult = await redisGetAllPositions("pos:*");
+    if (
+      redisResult.length > 0 ||
+      (await import("@/lib/redis")).isRedisAvailable()
+    ) {
       return { data: redisResult };
     }
-  } catch { /* fall through to in-memory */ }
-  const result: Array<{ lat: number; lng: number; heading: number; speed: number; updatedAt: number }> = [];
+  } catch {
+    /* fall through to in-memory */
+  }
+  const result: Array<{
+    lat: number;
+    lng: number;
+    heading: number;
+    speed: number;
+    updatedAt: number;
+  }> = [];
   for (const [, pos] of positions) {
     if (Date.now() - pos.updatedAt < 5 * 60_000) {
       result.push(pos);
@@ -556,11 +720,23 @@ export async function GET_shuttle_positions({ session }: any) {
   return { data: result };
 }
 
-export async function handleShuttlePositionStream(req: NextRequest, session: any): Promise<NextResponse> {
+export async function handleShuttlePositionStream(
+  req: NextRequest,
+  session: any,
+): Promise<NextResponse> {
   if (!session) {
-    return NextResponse.json({ error: { code: 'UNAUTHORIZED', message: 'Sign in required' } }, { status: 401 });
+    return NextResponse.json(
+      { error: { code: "UNAUTHORIZED", message: "Sign in required" } },
+      { status: 401 },
+    );
   }
-  const result: Array<{ lat: number; lng: number; heading: number; speed: number; updatedAt: number }> = [];
+  const result: Array<{
+    lat: number;
+    lng: number;
+    heading: number;
+    speed: number;
+    updatedAt: number;
+  }> = [];
   for (const [, pos] of positions) {
     if (Date.now() - pos.updatedAt < 5 * 60_000) result.push(pos);
   }

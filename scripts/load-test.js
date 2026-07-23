@@ -1,10 +1,3 @@
-// P2-67 / Sprint 2 #47: k6 load test suite.
-// Run with: k6 run scripts/load-test.js
-//
-// Tests the public catalog + auth flow at 50 RPS for 5 minutes.
-// Reports p50/p95/p99 latency + error rate.
-// Requires the dev server running on localhost:3000 with seeded data.
-
 import http from 'k6/http';
 import { check, sleep } from 'k6';
 

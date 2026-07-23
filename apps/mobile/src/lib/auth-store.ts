@@ -1,4 +1,3 @@
-// Auth store using Zustand for reactive state management across screens.
 import { create } from 'zustand';
 import { api, setToken } from './api';
 import * as SecureStore from 'expo-secure-store';

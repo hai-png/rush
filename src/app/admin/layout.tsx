@@ -6,10 +6,6 @@ import { Button } from '@/components/ui/button';
 import { SignOutButton } from '@/components/sign-out-button';
 import { Bus, Users, CreditCard, Ticket, FileText, Truck, Route, CalendarDays, Building2, HelpCircle, Settings, ScrollText, ClipboardList } from 'lucide-react';
 
-// P1-6 / FE-013: admin sidebar navigation. Previously the admin dashboard had
-// 13 nav buttons in the top bar with no mobile nav and no active state. Now
-// there's a persistent sidebar (collapsible on mobile via CSS) with icons +
-// active-link highlighting.
 const navItems = [
   { href: '/admin/users', label: 'Users', icon: Users },
   { href: '/admin/payments', label: 'Payments', icon: CreditCard },

@@ -7,12 +7,11 @@ type TxClient = Prisma.TransactionClient;
 
 // consumeRide atomically increments subscription.ridesUsed with a CAS guard
 // so two concurrent POST /rides calls can't both consume the last ride.
-// P2-75 fix: include status:'active' in the CAS where-clause so a sub that
+// Include status:'active' in the CAS where-clause so a sub that
 // was cancelled or expired between the read and the CAS still fails cleanly.
 //
-// P0-19 / BIZ-037 fix: when the subscription has a corporateId, also enforce
+// When the subscription has a corporateId, also enforce
 // the corporate monthly seat allowance via a CAS on CorporateMember.ridesUsedThisMonth.
-// The quota is per-member-per-corporate-per-month.
 export async function consumeRide(
   tx: TxClient | typeof db,
   subscriptionId: string,
@@ -24,10 +23,8 @@ export async function consumeRide(
   if (!sub) throw new BadRequestError('Subscription not found');
   if (sub.status !== 'active') throw new BadRequestError('Subscription not active');
 
-  // P0-19: enforce corporate seat allowance.
   if (sub.corporateId && sub.corporate) {
     const allowance = sub.corporate.monthlySeatAllowance;
-    // Find the member row inside the same tx.
     const member = await tx.corporateMember.findUnique({
       where: { corporateId_userId: { corporateId: sub.corporateId, userId: sub.userId } },
       select: { id: true, isActive: true, deletedAt: true, approvalStatus: true, ridesUsedThisMonth: true },
@@ -71,10 +68,9 @@ export async function consumeRide(
   }
 }
 
-// releaseRide atomically decrements subscription.ridesUsed when a ride is cancelled.
 // Safe to call outside a transaction (uses its own atomic updateMany).
 // Never decrements below zero (CAS guard).
-// P0-19: also decrements CorporateMember.ridesUsedThisMonth so cancelled rides
+// Also decrements CorporateMember.ridesUsedThisMonth so cancelled rides
 // give the member their quota back.
 export async function releaseRide(subscriptionId: string): Promise<void> {
   if (!subscriptionId) return;

@@ -1,18 +1,22 @@
+import { z } from "zod";
+import { db } from "@/lib/db";
+import { Money } from "@/lib/money";
+import { getPaymentProvider } from "@/lib/payments";
+import { loadEnv } from "@/lib/env";
+import { BadRequestError, NotFoundError, ForbiddenError } from "@/lib/errors";
+import { createId } from "@/lib/id";
+import { audit } from "@/lib/audit";
 
-import { z } from 'zod';
-import { db } from '@/lib/db';
-import { Money } from '@/lib/money';
-import { getPaymentProvider } from '@/lib/payments';
-import { loadEnv } from '@/lib/env';
-import { BadRequestError, NotFoundError, ForbiddenError } from '@/lib/errors';
-import { createId } from '@/lib/id';
-import { audit } from '@/lib/audit';
-
-const InAppInput = z.object({
-  subscriptionId: z.string().optional(),
-  seatClaimId: z.string().optional(),
-  description: z.string().min(1).max(200).optional(),
-}).refine(v => v.subscriptionId || v.seatClaimId, 'Either subscriptionId or seatClaimId is required');
+const InAppInput = z
+  .object({
+    subscriptionId: z.string().optional(),
+    seatClaimId: z.string().optional(),
+    description: z.string().min(1).max(200).optional(),
+  })
+  .refine(
+    (v) => v.subscriptionId || v.seatClaimId,
+    "Either subscriptionId or seatClaimId is required",
+  );
 
 export async function POST_inapp_checkout({ session, body }: any) {
   const input = InAppInput.parse(body);
@@ -31,13 +35,18 @@ export async function POST_inapp_checkout({ session, body }: any) {
       where: { id: input.subscriptionId },
       include: { plan: true },
     });
-    if (!sub) throw new NotFoundError('Subscription not found');
-    if (sub.userId !== session.id) throw new ForbiddenError('Not your subscription');
+    if (!sub) throw new NotFoundError("Subscription not found");
+    if (sub.userId !== session.id)
+      throw new ForbiddenError("Not your subscription");
     let riderAmountCents = sub.plan.priceCents;
     if (sub.corporateId) {
-      const corp = await db.corporate.findUnique({ where: { id: sub.corporateId } });
+      const corp = await db.corporate.findUnique({
+        where: { id: sub.corporateId },
+      });
       if (corp) {
-        riderAmountCents = sub.plan.priceCents - Math.round(sub.plan.priceCents * corp.subsidyPercent / 100);
+        riderAmountCents =
+          sub.plan.priceCents -
+          Math.round((sub.plan.priceCents * corp.subsidyPercent) / 100);
       }
     }
     amountCents = riderAmountCents;
@@ -46,20 +55,26 @@ export async function POST_inapp_checkout({ session, body }: any) {
   } else {
     const claim = await db.seatClaim.findUnique({
       where: { id: input.seatClaimId! },
-      include: { seatRelease: { include: { trip: { include: { route: true } } } } },
+      include: {
+        seatRelease: { include: { trip: { include: { route: true } } } },
+      },
     });
-    if (!claim) throw new NotFoundError('Seat claim not found');
-    if (claim.claimantUserId !== session.id) throw new ForbiddenError('Not your seat claim');
+    if (!claim) throw new NotFoundError("Seat claim not found");
+    if (claim.claimantUserId !== session.id)
+      throw new ForbiddenError("Not your seat claim");
     amountCents = claim.seatRelease.trip.route.fareCents;
-    description = input.description ?? `Seat claim for ${claim.seatRelease.trip.route.origin} → ${claim.seatRelease.trip.route.destination}`;
+    description =
+      input.description ??
+      `Seat claim for ${claim.seatRelease.trip.route.origin} → ${claim.seatRelease.trip.route.destination}`;
     seatClaimId = claim.id;
   }
 
-  if (amountCents <= 0) throw new BadRequestError('Resolved amount must be positive');
+  if (amountCents <= 0)
+    throw new BadRequestError("Resolved amount must be positive");
 
-  const provider = getPaymentProvider('telebirr');
+  const provider = getPaymentProvider("telebirr");
   if (!provider.createInAppOrder) {
-    throw new BadRequestError('InApp SDK not supported by current provider');
+    throw new BadRequestError("InApp SDK not supported by current provider");
   }
 
   const reference = `PO${createId()}`;
@@ -68,8 +83,11 @@ export async function POST_inapp_checkout({ session, body }: any) {
     merchOrderId: reference,
     amount: Money.fromCents(amountCents),
     description,
-    notifyUrl: env.TELEBIRR_NOTIFY_URL || `${env.APP_BASE_URL}/api/v1/webhooks/telebirr/notify`,
-    redirectUrl: env.TELEBIRR_REDIRECT_URL || `${env.APP_BASE_URL}/checkout/complete`,
+    notifyUrl:
+      env.TELEBIRR_NOTIFY_URL ||
+      `${env.APP_BASE_URL}/api/v1/webhooks/telebirr/notify`,
+    redirectUrl:
+      env.TELEBIRR_REDIRECT_URL || `${env.APP_BASE_URL}/checkout/complete`,
   };
 
   const result = await provider.createInAppOrder(intent);
@@ -80,9 +98,9 @@ export async function POST_inapp_checkout({ session, body }: any) {
       userId: session.id,
       subscriptionId,
       seatClaimId,
-      method: 'telebirr',
+      method: "telebirr",
       amountCents,
-      status: 'pending',
+      status: "pending",
     },
   });
 
@@ -104,16 +122,18 @@ const MandateSignInput = z.object({
 
 export async function POST_mandate_sign_url({ session, body }: any) {
   const input = MandateSignInput.parse(body);
-  const provider = getPaymentProvider('telebirr');
+  const provider = getPaymentProvider("telebirr");
   if (!provider.buildMandateSignUrl) {
-    throw new BadRequestError('Subscription Payment not supported by current provider');
+    throw new BadRequestError(
+      "Subscription Payment not supported by current provider",
+    );
   }
 
   // P1-7 / SEC-009: use crypto.randomInt instead of Math.random for the
   // mandate contract number. Math.random is not cryptographically secure —
   // an attacker who observes a few outputs can predict future ones.
-  const { randomInt } = await import('node:crypto');
-  let mctContractNo = '';
+  const { randomInt } = await import("node:crypto");
+  let mctContractNo = "";
   for (let i = 0; i < 32; i++) mctContractNo += randomInt(0, 10).toString();
 
   // P1 / BIZ-043: persist the mandate so we have a per-user ownership record.
@@ -125,7 +145,7 @@ export async function POST_mandate_sign_url({ session, body }: any) {
       subscriptionId: input.subscriptionId,
       mctContractNo,
       mandateTemplateId: input.mandateTemplateId,
-      status: 'pending',
+      status: "pending",
     },
   });
 
@@ -136,8 +156,8 @@ export async function POST_mandate_sign_url({ session, body }: any) {
 
   await audit({
     actorId: session.id,
-    action: 'telebirr.mandate_sign_url_generated',
-    entityType: 'mandate',
+    action: "telebirr.mandate_sign_url_generated",
+    entityType: "mandate",
     entityId: mandate.id,
     after: { mctContractNo, mandateTemplateId: input.mandateTemplateId },
   });
@@ -154,54 +174,59 @@ export async function GET_mandate({ session, params }: any) {
   const mandate = await db.mandate.findUnique({
     where: { mctContractNo: params.mctContractNo },
   });
-  if (!mandate) throw new NotFoundError('Mandate not found');
-  if (mandate.userId !== session.id && session.role !== 'platform_admin') {
-    throw new ForbiddenError('Not your mandate');
+  if (!mandate) throw new NotFoundError("Mandate not found");
+  if (mandate.userId !== session.id && session.role !== "platform_admin") {
+    throw new ForbiddenError("Not your mandate");
   }
 
-  // If Telebirr supports mandate queries, fetch the live status from their API.
-  const provider = getPaymentProvider('telebirr');
+  const provider = getPaymentProvider("telebirr");
   if (provider.queryMandate) {
     try {
       const remote = await provider.queryMandate(params.mctContractNo);
       return { data: { ...mandate, remote } };
-    } catch {
-      // Remote query failed — return local record only.
-    }
+    } catch {}
   }
   return { data: mandate };
 }
 
-export async function POST_mandate_cancel({ session, params, ipAddress, userAgent }: any) {
+export async function POST_mandate_cancel({
+  session,
+  params,
+  ipAddress,
+  userAgent,
+}: any) {
   // P1 / BIZ-043: ownership check — only the mandate owner or admin can cancel.
   const mandate = await db.mandate.findUnique({
     where: { mctContractNo: params.mctContractNo },
   });
-  if (!mandate) throw new NotFoundError('Mandate not found');
-  if (mandate.userId !== session.id && session.role !== 'platform_admin') {
-    throw new ForbiddenError('Not your mandate');
+  if (!mandate) throw new NotFoundError("Mandate not found");
+  if (mandate.userId !== session.id && session.role !== "platform_admin") {
+    throw new ForbiddenError("Not your mandate");
   }
-  if (mandate.status === 'cancelled') throw new BadRequestError('Mandate already cancelled');
+  if (mandate.status === "cancelled")
+    throw new BadRequestError("Mandate already cancelled");
 
-  const provider = getPaymentProvider('telebirr');
+  const provider = getPaymentProvider("telebirr");
   if (!provider.cancelMandate) {
-    throw new BadRequestError('Subscription Payment not supported by current provider');
+    throw new BadRequestError(
+      "Subscription Payment not supported by current provider",
+    );
   }
   const result = await provider.cancelMandate(params.mctContractNo);
 
-  // Update local mandate record.
   await db.mandate.update({
     where: { id: mandate.id },
-    data: { status: 'cancelled', cancelledAt: new Date() },
+    data: { status: "cancelled", cancelledAt: new Date() },
   });
 
   await audit({
     actorId: session.id,
-    action: 'telebirr.mandate_cancelled',
-    entityType: 'mandate',
+    action: "telebirr.mandate_cancelled",
+    entityType: "mandate",
     entityId: mandate.id,
     after: { ok: result.ok },
-    ipAddress, userAgent,
+    ipAddress,
+    userAgent,
   });
   return { data: result };
 }
@@ -212,16 +237,25 @@ const DisburseInput = z.object({
   reason: z.string().min(1).max(200),
 });
 
-export async function POST_disburse({ session, body, ipAddress, userAgent }: any) {
+export async function POST_disburse({
+  session,
+  body,
+  ipAddress,
+  userAgent,
+}: any) {
   // Route is already requireRole: ['platform_admin'] in the route table;
   // this is a defensive check in case the handler is ever called directly.
-  if (session?.role !== 'platform_admin') {
-    throw new ForbiddenError('Admin only — disburse is for the scheduler or admin testing');
+  if (session?.role !== "platform_admin") {
+    throw new ForbiddenError(
+      "Admin only — disburse is for the scheduler or admin testing",
+    );
   }
   const input = DisburseInput.parse(body);
-  const provider = getPaymentProvider('telebirr');
+  const provider = getPaymentProvider("telebirr");
   if (!provider.disburse) {
-    throw new BadRequestError('Subscription Payment not supported by current provider');
+    throw new BadRequestError(
+      "Subscription Payment not supported by current provider",
+    );
   }
 
   const merchOrderId = `DIS${createId()}`;
@@ -234,11 +268,12 @@ export async function POST_disburse({ session, body, ipAddress, userAgent }: any
 
   await audit({
     actorId: session.id,
-    action: 'telebirr.disburse',
-    entityType: 'mandate',
+    action: "telebirr.disburse",
+    entityType: "mandate",
     entityId: input.mctContractNo,
     after: { merchOrderId, amountCents: input.amountCents, result },
-    ipAddress, userAgent,
+    ipAddress,
+    userAgent,
   });
 
   return { status: 201, data: { merchOrderId, ...result } };

@@ -1,12 +1,4 @@
-// P1-6 / SEC-013: field-level encryption for sensitive columns (2FA secrets,
-// etc.) so that DB read access (admin, backup, SQL injection, CSV export)
-// cannot recover the raw secret.
-//
-// Uses AES-256-GCM with a key derived from AUTH_SECRET via PBKDF2 (100k
-// iterations, 32-byte key). The IV is randomly generated per encryption
-// and stored alongside the ciphertext: format is "v1:<ivHex>:<ctHex>:<tagHex>".
-// GCM provides both confidentiality and integrity — tampering with the
-// ciphertext or tag fails decryption.
+// AES-256-GCM field-level encryption. Format: "v1:<ivHex>:<ctHex>:<tagHex>".
 import { createCipheriv, createDecipheriv, pbkdf2Sync, randomBytes } from 'node:crypto';
 import { loadEnv } from '@/lib/env';
 

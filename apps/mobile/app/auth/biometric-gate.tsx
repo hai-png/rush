@@ -4,28 +4,6 @@ import { useAuthStore } from '../../src/lib/auth-store';
 import { router } from 'expo-router';
 import { getBiometricsEnabled, setBiometricsEnabled } from '../../src/lib/settings-store';
 
-// P0-7 / SEC-002: real biometric gate.
-//
-// Original behavior: this file was named biometric-gate.tsx but contained
-// zero biometric API calls — it just called `restore()` from useAuthStore,
-// which reads the token from SecureStore and calls /auth/me. Any user (or
-// thief) who unlocks the device got full account access with no FaceID /
-// TouchID / fingerprint prompt. expo-local-authentication wasn't even in
-// package.json.
-//
-// New behavior:
-//   1. On mount, attempt to restore the session from SecureStore.
-//   2. If a valid session exists AND biometrics are enabled in settings,
-//      prompt for biometric auth before routing to the dashboard.
-//   3. If biometrics fail or are unavailable, fall back to a "Tap to retry"
-//      UI with a "Sign out" escape hatch (so the user can re-login with
-//      password). We do NOT auto-fall-through, because that defeats the
-//      purpose of biometric protection.
-//   4. If biometrics are disabled in settings (the default), restore and
-//      route directly.
-//
-// Note: expo-local-authentication must be installed. If it isn't, the dynamic
-// import fails and we treat biometrics as unavailable (user must sign in).
 export default function BiometricGate() {
   const { restore, logout, user } = useAuthStore();
   const [status, setStatus] = useState<'loading' | 'biometric' | 'failed' | 'done'>('loading');
@@ -44,13 +22,10 @@ export default function BiometricGate() {
         router.replace('/rider/dashboard');
         return;
       }
-      // Try to prompt for biometric auth.
       const result = await promptBiometric();
       if (result === 'success') {
         router.replace('/rider/dashboard');
       } else if (result === 'unavailable') {
-        // Biometrics not available on this device — fall through to dashboard
-        // but warn the user once.
         Alert.alert(
           'Biometrics unavailable',
           'Biometric authentication is not available on this device. Sign in with your password next time for security.',

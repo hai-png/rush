@@ -284,14 +284,6 @@ model Trip {
   @@unique([routeId, departureAt, window])  // P0: prevent duplicate trips from scheduler re-runs
 }
 
-// ─── Route Assignments (monthly commitments) ────────────────────────────────
-// A contractor commits to serving a route for a month with a specific shuttle
-// and a recurring schedule (e.g. Mon-Fri mornings + evenings). Admin assigns
-// routes to contractors; riders subscribe to assignments.
-//
-// This replaces the old "Trip per day" model. Individual daily trips are
-// generated from the assignment's schedule pattern (Mon-Fri → 20-22 trips/month).
-
 model RouteAssignment {
   id            String   @id @default(cuid())
   routeId       String
