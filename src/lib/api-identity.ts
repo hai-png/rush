@@ -33,15 +33,16 @@ const RegisterInput = z.discriminatedUnion('kind', [
 export async function POST_register({ body, ipAddress, userAgent }: any) {
   const input = RegisterInput.parse(body);
   const phone = EthiopianPhone.normalize(input.phone);
-  const existing = await db.user.findUnique({ where: { phone } });
-  if (existing) throw new ConflictError('Phone already registered');
 
   const passwordHash = await hashPassword(input.password);
 
-  if (input.kind === 'rider') {
-    const user = await db.user.create({
-      data: {
-        phone, passwordHash, name: input.name, role: 'rider',
+  // P1 FIX: wrap user creation in try/catch to convert P2002 (unique violation)
+  // on phone to a friendly ConflictError instead of an unhandled 500.
+  try {
+    if (input.kind === 'rider') {
+      const user = await db.user.create({
+        data: {
+          phone, passwordHash, name: input.name, role: 'rider',
         riderProfile: { create: { homeArea: input.homeArea, workArea: input.workArea } },
       },
       include: { riderProfile: true },
@@ -58,6 +59,11 @@ export async function POST_register({ body, ipAddress, userAgent }: any) {
     });
     await audit({ actorId: user.id, action: 'user.register', entityType: 'user', entityId: user.id, after: { role: 'contractor', phone }, ipAddress, userAgent });
     return { status: 201, data: { user: { id: user.id, phone: user.phone, role: user.role, name: user.name }, profile: { id: user.contractorProfile!.id } } };
+  }
+  } catch (err: any) {
+    // P1 FIX: convert P2002 unique violation on phone to friendly ConflictError.
+    if (err?.code === 'P2002') throw new ConflictError('Phone already registered');
+    throw err;
   }
 }
 

@@ -145,20 +145,32 @@ export async function handleTicketMessageWithAttachment(req: NextRequest, sessio
     }
 
     let fileId: string | undefined;
+    let fileMeta: any;
     if (file && file instanceof File) {
-      const meta = await saveFile(file, `tickets/${ticket.id}`);
-      const uploaded = await db.uploadedFile.create({
-        data: {
-          uploaderId: session.id,
-          originalFilename: meta.originalFilename,
-          storageKey: meta.storageKey,
-          mimeType: meta.mimeType,
-          sizeBytes: meta.sizeBytes,
-          checksumSha256: meta.checksumSha256,
-          scanStatus: 'clean',
-        },
-      });
-      fileId = uploaded.id;
+      // P1 FIX: save file to disk + create UploadedFile row BEFORE the ticketMessage
+      // transaction. If the tx fails, we can clean up the orphaned file.
+      // Previously, saveFile wrote to disk before the tx, and if the tx failed,
+      // the file was orphaned with no UploadedFile row to track it.
+      fileMeta = await saveFile(file, `tickets/${ticket.id}`);
+      try {
+        const uploaded = await db.uploadedFile.create({
+          data: {
+            uploaderId: session.id,
+            originalFilename: fileMeta.originalFilename,
+            storageKey: fileMeta.storageKey,
+            mimeType: fileMeta.mimeType,
+            sizeBytes: fileMeta.sizeBytes,
+            checksumSha256: fileMeta.checksumSha256,
+            scanStatus: 'clean',
+          },
+        });
+        fileId = uploaded.id;
+      } catch (err) {
+        // Clean up the orphaned file if UploadedFile creation failed.
+        const { unlink } = await import('node:fs/promises');
+        try { await unlink(fileMeta.fullPath); } catch {}
+        throw err;
+      }
     }
 
     const msg = await db.$transaction(async (tx) => {

@@ -97,7 +97,7 @@ SUB_ID=$(python3 -c 'import json;print(json.load(open("/tmp/addis-ride-e2e/dash2
 RIDE=$(spost $RIDER /api/v1/rides '{"tripId":"'$TRIP_ID'","subscriptionId":"'$SUB_ID'"}')
 echo "$RIDE" | python3 -c 'import sys,json;d=json.load(sys.stdin);exit(0 if d.get("data",{}).get("id") else 1)' 2>/dev/null && ok "ride booked" || bad "ride book"
 
-RELEASE=$(spost $RIDER /api/v1/marketplace/seat-releases '{"tripId":"'$TRIP_ID'","window":"'$TRIP_WINDOW'","expiresAt":"'$(date -u -d '+2 hours' +'%Y-%m-%dT%H:%M:%S.000Z')'"}')
+RELEASE=$(spost $RIDER /api/v1/marketplace/seat-releases '{"tripId":"'$TRIP_ID'","window":"'$TRIP_WINDOW'","expiresAt":"'$(date -u -d '+30 minutes' +'%Y-%m-%dT%H:%M:%S.000Z')'"}')
 echo "$RELEASE" | python3 -c 'import sys,json;d=json.load(sys.stdin);exit(0 if d.get("data",{}).get("id") else 1)' 2>/dev/null && ok "seat released to marketplace" || bad "seat release"
 
 curl -s -b $RIDER $BASE/api/v1/marketplace/seat-releases > $TMP/mkt.json

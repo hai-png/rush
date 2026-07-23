@@ -18,10 +18,11 @@ const EXPO_PUBLIC_API_BASE = (process.env.EXPO_PUBLIC_API_BASE as string | undef
 
 const IS_PROD = process.env.NODE_ENV === 'production' || __DEV__ === false;
 if (IS_PROD && EXPO_PUBLIC_API_BASE.startsWith('http://') && process.env.EXPO_PUBLIC_API_ALLOW_HTTP !== '1') {
-  // We don't throw here because that would crash the app at import time.
-  // Instead, the first request will fail with a clear error. Operators
-  // must set EXPO_PUBLIC_API_BASE to an https:// URL for production builds.
-  console.error(
+  // P1 FIX: throw at module load — a misconfigured prod build with http:// API_BASE
+  // is a critical security issue (session JWT transmitted in cleartext). Crashing
+  // at import is acceptable for a misconfigured prod build — better than silently
+  // transmitting credentials in cleartext.
+  throw new Error(
     '[api] API_BASE is http:// in a production build. Set EXPO_PUBLIC_API_BASE to an https:// URL ' +
     '(or set EXPO_PUBLIC_API_ALLOW_HTTP=1 to bypass — NOT recommended).'
   );
