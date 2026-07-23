@@ -1,12 +1,16 @@
 import Link from 'next/link';
+import type { Metadata } from 'next';
 import { requireRole } from '@/lib/session-server';
 import { db } from '@/lib/db';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { SignOutButton } from '@/components/sign-out-button';
+import { formatETB, formatDateTime } from '@/lib/format';
 
 export const dynamic = 'force-dynamic';
+
+export const metadata: Metadata = { title: 'Payment History · Addis Ride' };
 
 export default async function RiderPaymentsPage() {
   const session = await requireRole('rider', 'platform_admin');
@@ -40,14 +44,14 @@ export default async function RiderPaymentsPage() {
                   <div>
                     <div className="font-mono text-sm">{p.reference}</div>
                     <div className="text-xs text-muted-foreground">
-                      {new Date(p.createdAt).toLocaleString()} · {p.method} · {p.subscription?.plan?.name ?? '—'}
+                      {formatDateTime(p.createdAt)} · {p.method} · {p.subscription?.plan?.name ?? '—'}
                     </div>
                     {p.refundAmountCents > 0 && (
-                      <div className="text-xs text-orange-600">Refunded: {(p.refundAmountCents / 100).toFixed(2)} ETB</div>
+                      <div className="text-xs text-orange-600">Refunded: {formatETB(p.refundAmountCents)}</div>
                     )}
                   </div>
                   <div className="flex items-center gap-2">
-                    <span className="font-semibold">{(p.amountCents / 100).toFixed(2)} ETB</span>
+                    <span className="font-semibold">{formatETB(p.amountCents)}</span>
                     <Badge variant="outline">{p.status}</Badge>
                   </div>
                 </div>

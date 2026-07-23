@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import type { Metadata } from 'next';
 import { requireRole } from '@/lib/session-server';
 import { db } from '@/lib/db';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -7,8 +8,11 @@ import { Badge } from '@/components/ui/badge';
 import { CreditCard, Bell, Ticket, Calendar, Plus } from 'lucide-react';
 import { CancelSubscriptionButton } from './cancel-button';
 import { SignOutButton } from '@/components/sign-out-button';
+import { formatETB, formatDate } from '@/lib/format';
 
 export const dynamic = 'force-dynamic';
+
+export const metadata: Metadata = { title: 'Rider Dashboard · Addis Ride' };
 
 export default async function RiderDashboardPage() {
   const session = await requireRole('rider', 'platform_admin');
@@ -74,7 +78,7 @@ export default async function RiderDashboardPage() {
                     </CardHeader>
                     <CardContent className="text-sm space-y-1">
                       <div className="flex justify-between"><span className="text-muted-foreground">Rides used</span><span>{s.ridesUsed} / {s.plan.ridesIncluded === -1 ? '∞' : s.plan.ridesIncluded}</span></div>
-                      <div className="flex justify-between"><span className="text-muted-foreground">Expires</span><span>{new Date(s.endDate).toLocaleDateString()}</span></div>
+                      <div className="flex justify-between"><span className="text-muted-foreground">Expires</span><span>{formatDate(s.endDate)}</span></div>
                       <div className="pt-2"><CancelSubscriptionButton id={s.id} /></div>
                     </CardContent>
                   </Card>
@@ -115,7 +119,7 @@ export default async function RiderDashboardPage() {
                       {recentPayments.map(p => (
                         <div key={p.id} className="py-2 text-sm flex justify-between">
                           <span className="font-mono text-xs">{p.reference}</span>
-                          <span>{(p.amountCents / 100).toFixed(2)} ETB · <Badge variant="outline">{p.status}</Badge></span>
+                          <span>{formatETB(p.amountCents)} · <Badge variant="outline">{p.status}</Badge></span>
                         </div>
                       ))}
                     </div>

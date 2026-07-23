@@ -2,6 +2,7 @@ import { View, Text, FlatList, TextInput, TouchableOpacity, StyleSheet, Keyboard
 import { useState, useEffect } from 'react';
 import { useLocalSearchParams } from 'expo-router';
 import { api } from '../../src/lib/api';
+import { colors, spacing, radius, fontSize, fontWeight } from '../../src/lib/theme';
 
 export default function TicketDetailScreen() {
   const { id } = useLocalSearchParams<{ id: string }>();
@@ -12,9 +13,16 @@ export default function TicketDetailScreen() {
   const [loading, setLoading] = useState(false);
 
   useEffect(() => {
-    if (id) {
-      api.get(`/tickets/${id}`).then(d => { setTicket(d); setMessages(d?.messages || []); }).catch(() => {});
-    }
+    if (!id) return;
+    let active = true;
+    api.get(`/tickets/${id}`)
+      .then(d => {
+        if (!active) return;
+        setTicket(d);
+        setMessages(d?.messages || []);
+      })
+      .catch(() => {});
+    return () => { active = false; };
   }, [id]);
 
   async function sendReply() {
@@ -37,11 +45,11 @@ export default function TicketDetailScreen() {
         <Text style={styles.sub}>{ticket.category} · {ticket.priority} · {ticket.status}</Text>
       </View>
       {error && (
-        <View style={{ backgroundColor: '#fee2e2', padding: 12, marginHorizontal: 16, borderRadius: 8, marginBottom: 8 }}>
-          <Text style={{ color: '#991b1b', textAlign: 'center', fontSize: 14 }}>Couldn't load — pull to retry</Text>
+        <View style={styles.errorBar}>
+          <Text style={styles.errorText}>Couldn't load — pull to retry</Text>
         </View>
       )}
-<FlatList
+      <FlatList
         data={messages}
         keyExtractor={item => item.id}
         renderItem={({ item }) => (
@@ -66,19 +74,21 @@ export default function TicketDetailScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f5f5f5' },
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  header: { padding: 16, borderBottomWidth: 1, borderBottomColor: '#e0e0e0', backgroundColor: '#fff' },
-  subject: { fontSize: 16, fontWeight: 'bold' },
-  sub: { fontSize: 12, color: '#666', marginTop: 4 },
-  msgList: { flex: 1, padding: 16 },
-  msg: { backgroundColor: '#fff', borderRadius: 8, padding: 12, marginBottom: 8 },
-  msgAdmin: { backgroundColor: '#eff6ff', borderColor: '#bfdbfe', borderWidth: 1 },
-  msgAuthor: { fontSize: 12, fontWeight: '600', color: '#2563eb' },
-  msgBody: { fontSize: 14, marginTop: 4 },
-  msgTime: { fontSize: 10, color: '#999', marginTop: 4 },
-  replyBox: { flexDirection: 'row', padding: 12, backgroundColor: '#fff', borderTopWidth: 1, borderTopColor: '#e0e0e0' },
-  replyInput: { flex: 1, backgroundColor: '#f5f5f5', borderRadius: 8, padding: 10, maxHeight: 80, fontSize: 14 },
-  sendBtn: { backgroundColor: '#2563eb', borderRadius: 8, paddingHorizontal: 16, justifyContent: 'center', marginLeft: 8 },
-  sendText: { color: '#fff', fontWeight: '600' },
+  container: { flex: 1, backgroundColor: colors.surface },
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.surface },
+  header: { padding: spacing.md, borderBottomWidth: 1, borderBottomColor: colors.borderSubtle, backgroundColor: colors.card },
+  subject: { fontSize: fontSize.md, fontWeight: fontWeight.bold },
+  sub: { fontSize: fontSize.xs, color: colors.textMuted, marginTop: spacing.xs },
+  msgList: { flex: 1, padding: spacing.md },
+  msg: { backgroundColor: colors.card, borderRadius: radius.md, padding: 12, marginBottom: spacing.sm },
+  msgAdmin: { backgroundColor: colors.infoBg, borderColor: colors.infoBorder, borderWidth: 1 },
+  msgAuthor: { fontSize: fontSize.xs, fontWeight: fontWeight.semibold, color: colors.primary },
+  msgBody: { fontSize: fontSize.sm, marginTop: spacing.xs },
+  msgTime: { fontSize: 10, color: colors.textLight, marginTop: spacing.xs },
+  replyBox: { flexDirection: 'row', padding: 12, backgroundColor: colors.card, borderTopWidth: 1, borderTopColor: colors.borderSubtle },
+  replyInput: { flex: 1, backgroundColor: colors.surface, borderRadius: radius.md, padding: 10, maxHeight: 80, fontSize: fontSize.sm },
+  sendBtn: { backgroundColor: colors.primary, borderRadius: radius.md, paddingHorizontal: spacing.md, justifyContent: 'center', marginLeft: spacing.sm },
+  sendText: { color: colors.white, fontWeight: fontWeight.semibold },
+  errorBar: { backgroundColor: colors.errorBg, padding: 12, marginHorizontal: spacing.md, borderRadius: radius.md, marginBottom: spacing.sm },
+  errorText: { color: colors.errorText, textAlign: 'center', fontSize: fontSize.sm },
 });

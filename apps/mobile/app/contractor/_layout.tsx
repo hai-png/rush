@@ -1,11 +1,12 @@
 import { Tabs } from 'expo-router';
 import { Text, View } from 'react-native';
+import { colors, fontSize } from '../../src/lib/theme';
 
 // contractor tab bar.
 function TabIcon({ label }: { label: string }) {
   return (
     <View style={{ paddingVertical: 8, paddingHorizontal: 12, alignItems: 'center' }}>
-      <Text style={{ color: '#666', fontSize: 12 }}>{label}</Text>
+      <Text style={{ color: colors.textMuted, fontSize: fontSize.xs }}>{label}</Text>
     </View>
   );
 }
@@ -15,12 +16,12 @@ export default function ContractorLayout() {
     <Tabs
       screenOptions={{
         headerShown: true,
-        headerStyle: { backgroundColor: '#2563eb' },
-        headerTintColor: '#fff',
+        headerStyle: { backgroundColor: colors.primary },
+        headerTintColor: colors.white,
         headerTitle: 'Addis Ride — Contractor',
-        tabBarStyle: { backgroundColor: '#fff', borderTopColor: '#e0e0e0' },
-        tabBarActiveTintColor: '#2563eb',
-        tabBarInactiveTintColor: '#666',
+        tabBarStyle: { backgroundColor: colors.white, borderTopColor: colors.borderSubtle },
+        tabBarActiveTintColor: colors.primary,
+        tabBarInactiveTintColor: colors.textMuted,
       }}
     >
       <Tabs.Screen name="dashboard" options={{ title: 'Home', tabBarIcon: () => <TabIcon label="Home" /> }} />

@@ -1,8 +1,9 @@
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 import { SignOutButton } from '@/components/sign-out-button';
+import { ThemeToggle } from '@/components/theme-toggle';
 
-// FE-07: shared header for dashboard / admin / contractor pages so the layout
+// FE-07 / INC-05: shared header for dashboard / admin / contractor pages so the layout
 // is consistent and nav items aren't re-implemented per page. Caller passes
 // the active title and an array of nav links (filtered per-role by the caller).
 type NavLink = { href: string; label: string };
@@ -35,6 +36,7 @@ export function DashboardHeader({
               <Link href={l.href}>{l.label}</Link>
             </Button>
           ))}
+          <ThemeToggle />
           <SignOutButton />
         </nav>
       </div>

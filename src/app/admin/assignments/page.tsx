@@ -1,13 +1,15 @@
-import Link from 'next/link';
+import type { Metadata } from 'next';
 import { requireRole } from '@/lib/session-server';
 import { db } from '@/lib/db';
 import { Card, CardContent } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { SignOutButton } from '@/components/sign-out-button';
+import { DashboardHeader } from '@/components/dashboard-header';
 import { CreateAssignmentButton } from './create-assignment-button';
+import { formatDate } from '@/lib/format';
 
 export const dynamic = 'force-dynamic';
+
+export const metadata: Metadata = { title: 'Assignments · Admin' };
 
 export default async function AdminAssignmentsPage() {
   await requireRole('platform_admin');
@@ -24,15 +26,7 @@ export default async function AdminAssignmentsPage() {
 
   return (
     <div className="min-h-screen flex flex-col">
-      <header className="border-b">
-        <div className="container mx-auto px-4 py-4 flex items-center justify-between">
-          <Link href="/dashboard/admin" className="text-xl font-bold">Admin · Assignments</Link>
-          <div className="flex gap-2 items-center">
-            <Button asChild variant="ghost"><Link href="/dashboard/admin">Dashboard</Link></Button>
-            <SignOutButton />
-          </div>
-        </div>
-      </header>
+      <DashboardHeader title="Admin · Assignments" backHref="/dashboard/admin" />
       <main className="flex-1 container mx-auto px-4 py-8 max-w-5xl">
         <div className="flex items-center justify-between mb-6">
           <h1 className="text-2xl font-bold">Route Assignments ({assignments.length})</h1>
@@ -58,7 +52,7 @@ export default async function AdminAssignmentsPage() {
                         Contractor: {a.contractor.name} · Shuttle: {a.shuttle.plate} ({a.shuttle.capacity} seats)
                       </div>
                       <div className="text-xs text-muted-foreground">
-                        Month: {new Date(a.monthStart).toLocaleDateString()} – {new Date(a.monthEnd).toLocaleDateString()}
+                        Month: {formatDate(a.monthStart)} – {formatDate(a.monthEnd)}
                       </div>
                       <div className="text-xs text-muted-foreground mt-1">
                         Schedule: {pattern.days?.join(', ')} · {pattern.windows?.join(', ')}

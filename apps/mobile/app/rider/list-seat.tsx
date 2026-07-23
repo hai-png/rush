@@ -3,23 +3,33 @@ import { useState, useCallback } from 'react';
 import { router } from 'expo-router';
 import { api } from '../../src/lib/api';
 import { useFocusEffect } from '@react-navigation/native';
+import { colors, spacing, radius, fontSize, fontWeight } from '../../src/lib/theme';
 
 export default function ListSeatScreen() {
   const [rides, setRides] = useState<any[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (isActive: () => boolean = () => true) => {
     setError(null);
     setRefreshing(true);
     try {
       const allRides = await api.get('/rides') || [];
+      if (!isActive()) return;
       setRides(allRides.filter((r: any) => r.status === 'booked' && r.trip?.status === 'scheduled'));
-    } catch (e) { setError(e instanceof Error ? e.message : 'Failed to load'); }
-    setRefreshing(false);
+    } catch (e) {
+      if (!isActive()) return;
+      setError(e instanceof Error ? e.message : 'Failed to load');
+    }
+    if (isActive()) setRefreshing(false);
   }, []);
 
-  useFocusEffect(useCallback(() => { load(); }, [load]));
+  // (MOB-05e — active guard prevents stale setState on blur.)
+  useFocusEffect(useCallback(() => {
+    let active = true;
+    load(() => active);
+    return () => { active = false; };
+  }, [load]));
 
   async function listSeat(ride: any) {
     const expiresAt = new Date(Date.now() + 24 * 3600_000).toISOString();
@@ -35,14 +45,14 @@ export default function ListSeatScreen() {
       <Text style={styles.title}>List a Seat for Sale</Text>
       <Text style={styles.desc}>Can't make a trip? List your seat for another rider to claim.</Text>
       {error && (
-        <View style={{ backgroundColor: '#fee2e2', padding: 12, marginHorizontal: 16, borderRadius: 8, marginBottom: 8 }}>
-          <Text style={{ color: '#991b1b', textAlign: 'center', fontSize: 14 }}>Couldn't load — pull to retry</Text>
+        <View style={styles.errorBar}>
+          <Text style={styles.errorText}>Couldn't load — pull to retry</Text>
         </View>
       )}
-<FlatList
+      <FlatList
         data={rides}
         keyExtractor={item => item.id}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={load} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load()} />}
         renderItem={({ item }) => (
           <View style={styles.card}>
             <Text style={styles.route}>{item.trip?.route?.origin} → {item.trip?.route?.destination}</Text>
@@ -60,14 +70,16 @@ export default function ListSeatScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f5f5f5' },
-  title: { fontSize: 20, fontWeight: 'bold', padding: 16 },
-  desc: { fontSize: 14, color: '#666', paddingHorizontal: 16, marginBottom: 8 },
-  card: { backgroundColor: '#fff', marginHorizontal: 16, marginBottom: 8, padding: 16, borderRadius: 8 },
-  route: { fontSize: 16, fontWeight: '600' },
-  sub: { fontSize: 12, color: '#666', marginTop: 4 },
-  fare: { fontSize: 14, fontWeight: '600', color: '#2563eb', marginTop: 4 },
-  btn: { backgroundColor: '#2563eb', borderRadius: 6, padding: 10, marginTop: 8, alignItems: 'center' },
-  btnText: { color: '#fff', fontSize: 14, fontWeight: '600' },
-  empty: { textAlign: 'center', color: '#999', padding: 32 },
+  container: { flex: 1, backgroundColor: colors.surface },
+  title: { fontSize: fontSize.lg, fontWeight: fontWeight.bold, padding: spacing.md },
+  desc: { fontSize: fontSize.sm, color: colors.textMuted, paddingHorizontal: spacing.md, marginBottom: spacing.sm },
+  card: { backgroundColor: colors.card, marginHorizontal: spacing.md, marginBottom: spacing.sm, padding: spacing.md, borderRadius: radius.md },
+  route: { fontSize: fontSize.md, fontWeight: fontWeight.semibold },
+  sub: { fontSize: fontSize.xs, color: colors.textMuted, marginTop: spacing.xs },
+  fare: { fontSize: fontSize.sm, fontWeight: fontWeight.semibold, color: colors.primary, marginTop: spacing.xs },
+  btn: { backgroundColor: colors.primary, borderRadius: 6, padding: 10, marginTop: spacing.sm, alignItems: 'center' },
+  btnText: { color: colors.white, fontSize: fontSize.sm, fontWeight: fontWeight.semibold },
+  empty: { textAlign: 'center', color: colors.textLight, padding: spacing.xl },
+  errorBar: { backgroundColor: colors.errorBg, padding: 12, marginHorizontal: spacing.md, borderRadius: radius.md, marginBottom: spacing.sm },
+  errorText: { color: colors.errorText, textAlign: 'center', fontSize: fontSize.sm },
 });

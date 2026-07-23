@@ -1,10 +1,14 @@
-
 import { db } from '@/lib/db';
 import { processRefundRetries } from '@/lib/payment-service';
 import { enqueueNotification } from '@/lib/outbox';
 import { getSmsProvider } from '@/lib/sms';
 import { getEmailProvider } from '@/lib/email';
 import { logger } from '@/lib/logger';
+
+// Re-export processRefundRetries so api-cron.ts can run it directly via ?job=refund-retries.
+// The function itself lives in payment-service.ts; the scheduler also calls it
+// on its own 60s timer.
+export { processRefundRetries };
 
 let started = false;
 
@@ -85,7 +89,9 @@ export async function runAllJobs(): Promise<{
   };
 }
 
-async function drainOutbox(): Promise<void> {
+// BIZ-069 (#18): exported so api-cron.ts can run a single job on demand
+// via ?job=expire-stale. Likewise drainOutbox / hourlyJobs below.
+export async function drainOutbox(): Promise<void> {
   // reaper — reset events that have been stuck in 'processing' for >15min.
   // Without this, a process crash mid-drain leaves events stranded forever.
   try {
@@ -132,8 +138,13 @@ async function drainOutbox(): Promise<void> {
         const payload = JSON.parse(evt.payload);
         switch (evt.channel) {
           case 'notification':
-            // enqueueNotification already wrote the Notification DB row.
-            // Mark as delivered — this channel exists for retry observability only.
+            // HALF-01 (#22): enqueueNotification already wrote the Notification
+            // DB row. This channel exists for retry-observability only — emit
+            // a structured log line so alerting can pick up notification
+            // "emissions" even though there's no external system to deliver to.
+            // The Notification row itself is the source of truth for "did the
+            // user see it?" (readAt on the Notification table).
+            logger.info({ id: evt.id, userId: payload.userId, type: payload.type }, 'outbox.notification.emitted');
             break;
           case 'sms':
             const smsResult = await getSmsProvider().send(payload.phone, payload.body);
@@ -206,7 +217,13 @@ async function drainOutbox(): Promise<void> {
   }
 }
 
-async function expireStale(): Promise<void> {
+// BIZ-069 (#18): exported for per-job cron trigger.
+export async function expireStale(): Promise<void> {
+  // BIZ-069 (#18): hoist `now` so all sub-checks use a single timestamp.
+  // Multiple new Date() calls inside the same function can drift across
+  // millisecond boundaries and produce inconsistent filter results
+  // (e.g. an expiringSubs row read with `lt: now1` but written with
+  // `lt: now2` where now2 > now1 — rows that flipped in between are missed).
   const now = new Date();
   // Capture the IDs of subs that are about to expire so we can cascade-cancel their future rides.
   // SCHED-03b: cap at 100 per run so the scheduler can't OOM if thousands of
@@ -312,7 +329,10 @@ async function expireStale(): Promise<void> {
   }
 }
 
-async function hourlyJobs(): Promise<void> {
+// BIZ-069 (#18): exported for per-job cron trigger.
+// DB-048 (#27): also calls rolloverAssignments() — see that function for the
+// auto-renewal logic.
+export async function hourlyJobs(): Promise<void> {
   await Promise.all([
     resetCorporateMonthlyCounters(),
     sendSubscriptionExpiryWarnings(),
@@ -320,6 +340,8 @@ async function hourlyJobs(): Promise<void> {
     expireStaleSeatClaims(),
     ensureTripsForActiveAssignments(),
     hardDeleteStaleUsers(),
+    rolloverAssignments(),
+    corporateBilling(),
   ]);
 }
 
@@ -566,5 +588,169 @@ async function sendSubscriptionExpiryWarnings(): Promise<void> {
   }
   if (notified > 0) {
     logger.info({ notified }, '[scheduler] sent subscription-expiry warnings');
+  }
+}
+
+// DB-048 (#27): cross-month rollover. For each active RouteAssignment whose
+// monthEnd is within the next 7 days, clone it to next month (shift monthStart
+// and monthEnd by +1 calendar month) so trip generation has somewhere to land
+// when the current month expires. Only fires when an admin has opted in via
+// the `auto_rollover_enabled` Setting (default: off). The contractor must be
+// active and the shuttle must still be active — we don't want to auto-renew
+// assignments for contractors who've left or shuttles that have been retired.
+async function rolloverAssignments(): Promise<void> {
+  const setting = await db.setting.findUnique({ where: { key: 'auto_rollover_enabled' } });
+  if (!setting || setting.value !== 'true') return;
+
+  const now = new Date();
+  const sevenDaysFromNow = new Date(now.getTime() + 7 * 24 * 3600_000);
+
+  // Active assignments ending within the next 7 days.
+  const endingSoon = await db.routeAssignment.findMany({
+    where: {
+      status: 'active',
+      monthEnd: { gt: now, lt: sevenDaysFromNow },
+    },
+    select: {
+      id: true, routeId: true, contractorId: true, shuttleId: true,
+      monthStart: true, monthEnd: true, schedulePattern: true,
+      maxSeats: true, assignedById: true,
+    },
+    take: 100,
+  });
+  if (endingSoon.length === 0) return;
+
+  let created = 0;
+  for (const a of endingSoon) {
+    // Verify contractor is still active + shuttle still active.
+    const contractor = await db.user.findUnique({
+      where: { id: a.contractorId },
+      select: { id: true, isActive: true, deletedAt: true },
+    });
+    if (!contractor || !contractor.isActive || contractor.deletedAt) continue;
+    const shuttle = await db.shuttle.findUnique({
+      where: { id: a.shuttleId },
+      select: { id: true, isActive: true },
+    });
+    if (!shuttle || !shuttle.isActive) continue;
+
+    // Compute next month's start/end by shifting monthStart by +1 month.
+    const nextMonthStart = new Date(a.monthStart.getFullYear(), a.monthStart.getMonth() + 1, 1);
+    const nextMonthEnd = new Date(nextMonthStart.getFullYear(), nextMonthStart.getMonth() + 1, 0, 23, 59, 59);
+
+    // Idempotent: skip if a row already exists for this route+contractor+month
+    // (could happen if the scheduler runs twice in the same hour).
+    const existing = await db.routeAssignment.findUnique({
+      where: {
+        routeId_contractorId_monthStart: {
+          routeId: a.routeId,
+          contractorId: a.contractorId,
+          monthStart: nextMonthStart,
+        },
+      },
+      select: { id: true },
+    });
+    if (existing) continue;
+
+    try {
+      const next = await db.routeAssignment.create({
+        data: {
+          routeId: a.routeId,
+          contractorId: a.contractorId,
+          shuttleId: a.shuttleId,
+          monthStart: nextMonthStart,
+          monthEnd: nextMonthEnd,
+          schedulePattern: a.schedulePattern,
+          status: 'assigned', // contractor must re-accept next month
+          maxSeats: a.maxSeats,
+          assignedById: a.assignedById,
+        },
+      });
+      // Pre-generate trips for next month so the schedule is visible to riders
+      // as soon as the rollover completes. Idempotent — see generateTripsFromAssignment.
+      const { generateTripsFromAssignment } = await import('@/lib/api-assignments');
+      await generateTripsFromAssignment(next).catch((err: unknown) => {
+        logger.error({ err: (err as Error).message, assignmentId: next.id }, '[scheduler] rollover trip generation failed');
+      });
+      created++;
+    } catch (err) {
+      logger.error({ err: (err as Error).message, assignmentId: a.id }, '[scheduler] rollover create failed');
+    }
+  }
+  if (created > 0) {
+    logger.info({ created }, '[scheduler] auto-rolled-over assignments to next month');
+  }
+}
+
+// BIZ-08 (#24): monthly corporate billing. For each active Corporate with
+// members, sum the subsidies consumed (Payment.subsidyCents) in the previous
+// calendar month and create a CorporateInvoice row with status='issued' and
+// dueAt = +30 days. Gated by the `corporate_billing_enabled` Setting.
+async function corporateBilling(): Promise<void> {
+  const setting = await db.setting.findUnique({ where: { key: 'corporate_billing_enabled' } });
+  if (!setting || setting.value !== 'true') return;
+
+  const now = new Date();
+  // Only run on the first day of the month (or close to it — hourly tick
+  // checks). Skip if not the first day.
+  if (now.getDate() !== 1) return;
+
+  // Previous month boundaries.
+  const periodEnd = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
+  const periodStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+
+  const corporates = await db.corporate.findMany({
+    where: { isActive: true, deletedAt: null },
+    select: { id: true, name: true },
+    take: 200,
+  });
+  if (corporates.length === 0) return;
+
+  let created = 0;
+  for (const corp of corporates) {
+    // Idempotent: skip if an invoice already exists for this corporate + period.
+    const existing = await db.corporateInvoice.findFirst({
+      where: { corporateId: corp.id, periodStart },
+      select: { id: true },
+    });
+    if (existing) continue;
+
+    // Sum subsidies consumed in the previous month for this corporate.
+    const agg = await db.payment.aggregate({
+      _sum: { subsidyCents: true },
+      where: {
+        subscription: { corporateId: corp.id },
+        createdAt: { gte: periodStart, lte: periodEnd },
+      },
+    });
+    const subtotalCents = agg._sum.subsidyCents ?? 0;
+    // Skip zero-subsidy months — no point creating an empty invoice.
+    if (subtotalCents === 0) continue;
+
+    const taxCents = 0; // VAT not modeled yet — admin can adjust post-issue.
+    const totalCents = subtotalCents + taxCents;
+    const dueAt = new Date(now.getTime() + 30 * 24 * 3600_000);
+
+    try {
+      await db.corporateInvoice.create({
+        data: {
+          corporateId: corp.id,
+          periodStart,
+          periodEnd,
+          subtotalCents,
+          taxCents,
+          totalCents,
+          status: 'issued',
+          issuedAt: now,
+          dueAt,
+        },
+      });
+      created++;
+    } catch (err) {
+      logger.error({ err: (err as Error).message, corporateId: corp.id }, '[scheduler] corporate invoice create failed');
+    }
+  }
+  if (created > 0) {
+    logger.info({ created, periodStart: periodStart.toISOString() }, '[scheduler] generated corporate invoices');
   }
 }

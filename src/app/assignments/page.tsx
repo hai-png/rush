@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import type { Metadata } from 'next';
 import { requireSession } from '@/lib/session-server';
 import { db } from '@/lib/db';
 import { Card, CardContent } from '@/components/ui/card';
@@ -8,8 +9,11 @@ import { SignOutButton } from '@/components/sign-out-button';
 // lazy-load RouteMap via a client-component wrapper (ssr:false isn't
 // allowed in Server Components directly).
 import { RouteMap } from '@/components/route-map-lazy';
+import { formatETB } from '@/lib/format';
 
 export const dynamic = 'force-dynamic';
+
+export const metadata: Metadata = { title: 'Routes · Addis Ride' };
 
 export default async function AssignmentsPage() {
   const session = await requireSession();
@@ -67,7 +71,7 @@ export default async function AssignmentsPage() {
                           Schedule: {pattern.days?.join(', ')} · {pattern.windows?.join(', ')}
                         </div>
                         <div className="text-xs text-muted-foreground">
-                          Fare: {(a.route.fareCents / 100).toFixed(2)} ETB · {a._count.rides} rides booked · {a._count.rides}/{a.maxSeats} seats used
+                          Fare: {formatETB(a.route.fareCents)} · {a._count.rides} rides booked · {a._count.rides}/{a.maxSeats} seats used
                         </div>
                       </div>
                       <Badge>active</Badge>

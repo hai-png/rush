@@ -1,33 +1,44 @@
 import Link from 'next/link';
+import type { Metadata } from 'next';
 import { requireRole } from '@/lib/session-server';
 import { db } from '@/lib/db';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
-import { SignOutButton } from '@/components/sign-out-button';
+import { DashboardHeader } from '@/components/dashboard-header';
+import { Pagination } from '@/components/pagination';
 
 export const dynamic = 'force-dynamic';
 
-export default async function AdminTicketsPage() {
+export const metadata: Metadata = { title: 'Tickets · Admin' };
+
+const PAGE_SIZE = 50;
+
+// FE-044: paginated admin tickets list (was take:200, no pagination UI).
+export default async function AdminTicketsPage({ searchParams }: { searchParams: Promise<{ page?: string }> }) {
   await requireRole('platform_admin');
-  const tickets = await db.supportTicket.findMany({
-    include: { user: { select: { name: true, phone: true } }, _count: { select: { messages: true } } },
-    orderBy: { updatedAt: 'desc' },
-    take: 200,
-  });
+  const sp = await searchParams;
+  const page = Math.max(1, parseInt(sp.page ?? '1', 10) || 1);
+
+  const [tickets, total] = await Promise.all([
+    db.supportTicket.findMany({
+      include: { user: { select: { name: true, phone: true } }, _count: { select: { messages: true } } },
+      orderBy: { updatedAt: 'desc' },
+      take: PAGE_SIZE,
+      skip: (page - 1) * PAGE_SIZE,
+    }),
+    db.supportTicket.count(),
+  ]);
 
   return (
     <div className="min-h-screen flex flex-col">
-      <header className="border-b">
-        <div className="container mx-auto px-4 py-4 flex items-center justify-between">
-          <Link href="/dashboard/admin" className="text-xl font-bold">Admin · Tickets</Link>
-          <SignOutButton />
-        </div>
-      </header>
+      <DashboardHeader title="Admin · Tickets" backHref="/dashboard/admin" />
       <main className="flex-1 container mx-auto px-4 py-8 max-w-6xl">
-        <h1 className="text-2xl font-bold mb-4">Support tickets ({tickets.length})</h1>
+        <h1 className="text-2xl font-bold mb-4">Support tickets ({total})</h1>
         <Card>
           <CardContent className="py-3 divide-y text-sm">
-            {tickets.map(t => (
+            {tickets.length === 0 ? (
+              <div className="py-6 text-center text-muted-foreground">No tickets yet.</div>
+            ) : tickets.map(t => (
               <Link key={t.id} href={`/tickets/${t.id}`} className="block py-2 hover:bg-accent/30 -mx-3 px-3 rounded">
                 <div className="flex justify-between items-start">
                   <div>
@@ -44,6 +55,7 @@ export default async function AdminTicketsPage() {
             ))}
           </CardContent>
         </Card>
+        <Pagination page={page} total={total} pageSize={PAGE_SIZE} basePath="/admin/tickets" />
       </main>
     </div>
   );

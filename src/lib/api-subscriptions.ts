@@ -80,7 +80,13 @@ export async function POST_create({ session, body, ipAddress, userAgent }: any) 
   }
 
   const now = new Date();
-  const endDate = new Date(now.getTime() + plan.durationDays * 24 * 3600_000);
+  // BIZ-068 (#17): use calendar-day arithmetic instead of ms-since-epoch.
+  // The previous `new Date(now.getTime() + plan.durationDays * 24 * 3600_000)`
+  // drifts across DST transitions (Africa/Addis_Ababa has no DST today, but
+  // this is the correct general pattern) and accumulates floating-point error
+  // for very large durationDays values.
+  const endDate = new Date(now);
+  endDate.setDate(endDate.getDate() + plan.durationDays);
 
   const reference = `PO${createId()}`;
   const provider = getPaymentProvider(input.paymentMethod);
@@ -115,6 +121,9 @@ export async function POST_create({ session, body, ipAddress, userAgent }: any) 
         subscriptionId: created.id,
         method: input.paymentMethod,
         amountCents: riderAmountCents,
+        // BIZ-08 (#24): record the corporate subsidy portion for the monthly
+        // billing job to sum up.
+        subsidyCents: corporateSubsidyCents,
         status: 'pending',
       },
     });
@@ -293,7 +302,9 @@ export async function POST_renew({ session, params, body, ipAddress, userAgent }
   // extend the existing subscription's endDate if it's still active,
   // start the new one from now.
   const newStartDate = sub.status === 'active' && sub.endDate > now ? sub.endDate : now;
-  const newEndDate = new Date(newStartDate.getTime() + sub.plan.durationDays * 24 * 3600_000);
+  // BIZ-068 (#17): calendar-day arithmetic (see POST_create for rationale).
+  const newEndDate = new Date(newStartDate);
+  newEndDate.setDate(newEndDate.getDate() + sub.plan.durationDays);
 
   const newSub = await db.$transaction(async (tx) => {
     // Otherwise, create a new subscription row.
@@ -314,6 +325,8 @@ export async function POST_renew({ session, params, body, ipAddress, userAgent }
           subscriptionId: extended.id,
           method: paymentMethod,
           amountCents: riderAmountCents,
+          // BIZ-08 (#24): record the corporate subsidy portion.
+          subsidyCents: sub.plan.priceCents - riderAmountCents,
           status: 'pending',
         },
       });
@@ -338,6 +351,8 @@ export async function POST_renew({ session, params, body, ipAddress, userAgent }
         subscriptionId: created.id,
         method: paymentMethod,
         amountCents: riderAmountCents,
+        // BIZ-08 (#24): record the corporate subsidy portion.
+        subsidyCents: sub.plan.priceCents - riderAmountCents,
         status: 'pending',
       },
     });
@@ -378,5 +393,93 @@ export async function POST_renew({ session, params, body, ipAddress, userAgent }
 }
 
 export async function DELETE_subscription(ctx: any) {
-  return POST_cancel(ctx);
+  // INC-02 (#21): DELETE returns 204 with no body. Delegate to POST_cancel for
+  // the actual work, then strip the body from the response.
+  await POST_cancel(ctx);
+  return { status: 204 };
+}
+
+// #7: POST /subscriptions/:id/change-payment-method — swap the payment method
+// for the subscription's NEXT billing cycle. Cancels the existing pending
+// payment (if any) and creates a new pending Payment row with the requested
+// method. Does NOT touch a completed/confirmed payment for the current cycle.
+const ChangePaymentMethodInput = z.object({
+  method: z.enum(['telebirr', 'cbe', 'cash']),
+});
+
+export async function POST_change_payment_method({ session, params, body, ipAddress, userAgent }: any) {
+  const input = ChangePaymentMethodInput.parse(body);
+  const sub = await db.subscription.findUnique({
+    where: { id: params.id },
+    include: { plan: true },
+  });
+  if (!sub) throw new NotFoundError('Subscription not found');
+  if (sub.userId !== session.id && session.role !== 'platform_admin') {
+    throw new NotFoundError('Subscription not found');
+  }
+
+  // Look up any pending payment on this subscription.
+  const pendingPayments = await db.payment.findMany({
+    where: { subscriptionId: sub.id, status: 'pending' },
+    select: { id: true, reference: true, amountCents: true, method: true },
+  });
+
+  // Compute the rider amount for the next cycle, mirroring POST_create.
+  let riderAmountCents = sub.plan.priceCents;
+  if (sub.corporateId) {
+    const corp = await db.corporate.findUnique({ where: { id: sub.corporateId } });
+    if (corp && corp.isActive && !corp.deletedAt) {
+      riderAmountCents = computeCorporateSubsidy(sub.plan.priceCents, corp.subsidyPercent).riderAmountCents;
+    }
+  }
+  if (riderAmountCents <= 0) {
+    throw new BadRequestError('Corporate subsidy covers 100% of the plan price — no payment needed');
+  }
+
+  const reference = `PO${createId()}`;
+  const before = { pendingPayments: pendingPayments.map(p => ({ id: p.id, method: p.method })) };
+
+  await db.$transaction(async (tx) => {
+    // Cancel any existing pending payment(s) so the next-cycle payment is the
+    // sole active one. status:'cancelled' is a terminal state for payments.
+    if (pendingPayments.length > 0) {
+      await tx.payment.updateMany({
+        where: { id: { in: pendingPayments.map(p => p.id) }, status: 'pending' },
+        data: { status: 'cancelled' },
+      });
+    }
+    // Create the new pending payment. 'cash' is recorded as a manual-method
+    // payment; admin will reconcile manually (same flow as CBE).
+    await tx.payment.create({
+      data: {
+        reference,
+        userId: sub.userId,
+        subscriptionId: sub.id,
+        method: input.method,
+        amountCents: riderAmountCents,
+        subsidyCents: sub.plan.priceCents - riderAmountCents,
+        status: 'pending',
+      },
+    });
+  }, { timeout: 15000, maxWait: 20000 });
+
+  await audit({
+    actorId: session.id,
+    action: 'subscription.payment_method_changed',
+    entityType: 'subscription',
+    entityId: sub.id,
+    before,
+    after: { method: input.method, newPaymentRef: reference },
+    ipAddress, userAgent,
+  });
+
+  return {
+    status: 201,
+    data: {
+      subscriptionId: sub.id,
+      method: input.method,
+      paymentReference: reference,
+      cancelledPendingPayments: pendingPayments.length,
+    },
+  };
 }

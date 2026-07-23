@@ -11,8 +11,12 @@ import {
 } from '@/components/ui/dialog';
 import { toast } from 'sonner';
 import { api } from '@/lib/api-client';
+import { formatETB } from '@/lib/format';
 
 export function RefundButton({ paymentId, maxAmount }: { paymentId: string; maxAmount: number }) {
+  // maxAmount is in ETB (already divided by 100 in the parent page). Convert
+  // back to cents for formatETB so the display stays consistent with the rest
+  // of the admin UI.
   const router = useRouter();
 
   const [open, setOpen] = useState(false);
@@ -22,7 +26,7 @@ export function RefundButton({ paymentId, maxAmount }: { paymentId: string; maxA
 
   async function submit() {
     if (amount <= 0 || amount > maxAmount) {
-      toast.error(`Amount must be between 0 and ${maxAmount} ETB`);
+      toast.error(`Amount must be between 0 and ${formatETB(maxAmount * 100)}`);
       return;
     }
     if (!reason.trim()) {
@@ -54,7 +58,7 @@ export function RefundButton({ paymentId, maxAmount }: { paymentId: string; maxA
           <div>
             <Label htmlFor="refund-amount">Amount (ETB)</Label>
             <Input id="refund-amount" type="number" min={0.01} max={maxAmount} step="0.01" value={amount} onChange={e => setAmount(Number(e.target.value))} />
-            <p className="text-xs text-muted-foreground mt-1">Max: {maxAmount.toFixed(2)} ETB</p>
+            <p className="text-xs text-muted-foreground mt-1">Max: {formatETB(maxAmount * 100)}</p>
           </div>
           <div>
             <Label htmlFor="refund-reason">Reason</Label>

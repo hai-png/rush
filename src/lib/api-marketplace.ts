@@ -32,6 +32,12 @@ const ReleaseInput = z.object({
   tripId: z.string().min(1),
   window: z.enum(['morning', 'evening']),
   expiresAt: z.string().datetime(),
+  // #8: optional override for the route fare. When null/undefined the buyer
+  // pays the route's canonical fareCents at claim time. When set, the buyer
+  // pays this amount. Must be positive (a 0-ETB release would let a buyer
+  // claim a seat for free, which is the seller's choice but should be
+  // explicit rather than the result of a typo).
+  priceCents: z.number().int().positive().optional().nullable(),
 });
 
 export async function POST_create_release({ session, body, ipAddress, userAgent }: any) {
@@ -82,6 +88,8 @@ export async function POST_create_release({ session, body, ipAddress, userAgent 
         window: input.window,
         status: 'open',
         expiresAt: expiresAtDate,
+        // #8: persist the seller's price override (or null = use route fare).
+        priceCents: input.priceCents ?? null,
       },
     });
   });
@@ -113,7 +121,8 @@ export async function POST_claim({ session, body, params, ipAddress, userAgent }
   if (trip && trip.departureAt < new Date()) throw new BadRequestError('Cannot cancel a release after trip departure');
   if (release.userId === session.id) throw new BadRequestError('Cannot claim your own release');
 
-  const fare = release.trip.route.fareCents;
+  // #8: use the release's override price if set, otherwise the route fare.
+  const fare = release.priceCents ?? release.trip.route.fareCents;
   if (fare <= 0) throw new BadRequestError('Route fare not set');
 
   const reference = `SC${createId()}`;

@@ -1,12 +1,13 @@
 import { Tabs } from 'expo-router';
-import { Platform, Pressable, Text, View } from 'react-native';
+import { Text, View } from 'react-native';
+import { colors, fontSize, fontWeight } from '../../src/lib/theme';
 
 // rider tab bar. Bottom tabs for the five primary rider
 // screens so users can navigate between them without being stranded.
 function TabIcon({ label, active }: { label: string; active: boolean }) {
   return (
     <View style={{ paddingVertical: 8, paddingHorizontal: 12, alignItems: 'center' }}>
-      <Text style={{ color: active ? '#2563eb' : '#666', fontSize: 12, fontWeight: active ? '600' : '400' }}>
+      <Text style={{ color: active ? colors.primary : colors.textMuted, fontSize: fontSize.xs, fontWeight: active ? fontWeight.semibold : fontWeight.normal }}>
         {label}
       </Text>
     </View>
@@ -18,12 +19,12 @@ export default function RiderLayout() {
     <Tabs
       screenOptions={{
         headerShown: true,
-        headerStyle: { backgroundColor: '#2563eb' },
-        headerTintColor: '#fff',
+        headerStyle: { backgroundColor: colors.primary },
+        headerTintColor: colors.white,
         headerTitle: 'Addis Ride',
-        tabBarStyle: { backgroundColor: '#fff', borderTopColor: '#e0e0e0' },
-        tabBarActiveTintColor: '#2563eb',
-        tabBarInactiveTintColor: '#666',
+        tabBarStyle: { backgroundColor: colors.white, borderTopColor: colors.borderSubtle },
+        tabBarActiveTintColor: colors.primary,
+        tabBarInactiveTintColor: colors.textMuted,
       }}
     >
       <Tabs.Screen

@@ -135,6 +135,7 @@ export async function POST_invite({ session, body, query, ipAddress, userAgent }
   const corp = await resolveCorporate(session, query?.corporateId);
   if (!corp) throw new NotFoundError('No corporate found');
 
+  // BIZ-067 (#16): no `before` snapshot — this is a create.
   // Retry on collision (matches generateUniqueCode pattern for corporate codes).
   const { randomInt } = await import('node:crypto');
   const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
@@ -198,7 +199,8 @@ export async function DELETE_invite({ session, params, query, ipAddress, userAge
   const before = invite;
   await db.corporateInvite.update({ where: { id: params.id }, data: { isActive: false } });
   await audit({ actorId: session.id, action: 'corporate.invite_revoked', entityType: 'corporate_invite', entityId: params.id, before, after: { isActive: false }, ipAddress, userAgent });
-  return { data: { id: params.id, isActive: false } };
+  // INC-02 (#21): DELETE returns 204 with no body.
+  return { status: 204 };
 }
 
 const SignupInput = z.object({
@@ -308,6 +310,8 @@ export async function POST_approve({ session, params, query, ipAddress, userAgen
   if (!member || member.corporateId !== corp.id) throw new NotFoundError('Member not found');
   if (member.approvalStatus !== 'pending') throw new ConflictError('Member is not pending');
 
+  // BIZ-067 (#16): capture `before` snapshot.
+  const before = { ...member };
   await db.corporateMember.update({
     where: { id: member.id },
     data: { approvalStatus: 'approved' },
@@ -317,7 +321,8 @@ export async function POST_approve({ session, params, query, ipAddress, userAgen
     action: 'corporate.member_approved',
     entityType: 'corporate_member',
     entityId: member.id,
-    after: { userId: member.userId },
+    before,
+    after: { userId: member.userId, approvalStatus: 'approved' },
     ipAddress, userAgent,
   });
   return { data: { id: member.id, approvalStatus: 'approved' } };
@@ -334,6 +339,8 @@ export async function POST_reject({ session, params, query, ipAddress, userAgent
   if (!member || member.corporateId !== corp.id) throw new NotFoundError('Member not found');
   if (member.approvalStatus !== 'pending') throw new ConflictError('Member is not pending');
 
+  // BIZ-067 (#16): capture `before` snapshot.
+  const before = { ...member };
   await db.corporateMember.update({
     where: { id: member.id },
     data: { approvalStatus: 'rejected' },
@@ -343,7 +350,8 @@ export async function POST_reject({ session, params, query, ipAddress, userAgent
     action: 'corporate.member_rejected',
     entityType: 'corporate_member',
     entityId: member.id,
-    after: { userId: member.userId },
+    before,
+    after: { userId: member.userId, approvalStatus: 'rejected' },
     ipAddress, userAgent,
   });
   return { data: { id: member.id, approvalStatus: 'rejected' } };
@@ -396,8 +404,10 @@ export async function PATCH_corporate({ session, body, query, ipAddress, userAge
   const corp = await resolveCorporate(session, query?.corporateId);
   if (!corp) throw new NotFoundError('No corporate found');
 
+  // BIZ-067 (#16): capture `before` snapshot for the audit log.
+  const before = { ...corp };
   const updated = await db.corporate.update({ where: { id: corp.id }, data: input });
-  await audit({ actorId: session.id, action: 'corporate.updated', entityType: 'corporate', entityId: corp.id, after: input, ipAddress, userAgent });
+  await audit({ actorId: session.id, action: 'corporate.updated', entityType: 'corporate', entityId: corp.id, before, after: input, ipAddress, userAgent });
   return { data: updated };
 }
 
@@ -409,6 +419,9 @@ export async function DELETE_member({ session, params, query, ipAddress, userAge
   if (!corp) throw new NotFoundError('No corporate found');
   const member = await db.corporateMember.findUnique({ where: { id: params.id } });
   if (!member || member.corporateId !== corp.id) throw new NotFoundError('Member not found');
+
+  // BIZ-067 (#16): capture `before` snapshot.
+  const before = { ...member };
 
   // BIZ-07: cancel the removed member's corporate-linked subscriptions so they
   // can no longer ride at the subsidized rate. Non-corporate subscriptions are
@@ -436,8 +449,9 @@ export async function DELETE_member({ session, params, query, ipAddress, userAge
     body: 'Your corporate membership has been removed. Any corporate-linked subscriptions have been cancelled.',
     link: '/dashboard/rider',
   }).catch(() => {});
-  await audit({ actorId: session.id, action: 'corporate.member_removed', entityType: 'corporate_member', entityId: params.id, after: { userId: member.userId }, ipAddress, userAgent });
-  return { data: { id: params.id, isActive: false } };
+  await audit({ actorId: session.id, action: 'corporate.member_removed', entityType: 'corporate_member', entityId: params.id, before, after: { userId: member.userId, isActive: false }, ipAddress, userAgent });
+  // INC-02 (#21): DELETE returns 204 with no body.
+  return { status: 204 };
 }
 
 // removed `ridesUsedThisMonth` from the admin-editable input.
@@ -464,4 +478,30 @@ export async function PATCH_member({ session, params, body, query, ipAddress, us
   const updated = await db.corporateMember.update({ where: { id: params.id }, data: input });
   await audit({ actorId: session.id, action: 'corporate.member_updated', entityType: 'corporate_member', entityId: params.id, before, after: input, ipAddress, userAgent });
   return { data: updated };
+}
+
+// #24: GET /corporate/invoices — list invoices for the caller's corporate
+// (or, for platform_admin, optionally another corporate via ?corporateId=).
+// Includes only issued/paid/void invoices — drafts are admin-internal.
+export async function GET_invoices({ session, query }: any) {
+  if (session.role !== 'corporate_admin' && session.role !== 'platform_admin') {
+    throw new ForbiddenError('Corporate admin only');
+  }
+  const corp = await resolveCorporate(session, query?.corporateId);
+  if (!corp) throw new NotFoundError('No corporate found');
+
+  const { parsePagination, paginatedResponse } = await import('@/lib/pagination');
+  const page = parsePagination(query);
+  const where: any = { corporateId: corp.id };
+  if (query?.status) where.status = query.status;
+
+  const [invoices, total] = await Promise.all([
+    db.corporateInvoice.findMany({
+      where,
+      orderBy: { periodStart: 'desc' },
+      ...page.findManyArgs,
+    }),
+    db.corporateInvoice.count({ where }),
+  ]);
+  return paginatedResponse(invoices, total, page);
 }

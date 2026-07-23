@@ -1,11 +1,17 @@
 import Link from 'next/link';
+import type { Metadata } from 'next';
 import { requireSession } from '@/lib/session-server';
 import { db } from '@/lib/db';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
+import { Badge } from '@/components/ui/badge';
 import { SignOutButton } from '@/components/sign-out-button';
+import { ThemeToggle } from '@/components/theme-toggle';
+import { formatDateTime } from '@/lib/format';
 
 export const dynamic = 'force-dynamic';
+
+export const metadata: Metadata = { title: 'Account · Addis Ride' };
 
 export default async function AccountPage() {
   const session = await requireSession();
@@ -23,6 +29,7 @@ export default async function AccountPage() {
           <Link href="/" className="text-xl font-bold">Addis Ride</Link>
           <div className="flex gap-2 items-center">
             <Button asChild variant="ghost"><Link href="/dashboard/rider">Dashboard</Link></Button>
+            <ThemeToggle />
             <SignOutButton />
           </div>
         </div>
@@ -35,10 +42,34 @@ export default async function AccountPage() {
             <div><span className="text-muted-foreground">Phone:</span> {safe.phone}</div>
             <div><span className="text-muted-foreground">Email:</span> {safe.email ?? '—'}</div>
             <div><span className="text-muted-foreground">Role:</span> {safe.role}</div>
-            <div><span className="text-muted-foreground">Phone verified:</span> {safe.phoneVerified ? 'yes' : 'no'}</div>
-            <div><span className="text-muted-foreground">2FA enabled:</span> {safe.twoFactorEnabled ? 'yes' : 'no'}</div>
-            <div><span className="text-muted-foreground">ToS version:</span> {safe.tosVersion ?? '—'}</div>
-            <div><span className="text-muted-foreground">Created:</span> {new Date(safe.createdAt).toLocaleString()}</div>
+            {/* FE-055: phoneVerified shown as a status Badge instead of a raw
+                boolean so the meaning is obvious at a glance. */}
+            <div className="flex items-center gap-2">
+              <span className="text-muted-foreground">Phone verified:</span>
+              {safe.phoneVerified ? (
+                <Badge className="bg-green-600 hover:bg-green-600 text-white">Verified</Badge>
+              ) : (
+                <Badge variant="outline" className="text-amber-700 border-amber-500 bg-amber-50 dark:bg-amber-950/30 dark:text-amber-300">Not verified</Badge>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              <span className="text-muted-foreground">2FA enabled:</span>
+              {safe.twoFactorEnabled ? (
+                <Badge className="bg-green-600 hover:bg-green-600 text-white">Enabled</Badge>
+              ) : (
+                <Badge variant="outline">Disabled</Badge>
+              )}
+            </div>
+            {/* FE-055: hide the raw tosVersion number; instead render a
+                human-readable "Terms accepted (vX)" line. If they haven't
+                accepted any ToS yet, show "Terms not accepted". */}
+            <div>
+              <span className="text-muted-foreground">Terms:</span>{' '}
+              {safe.tosVersion
+                ? <span>Terms accepted (v{safe.tosVersion})</span>
+                : <Badge variant="outline" className="text-amber-700 border-amber-500 bg-amber-50 dark:bg-amber-950/30 dark:text-amber-300">Not accepted</Badge>}
+            </div>
+            <div><span className="text-muted-foreground">Created:</span> {formatDateTime(safe.createdAt)}</div>
           </CardContent>
         </Card>
         <div className="grid grid-cols-2 gap-2">

@@ -1,19 +1,24 @@
-import Link from 'next/link';
-import { Button } from '@/components/ui/button';
-import { CheckCircle2 } from 'lucide-react';
+import type { Metadata } from 'next';
+import { Suspense } from 'react';
+import { CheckoutCompletePoller } from './checkout-complete-poller';
 
+export const metadata: Metadata = { title: 'Checkout Complete · Addis Ride' };
+
+// FE-053: previously this page was a static "processing…" message. The user
+// had no idea whether their payment had actually settled. Now it's a client
+// component (rendered through this thin server wrapper so we can export
+// metadata) that polls the subscription / payment endpoint until it becomes
+// active/confirmed, then redirects to the rider dashboard. If polling
+// exceeds 60s we surface a "taking longer than expected" message so the
+// user knows to contact support instead of staring at a spinner forever.
+//
+// Suspense is required around the poller because it calls `useSearchParams`,
+// which during static prerender would otherwise force the whole page to bail
+// out to client-side rendering.
 export default function CheckoutCompletePage() {
   return (
-    <div className="min-h-screen flex items-center justify-center p-4">
-      <div className="max-w-md text-center space-y-4">
-        <CheckCircle2 className="h-16 w-16 text-green-600 mx-auto" />
-        <h1 className="text-2xl font-bold">Payment processing</h1>
-        <p className="text-muted-foreground">
-          Your payment is being confirmed. Your subscription will be activated shortly.
-          Check your dashboard in a moment.
-        </p>
-        <Button asChild><Link href="/dashboard/rider">Go to dashboard</Link></Button>
-      </div>
-    </div>
+    <Suspense fallback={<div className="min-h-screen flex items-center justify-center text-muted-foreground">Loading…</div>}>
+      <CheckoutCompletePoller />
+    </Suspense>
   );
 }

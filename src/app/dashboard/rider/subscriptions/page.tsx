@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import type { Metadata } from 'next';
 import { requireRole } from '@/lib/session-server';
 import { db } from '@/lib/db';
 import { Card, CardContent } from '@/components/ui/card';
@@ -6,8 +7,11 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { SignOutButton } from '@/components/sign-out-button';
 import { RenewButton } from './renew-button';
+import { formatETB, formatDate } from '@/lib/format';
 
 export const dynamic = 'force-dynamic';
+
+export const metadata: Metadata = { title: 'My Subscriptions · Addis Ride' };
 
 export default async function RiderSubscriptionsPage() {
   const session = await requireRole('rider', 'platform_admin');
@@ -44,7 +48,7 @@ export default async function RiderSubscriptionsPage() {
                     <div>
                       <div className="font-medium text-lg">{s.plan.name}</div>
                       <div className="text-sm text-muted-foreground">
-                        {new Date(s.startDate).toLocaleDateString()} – {new Date(s.endDate).toLocaleDateString()}
+                        {formatDate(s.startDate)} – {formatDate(s.endDate)}
                       </div>
                       <div className="text-sm text-muted-foreground mt-1">
                         Rides: {s.ridesUsed} / {s.plan.ridesIncluded === -1 ? '∞' : s.plan.ridesIncluded}
@@ -58,7 +62,7 @@ export default async function RiderSubscriptionsPage() {
                       {s.payments.map(p => (
                         <div key={p.id} className="text-xs flex justify-between">
                           <span className="font-mono">{p.reference.slice(0, 20)}…</span>
-                          <span>{(p.amountCents / 100).toFixed(2)} ETB · <Badge variant="outline">{p.status}</Badge></span>
+                          <span>{formatETB(p.amountCents)} · <Badge variant="outline">{p.status}</Badge></span>
                         </div>
                       ))}
                     </div>

@@ -1,13 +1,14 @@
 import { View, Text, FlatList, TouchableOpacity, StyleSheet, Alert } from 'react-native';
 import { useState, useEffect } from 'react';
 import { router } from 'expo-router';
-import { api } from '../../src/lib/auth';
 import { api as apiClient } from '../../src/lib/api';
-import { logout } from '../../src/lib/auth';
+import { useAuthStore } from '../../src/lib/auth-store';
+import { colors, spacing, radius, fontSize, fontWeight } from '../../src/lib/theme';
 
 type Trip = { id: string; departureAt: string; window: string; status: string; route: { origin: string; destination: string }; shuttle: { plate: string }; seatsBooked: number };
 
 export default function ContractorDashboard() {
+  const logout = useAuthStore(s => s.logout);
   const [trips, setTrips] = useState<Trip[]>([]);
   const [assignments, setAssignments] = useState<any[]>([]);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -48,7 +49,7 @@ export default function ContractorDashboard() {
     <View style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.title}>My Trips</Text>
-        <TouchableOpacity onPress={() => { logout(); router.replace('/auth/login'); }}>
+        <TouchableOpacity onPress={async () => { await logout(); router.replace('/auth/login'); }}>
           <Text style={styles.logout}>Sign Out</Text>
         </TouchableOpacity>
       </View>
@@ -86,16 +87,19 @@ export default function ContractorDashboard() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f5f5f5' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 16 },
-  title: { fontSize: 20, fontWeight: 'bold' },
-  logout: { color: '#dc2626', fontSize: 14 },
-  section: { fontSize: 14, color: '#666', paddingHorizontal: 16, marginBottom: 8 },
-  card: { backgroundColor: '#fff', marginHorizontal: 16, marginBottom: 8, padding: 16, borderRadius: 8 },
-  route: { fontSize: 16, fontWeight: '600' },
-  sub: { fontSize: 12, color: '#666', marginTop: 4 },
-  btn: { backgroundColor: '#2563eb', borderRadius: 6, padding: 10, marginTop: 8, alignItems: 'center' },
-  btnComplete: { backgroundColor: '#16a34a' },
-  btnText: { color: '#fff', fontSize: 14, fontWeight: '600' },
-  empty: { textAlign: 'center', color: '#999', padding: 32 },
+  container: { flex: 1, backgroundColor: colors.surface },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: spacing.md },
+  title: { fontSize: fontSize.lg, fontWeight: fontWeight.bold },
+  logout: { color: colors.error, fontSize: fontSize.sm },
+  section: { fontSize: fontSize.sm, color: colors.textMuted, paddingHorizontal: spacing.md, marginBottom: spacing.sm },
+  card: { backgroundColor: colors.card, marginHorizontal: spacing.md, marginBottom: spacing.sm, padding: spacing.md, borderRadius: radius.md },
+  route: { fontSize: fontSize.md, fontWeight: fontWeight.semibold },
+  sub: { fontSize: fontSize.xs, color: colors.textMuted, marginTop: spacing.xs },
+  btn: { backgroundColor: colors.primary, borderRadius: 6, padding: 10, marginTop: spacing.sm, alignItems: 'center' },
+  btnComplete: { backgroundColor: colors.success },
+  btnText: { color: colors.white, fontSize: fontSize.sm, fontWeight: fontWeight.semibold },
+  empty: { textAlign: 'center', color: colors.textLight, padding: spacing.xl },
+  errorBox: { backgroundColor: colors.errorBg, marginHorizontal: spacing.md, marginBottom: spacing.sm, padding: spacing.md, borderRadius: radius.md },
+  errorText: { color: colors.errorText, fontSize: fontSize.sm },
+  errorHint: { color: colors.errorText, fontSize: fontSize.xs, marginTop: spacing.xs },
 });

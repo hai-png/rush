@@ -2,14 +2,21 @@ import { View, Text, FlatList, StyleSheet } from 'react-native';
 import { api } from '../../src/lib/api';
 import { useFocusEffect } from '@react-navigation/native';
 import { useCallback, useState } from 'react';
+import { colors, spacing, radius, fontSize, fontWeight } from '../../src/lib/theme';
 
 type Notif = { id: string; title: string; body: string; readAt: string | null; createdAt: string };
 
 export default function NotificationsScreen() {
   const [notifs, setNotifs] = useState<Notif[]>([]);
 
+  // (MOB-05e — active-guard prevents setState after the screen loses focus
+  // while the fetch is still in flight.)
   useFocusEffect(useCallback(() => {
-    api.get<Notif[]>('/notifications').then(d => setNotifs(d || [])).catch(() => {});
+    let active = true;
+    api.get<Notif[]>('/notifications')
+      .then(d => { if (active) setNotifs(d || []); })
+      .catch(() => { if (active) setNotifs([]); });
+    return () => { active = false; };
   }, []));
 
   return (
@@ -32,12 +39,12 @@ export default function NotificationsScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f5f5f5' },
-  title: { fontSize: 20, fontWeight: 'bold', padding: 16 },
-  card: { backgroundColor: '#fff', marginHorizontal: 16, marginBottom: 8, padding: 16, borderRadius: 8 },
-  unread: { borderLeftWidth: 4, borderLeftColor: '#2563eb' },
-  cardTitle: { fontSize: 14, fontWeight: '600' },
-  cardBody: { fontSize: 13, color: '#666', marginTop: 4 },
-  cardTime: { fontSize: 11, color: '#999', marginTop: 4 },
-  empty: { textAlign: 'center', color: '#999', padding: 32 },
+  container: { flex: 1, backgroundColor: colors.surface },
+  title: { fontSize: fontSize.lg, fontWeight: fontWeight.bold, padding: spacing.md },
+  card: { backgroundColor: colors.card, marginHorizontal: spacing.md, marginBottom: spacing.sm, padding: spacing.md, borderRadius: radius.md },
+  unread: { borderLeftWidth: 4, borderLeftColor: colors.primary },
+  cardTitle: { fontSize: fontSize.sm, fontWeight: fontWeight.semibold },
+  cardBody: { fontSize: 13, color: colors.textMuted, marginTop: spacing.xs },
+  cardTime: { fontSize: 11, color: colors.textLight, marginTop: spacing.xs },
+  empty: { textAlign: 'center', color: colors.textLight, padding: spacing.xl },
 });

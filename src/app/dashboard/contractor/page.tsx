@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import type { Metadata } from 'next';
 import { requireRole } from '@/lib/session-server';
 import { db } from '@/lib/db';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
@@ -6,8 +7,11 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { SignOutButton } from '@/components/sign-out-button';
 import { TripActions } from '@/components/trip-actions';
+import { formatDateTime } from '@/lib/format';
 
 export const dynamic = 'force-dynamic';
+
+export const metadata: Metadata = { title: 'Driver Dashboard · Addis Ride' };
 
 export default async function ContractorDashboardPage() {
   const session = await requireRole('contractor', 'platform_admin');
@@ -90,7 +94,7 @@ export default async function ContractorDashboardPage() {
                   <div key={t.id} className="py-2 flex justify-between items-center text-sm">
                     <div>
                       <div className="font-medium">{t.route.origin} → {t.route.destination}</div>
-                      <div className="text-xs text-muted-foreground">{t.shuttle.plate} · {new Date(t.departureAt).toLocaleString()}</div>
+                      <div className="text-xs text-muted-foreground">{t.shuttle.plate} · {formatDateTime(t.departureAt)}</div>
                     </div>
                     <div className="flex gap-2">
                       <Badge variant="outline">{t.seatsBooked}/{t.shuttle.capacity}</Badge>

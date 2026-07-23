@@ -158,6 +158,9 @@ export async function POST_board({ session, params, ipAddress, userAgent }: any)
     throw new ForbiddenError('Not your trip');
   }
 
+  // BIZ-067 (#16): capture `before` snapshot for the audit log.
+  const before = { ...trip };
+
   // wrap in a transaction; use CAS on trip.status to prevent concurrent boards.
   await db.$transaction(async (tx) => {
     const tripCas = await tx.trip.updateMany({
@@ -191,6 +194,8 @@ export async function POST_board({ session, params, ipAddress, userAgent }: any)
     action: 'trip.boarded',
     entityType: 'trip',
     entityId: trip.id,
+    before,
+    after: { status: 'in_transit' },
     ipAddress, userAgent,
   });
   return { data: { id: trip.id, status: 'in_transit' } };
@@ -214,6 +219,9 @@ export async function POST_complete({ session, params, ipAddress, userAgent }: a
   if (boardedCount === 0) {
     throw new BadRequestError('Cannot complete a trip with no boarded rides. Cancel the trip instead.');
   }
+
+  // BIZ-067 (#16): capture `before` snapshot.
+  const before = { ...trip };
 
   await db.$transaction(async (tx) => {
     const tripCas = await tx.trip.updateMany({
@@ -243,6 +251,8 @@ export async function POST_complete({ session, params, ipAddress, userAgent }: a
     action: 'trip.completed',
     entityType: 'trip',
     entityId: trip.id,
+    before,
+    after: { status: 'completed' },
     ipAddress, userAgent,
   });
   // Recompute the contractor's rating after trip completion.
@@ -275,6 +285,9 @@ export async function POST_trip_cancel({ session, params, body, ipAddress, userA
   const reason = (body?.reason && typeof body.reason === 'string' && body.reason.length <= 500)
     ? body.reason
     : 'Trip cancelled';
+
+  // BIZ-067 (#16): capture `before` snapshot.
+  const before = { ...trip };
 
   // Cascade-cancel every booked ride, restore seats, restore subscription credits.
   const affected = await db.$transaction(async (tx) => {
@@ -330,6 +343,7 @@ export async function POST_trip_cancel({ session, params, body, ipAddress, userA
     action: 'trip.cancelled',
     entityType: 'trip',
     entityId: trip.id,
+    before,
     after: { reason, affectedRides: affected.length },
     ipAddress, userAgent,
   });
@@ -553,20 +567,34 @@ export async function POST_shuttle_position({ session, body }: any) {
   if (session.role !== 'contractor' && session.role !== 'platform_admin') {
     throw new ForbiddenError('Contractor only');
   }
-  // verify the contractor owns at least one active shuttle.
-  // SCHED-04: key positions by shuttleId (not userId) — a contractor with
+  // BIZ-056 (#15): key positions by shuttleId (not userId) — a contractor with
   // multiple shuttles would otherwise overwrite the position of one shuttle
   // when posting from another. The position belongs to the SHUTTLE, not the
   // driver (a relief driver using the same shuttle should update the same
   // position entry).
+  //
+  // Contractors may supply an explicit `shuttleId` in the body; we verify
+  // ownership before accepting it. If omitted, we fall back to the first
+  // active shuttle the contractor owns (the historical behavior, kept for
+  // backward compatibility with existing mobile clients).
   let shuttleId: string | null = null;
   if (session.role === 'contractor') {
-    const owns = await db.shuttle.findFirst({
-      where: { contractorId: session.id, isActive: true },
-      select: { id: true },
-    });
-    if (!owns) throw new ForbiddenError('You have no active shuttle');
-    shuttleId = owns.id;
+    if (body.shuttleId) {
+      const owns = await db.shuttle.findFirst({
+        where: { id: body.shuttleId, contractorId: session.id },
+        select: { id: true, isActive: true },
+      });
+      if (!owns) throw new ForbiddenError('You do not own this shuttle');
+      if (!owns.isActive) throw new BadRequestError('This shuttle is not active');
+      shuttleId = owns.id;
+    } else {
+      const owns = await db.shuttle.findFirst({
+        where: { contractorId: session.id, isActive: true },
+        select: { id: true },
+      });
+      if (!owns) throw new ForbiddenError('You have no active shuttle');
+      shuttleId = owns.id;
+    }
   } else {
     // platform_admin — require an explicit shuttleId in the body so the
     // position is associated with the correct shuttle.
@@ -594,17 +622,65 @@ export async function POST_shuttle_position({ session, body }: any) {
 }
 
 export async function GET_shuttle_positions({ session, query }: any) {
+  // BIZ-053 (#13): role-scoped filtering. Previously returned the entire
+  // positions Map to any authenticated caller, leaking every shuttle's
+  // live location to any rider. Now:
+  //   - rider: only positions for the trip their active subscription is on
+  //   - contractor: only their own shuttles' positions
+  //   - platform_admin: all positions
+  let allowedShuttleIds: Set<string> | null = null;
+  if (session?.role === 'rider') {
+    // Find the rider's active subscription, then the trip(s) it's on (booked
+    // rides only — completed/cancelled rides don't need live positions).
+    const rides = await db.ride.findMany({
+      where: {
+        userId: session.id,
+        status: 'booked',
+        trip: { status: { in: ['scheduled', 'in_transit'] } },
+      },
+      select: { trip: { select: { shuttleId: true } } },
+    });
+    allowedShuttleIds = new Set(rides.map(r => r.trip?.shuttleId).filter(Boolean) as string[]);
+  } else if (session?.role === 'contractor') {
+    const ownShuttles = await db.shuttle.findMany({
+      where: { contractorId: session.id, isActive: true },
+      select: { id: true },
+    });
+    allowedShuttleIds = new Set(ownShuttles.map(s => s.id));
+  }
+  // platform_admin → allowedShuttleIds stays null (no filter).
+
+  // Optional ?tripId= and ?routeId= filters narrow the result further.
+  let tripShuttleIds: Set<string> | null = null;
+  if (query?.tripId || query?.routeId) {
+    const trips = await db.trip.findMany({
+      where: {
+        ...(query?.tripId ? { id: query.tripId } : {}),
+        ...(query?.routeId ? { routeId: query.routeId } : {}),
+      },
+      select: { id: true, shuttleId: true },
+    });
+    tripShuttleIds = new Set(trips.map(t => t.shuttleId));
+  }
+
+  const filterFn = (shuttleId: string | undefined): boolean => {
+    if (!shuttleId) return false;
+    if (allowedShuttleIds && !allowedShuttleIds.has(shuttleId)) return false;
+    if (tripShuttleIds && !tripShuttleIds.has(shuttleId)) return false;
+    return true;
+  };
+
   // Try Redis first; fall back to in-memory.
   try {
     const { redisGetAllPositions } = await import('@/lib/redis');
     const redisResult = await redisGetAllPositions('pos:*');
     if (redisResult.length > 0 || (await import('@/lib/redis')).isRedisAvailable()) {
-      return { data: redisResult };
+      return { data: redisResult.filter((p: any) => filterFn(p.shuttleId)) };
     }
   } catch { /* fall through to in-memory */ }
   const result: Array<{ lat: number; lng: number; heading: number; speed: number; updatedAt: number }> = [];
   for (const [, pos] of positions) {
-    if (Date.now() - pos.updatedAt < 5 * 60_000) {
+    if (Date.now() - pos.updatedAt < 5 * 60_000 && filterFn((pos as any).shuttleId)) {
       result.push(pos);
     }
   }

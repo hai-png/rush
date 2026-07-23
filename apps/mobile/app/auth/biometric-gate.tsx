@@ -3,6 +3,7 @@ import { useEffect, useState } from 'react';
 import { useAuthStore } from '../../src/lib/auth-store';
 import { router } from 'expo-router';
 import { getBiometricsEnabled, setBiometricsEnabled } from '../../src/lib/settings-store';
+import { colors, spacing, radius, fontSize, fontWeight } from '../../src/lib/theme';
 
 // real biometric gate.
 //
@@ -32,20 +33,24 @@ export default function BiometricGate() {
   const [hasSession, setHasSession] = useState(false);
 
   useEffect(() => {
+    let active = true;
     (async () => {
       const ok = await restore();
+      if (!active) return;
       if (!ok) {
         router.replace('/auth/login');
         return;
       }
       setHasSession(true);
       const biometricsEnabled = await getBiometricsEnabled();
+      if (!active) return;
       if (!biometricsEnabled) {
         router.replace('/rider/dashboard');
         return;
       }
       // Try to prompt for biometric auth.
       const result = await promptBiometric();
+      if (!active) return;
       if (result === 'success') {
         router.replace('/rider/dashboard');
       } else if (result === 'unavailable') {
@@ -61,7 +66,8 @@ export default function BiometricGate() {
         setStatus('failed');
       }
     })();
-  }, []);
+    return () => { active = false; };
+  }, [restore]);
 
   async function promptBiometric(): Promise<'success' | 'failed' | 'unavailable'> {
     try {
@@ -119,11 +125,11 @@ export default function BiometricGate() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#2563eb', padding: 24 },
-  title: { fontSize: 32, fontWeight: 'bold', color: '#fff', marginBottom: 16 },
-  loading: { fontSize: 16, color: '#fff', marginBottom: 16 },
-  btn: { backgroundColor: '#fff', borderRadius: 8, padding: 14, alignItems: 'center', marginTop: 12, minWidth: 200 },
-  btnText: { color: '#2563eb', fontSize: 16, fontWeight: '600' },
-  btnSecondary: { marginTop: 12, padding: 8 },
-  btnSecondaryText: { color: '#fff', fontSize: 14, textDecorationLine: 'underline' },
+  container: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.primary, padding: spacing.lg },
+  title: { fontSize: fontSize.xxl, fontWeight: fontWeight.bold, color: colors.white, marginBottom: spacing.md },
+  loading: { fontSize: fontSize.md, color: colors.white, marginBottom: spacing.md },
+  btn: { backgroundColor: colors.white, borderRadius: radius.md, padding: 14, alignItems: 'center', marginTop: spacing.sm, minWidth: 200 },
+  btnText: { color: colors.primary, fontSize: fontSize.md, fontWeight: fontWeight.semibold },
+  btnSecondary: { marginTop: spacing.sm, padding: spacing.sm },
+  btnSecondaryText: { color: colors.white, fontSize: fontSize.sm, textDecorationLine: 'underline' },
 });

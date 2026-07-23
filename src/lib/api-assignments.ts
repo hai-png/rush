@@ -40,7 +40,8 @@ export async function DELETE_pickup({ session, params, ipAddress, userAgent }: a
   if (session.role !== 'platform_admin') throw new ForbiddenError('Admin only');
   await db.pickupLocation.update({ where: { id: params.id }, data: { isActive: false } });
   await audit({ actorId: session.id, action: 'pickup.deleted', entityType: 'pickup_location', entityId: params.id, ipAddress, userAgent });
-  return { data: { id: params.id, isActive: false } };
+  // INC-02 (#21): DELETE returns 204 with no body.
+  return { status: 204 };
 }
 
 export async function GET_assignments({ session }: any) {
@@ -162,7 +163,24 @@ export async function POST_assignment({ session, body, ipAddress, userAgent }: a
 }
 
 export async function generateTripsFromAssignment(assignment: any): Promise<number> {
-  const pattern = JSON.parse(assignment.schedulePattern);
+  // DB-025 (#25): validate the schedulePattern JSON before using it. The
+  // schema matches what POST_assignment accepts, but the row may have been
+  // written by an older code path or hand-edited. An invalid pattern logs a
+  // warning and returns 0 — the caller (POST_assignment / scheduler) treats
+  // a 0-return as "no trips generated", which is safe.
+  const SchedulePattern = z.object({
+    days: z.array(z.string()),
+    windows: z.array(z.string()),
+    morningTime: z.string().optional(),
+    eveningTime: z.string().optional(),
+  });
+  let pattern: z.infer<typeof SchedulePattern>;
+  try {
+    pattern = SchedulePattern.parse(JSON.parse(assignment.schedulePattern));
+  } catch (err) {
+    logger.error({ err: (err as Error).message, assignmentId: assignment.id }, '[assignment] invalid schedulePattern — skipping trip generation');
+    return 0;
+  }
   const { days, windows, morningTime, eveningTime } = pattern;
   if (!days || !windows || days.length === 0 || windows.length === 0) return 0;
 
@@ -196,9 +214,17 @@ export async function generateTripsFromAssignment(assignment: any): Promise<numb
     if (targetDays.has(cursor.getDay()) && !holidayDates.has(cursor.toDateString())) {
       for (const window of windows) {
         const departureAt = new Date(cursor);
-        // BIZ-13: use configurable times per window when provided.
+        // BIZ-13 (#20): pin departure to Africa/Addis_Ababa local time
+        // (UTC+3, no DST). setHours(h, m, 0, 0) uses the server's local TZ
+        // — when the server's TZ matches the Dockerfile's pinned
+        // TZ=Africa/Addis_Ababa this is correct, but a misconfigured
+        // deployment would silently shift every trip by the offset. We use
+        // setUTCHours(h + 3, m, 0, 0) so the trip's wall-clock time in
+        // Addis is always 07:30 / 17:30 regardless of the server's TZ.
+        // (The +3 offset is Africa/Addis_Ababa's fixed UTC offset — Addis
+        // does not observe DST.)
         const [h, m] = window === 'morning' ? morningHM : eveningHM;
-        departureAt.setHours(h, m, 0, 0);
+        departureAt.setUTCHours(h + 3, m, 0, 0);
         trips.push({
           routeId: assignment.routeId,
           shuttleId: assignment.shuttleId,
@@ -325,6 +351,19 @@ export async function POST_reject_assignment({ session, params, body, ipAddress,
           refundedRides++;
         } catch (err) {
           logger.error({ err: (err as Error).message, paymentId: p.id }, '[assignment.reject] scheduleRefund failed');
+        }
+      }
+    }
+
+    // BIZ-04 (#12): restore subscription credits for cancelled
+    // subscription-booked rides. The previous comment claimed this was done
+    // but the loop was missing. Mirrors the pattern in
+    // api-operations.ts:POST_trip_cancel.
+    const { releaseRide } = await import('@/lib/subscription');
+    for (const r of ridesToCancel) {
+      if (r.subscriptionId) {
+        try { await releaseRide(r.subscriptionId); } catch (err) {
+          logger.error({ err: (err as Error).message, subscriptionId: r.subscriptionId }, '[assignment.reject] releaseRide failed');
         }
       }
     }

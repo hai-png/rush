@@ -310,7 +310,11 @@ fi
 # Operations: shuttle positions
 POS=$(curl -s -b $CONTRACTOR -X POST $BASE/api/v1/shuttle-positions -H 'content-type: application/json' -H "x-csrf-token: $CCSRF" -d '{"lat":9.03,"lng":38.74,"heading":180,"speed":45}')
 echo "$POS" | python3 -c 'import sys,json;d=json.load(sys.stdin);exit(0 if d["data"]["ok"] else 1)' && ok "POST /shuttle-positions" || bad "post position"
-curl -s -b $RIDER $BASE/api/v1/shuttle-positions | python3 -c 'import sys,json;d=json.load(sys.stdin);exit(0 if isinstance(d["data"],list) and len(d["data"])>=1 else 1)' && ok "GET /shuttle-positions" || bad "get positions"
+# BIZ-053: contractor sees their own shuttle's position
+curl -s -b $CONTRACTOR $BASE/api/v1/shuttle-positions | python3 -c 'import sys,json;d=json.load(sys.stdin);exit(0 if isinstance(d["data"],list) and len(d["data"])>=1 else 1)' && ok "GET /shuttle-positions (contractor sees own)" || bad "get positions"
+# BIZ-053: rider without a booked ride on this shuttle sees nothing (security)
+RIDER_POS=$(curl -s -b $RIDER $BASE/api/v1/shuttle-positions)
+echo "$RIDER_POS" | python3 -c 'import sys,json;d=json.load(sys.stdin);exit(0 if isinstance(d["data"],list) and len(d["data"])==0 else 1)' && ok "GET /shuttle-positions (rider filtered out — BIZ-053)" || bad "rider position leak"
 
 # Dashboard active-trip
 curl -s -b $RIDER $BASE/api/v1/dashboard/rider/active-trip | python3 -c 'import sys,json;d=json.load(sys.stdin);exit(0 if "data" in d else 1)' && ok "GET /dashboard/rider/active-trip" || bad "active-trip"

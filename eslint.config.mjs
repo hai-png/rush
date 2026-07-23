@@ -9,15 +9,17 @@ const __dirname = dirname(__filename);
 // P1 / OPS: previously this config disabled every meaningful rule, making
 // `bunx eslint .` a no-op. We now enable a sensible subset of rules that
 // catch real bugs without producing massive noise on the existing codebase.
-// Rules that would produce thousands of warnings on legacy code remain off
-// (no-explicit-any, no-unused-vars) — to be turned on incrementally.
+// ARCH-05a (#29): the three TypeScript rules below are set to "warn" rather
+// than "error" so CI doesn't fail on the legacy codebase. New code should
+// aim to not introduce new `any` / unused vars / `@ts-*` suppressions; the
+// warnings make such additions visible in PR review without blocking merge.
 const eslintConfig = [...nextCoreWebVitals, ...nextTypescript, {
   rules: {
-    // TypeScript rules — keep off for now (codebase uses `any` pervasively).
-    "@typescript-eslint/no-explicit-any": "off",
-    "@typescript-eslint/no-unused-vars": "off",
+    // TypeScript rules — warn (not error) so CI doesn't break on legacy code.
+    "@typescript-eslint/no-explicit-any": "warn",
+    "@typescript-eslint/no-unused-vars": ["warn", { argsIgnorePattern: "^_" }],
     "@typescript-eslint/no-non-null-assertion": "off",
-    "@typescript-eslint/ban-ts-comment": "off",
+    "@typescript-eslint/ban-ts-comment": "warn",
     "@typescript-eslint/prefer-as-const": "off",
     "@typescript-eslint/no-unused-disable-directive": "off",
 

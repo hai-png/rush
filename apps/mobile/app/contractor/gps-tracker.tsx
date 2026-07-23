@@ -1,6 +1,7 @@
 import { View, Text, TouchableOpacity, StyleSheet, Alert } from 'react-native';
 import { useState, useEffect, useRef } from 'react';
 import { api } from '../../src/lib/api';
+import { colors, spacing, radius, fontSize, fontWeight } from '../../src/lib/theme';
 
 // real GPS tracking using expo-location.
 // — riders tracking their shuttle saw nonsense. Now uses actual device GPS.
@@ -96,12 +97,12 @@ export default function GpsTrackerScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f5f5f5', padding: 16 },
-  title: { fontSize: 24, fontWeight: 'bold', marginBottom: 16 },
-  card: { backgroundColor: '#fff', borderRadius: 8, padding: 16 },
-  label: { fontSize: 16, marginBottom: 4 },
-  error: { color: '#dc2626', fontSize: 14, marginTop: 4 },
-  hint: { fontSize: 12, color: '#999', marginTop: 8 },
-  button: { backgroundColor: '#2563eb', borderRadius: 8, padding: 14, alignItems: 'center', marginTop: 12 },
-  buttonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
+  container: { flex: 1, backgroundColor: colors.surface, padding: spacing.md },
+  title: { fontSize: fontSize.xl, fontWeight: fontWeight.bold, marginBottom: spacing.md, color: colors.text },
+  card: { backgroundColor: colors.card, borderRadius: radius.md, padding: spacing.md },
+  label: { fontSize: fontSize.md, marginBottom: spacing.xs, color: colors.text },
+  error: { color: colors.error, fontSize: fontSize.sm, marginTop: spacing.xs },
+  hint: { fontSize: fontSize.xs, color: colors.textLight, marginTop: spacing.sm },
+  button: { backgroundColor: colors.primary, borderRadius: radius.md, padding: 14, alignItems: 'center', marginTop: 12 },
+  buttonText: { color: colors.white, fontSize: fontSize.md, fontWeight: fontWeight.semibold },
 });

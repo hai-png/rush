@@ -1,14 +1,17 @@
 import Link from 'next/link';
+import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { requireRole } from '@/lib/session-server';
 import { db } from '@/lib/db';
 import { Card, CardContent } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { SignOutButton } from '@/components/sign-out-button';
+import { DashboardHeader } from '@/components/dashboard-header';
 import { RefundButton } from './refund-button';
+import { formatETB, formatDateTime } from '@/lib/format';
 
 export const dynamic = 'force-dynamic';
+
+export const metadata: Metadata = { title: 'Payment · Admin' };
 
 export default async function AdminPaymentDetailPage({ params }: { params: Promise<{ id: string }> }) {
   await requireRole('platform_admin');
@@ -30,15 +33,7 @@ export default async function AdminPaymentDetailPage({ params }: { params: Promi
 
   return (
     <div className="min-h-screen flex flex-col">
-      <header className="border-b">
-        <div className="container mx-auto px-4 py-4 flex items-center justify-between">
-          <Link href="/dashboard/admin" className="text-xl font-bold">Admin · Payment</Link>
-          <div className="flex gap-2 items-center">
-            <Button asChild variant="ghost"><Link href="/admin/payments">All payments</Link></Button>
-            <SignOutButton />
-          </div>
-        </div>
-      </header>
+      <DashboardHeader title="Admin · Payment" backHref="/admin/payments" backLabel="All payments" />
       <main className="flex-1 container mx-auto px-4 py-8 max-w-3xl">
         <h1 className="text-2xl font-bold mb-2 font-mono">{payment.reference}</h1>
         <div className="text-sm text-muted-foreground mb-6">Payment ID: {payment.id}</div>
@@ -47,9 +42,9 @@ export default async function AdminPaymentDetailPage({ params }: { params: Promi
           <Card>
             <CardContent className="py-4 text-sm space-y-1">
               <div className="text-xs text-muted-foreground uppercase">Amount</div>
-              <div className="text-2xl font-bold">{(payment.amountCents / 100).toFixed(2)} ETB</div>
+              <div className="text-2xl font-bold">{formatETB(payment.amountCents)}</div>
               {payment.refundAmountCents > 0 && (
-                <div className="text-xs text-muted-foreground">Refunded: {(payment.refundAmountCents / 100).toFixed(2)} ETB</div>
+                <div className="text-xs text-muted-foreground">Refunded: {formatETB(payment.refundAmountCents)}</div>
               )}
               <div className="pt-2"><Badge variant="outline">{payment.status}</Badge> <Badge>{payment.method}</Badge></div>
             </CardContent>
@@ -78,9 +73,9 @@ export default async function AdminPaymentDetailPage({ params }: { params: Promi
                 Seat claim for: {payment.seatClaim.seatRelease.trip.route.origin} → {payment.seatClaim.seatRelease.trip.route.destination}
               </div>
             ) : null}
-            <div>Created: {new Date(payment.createdAt).toLocaleString()}</div>
-            <div>Updated: {new Date(payment.updatedAt).toLocaleString()}</div>
-            {payment.refundedAt && <div>Refunded at: {new Date(payment.refundedAt).toLocaleString()}</div>}
+            <div>Created: {formatDateTime(payment.createdAt)}</div>
+            <div>Updated: {formatDateTime(payment.updatedAt)}</div>
+            {payment.refundedAt && <div>Refunded at: {formatDateTime(payment.refundedAt)}</div>}
           </CardContent>
         </Card>
 
@@ -89,8 +84,8 @@ export default async function AdminPaymentDetailPage({ params }: { params: Promi
             <CardContent className="py-4">
               <div className="text-sm font-semibold mb-2">Issue refund</div>
               <p className="text-xs text-muted-foreground mb-3">
-                Max refundable: <strong>{(maxRefund / 100).toFixed(2)} ETB</strong>
-                {alreadyRefunded > 0 && ` (already refunded ${(alreadyRefunded / 100).toFixed(2)} ETB)`}
+                Max refundable: <strong>{formatETB(maxRefund)}</strong>
+                {alreadyRefunded > 0 && ` (already refunded ${formatETB(alreadyRefunded)})`}
               </p>
               <RefundButton paymentId={payment.id} maxAmount={maxRefund / 100} />
             </CardContent>
@@ -109,7 +104,7 @@ export default async function AdminPaymentDetailPage({ params }: { params: Promi
                       <Badge variant="outline">{r.status}</Badge>
                     </div>
                     <div className="text-muted-foreground">
-                      Amount: {(r.amountCents / 100).toFixed(2)} ETB · attempts: {r.attempts}/{r.maxAttempts}
+                      Amount: {formatETB(r.amountCents)} · attempts: {r.attempts}/{r.maxAttempts}
                     </div>
                     <div className="text-muted-foreground">Reason: {r.reason}</div>
                     {r.lastError && <div className="text-red-600">Error: {r.lastError}</div>}

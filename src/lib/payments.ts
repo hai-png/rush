@@ -626,11 +626,44 @@ class CbeProvider implements PaymentProvider {
     return { status: 'manual', instructions };
   }
 
+  // HALF-04 (#23): CBE has no realtime payment-status API — admins reconcile
+  // manually against bank statements. We can still answer status queries by
+  // looking up the Payment row by reference. A row marked 'completed' means
+  // an admin has already confirmed the bank transfer.
+  async verifyPayment(reference: string): Promise<PaymentStatusResult> {
+    const { db } = await import('@/lib/db');
+    const row = await db.payment.findFirst({ where: { reference, method: 'cbe' } });
+    if (!row) return { status: 'pending' };
+    // Map internal statuses to provider-level statuses. 'completed' on our
+    // side = the bank transfer was confirmed; everything else is treated as
+    // pending until manual reconciliation flips it.
+    return { status: row.status === 'completed' ? 'completed' : 'pending' };
+  }
+
+  // CBE has no webhook — admins reconcile against bank statements. parseWebhook
+  // returns a 'manual' marker so payment-service can route these to the manual
+  // reconciliation queue without crashing if a stray POST hits the webhook URL.
+  async parseWebhook(_req: Request): Promise<WebhookEvent> {
+    return {
+      type: 'payment.settled',
+      merchOrderId: '',
+      amount: undefined,
+      raw: { source: 'cbe-manual' },
+      signatureValid: false,
+      timestampMs: Date.now(),
+      outRequestNo: 'cbe-manual',
+    } as WebhookEvent;
+  }
+
   // CBE has no API for refunds — the admin must manually
   // transfer back via bank. This method marks the refund as "processing"
   // so the admin knows to do the manual transfer. The payment status is
   // then manually updated to 'refunded' after the admin confirms the transfer.
   async refund(req: RefundRequest): Promise<RefundResult> {
+    logger.warn(
+      { refundRequestNo: req.refundRequestNo, merchOrderId: req.merchOrderId, amount: req.amount.toString() },
+      '[CbeProvider] refund requires manual bank transfer — admin must complete the transfer and mark the payment refunded',
+    );
     return { status: 'processing', retryAfterMs: 86_400_000 }; // 24h — admin checks back next day
   }
 }

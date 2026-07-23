@@ -1,3 +1,14 @@
+// api-admin-advanced.ts — admin actions that require side-effect orchestration
+// (impersonation, settings, corporate admin actions, CSV export, metrics,
+// bulk expire/suspend/refund, route price updates, refund cancellation,
+// corporate invoice payment confirmation). Handlers may trigger outbox
+// events, audit chains, or external API calls.
+//
+// ARCH-02 (#28): the split from api-admin.ts is intentional — CRUD + list
+// endpoints stay simple and predictable in api-admin.ts; anything that fans
+// out side effects lives here so reviewers can focus on the audit trail +
+// notification surface area in one place.
+
 import { db } from '@/lib/db';
 import { z } from 'zod';
 import { NotFoundError, BadRequestError, ForbiddenError, ConflictError, UnauthorizedError } from '@/lib/errors';
@@ -161,7 +172,8 @@ export async function DELETE_corporate({ session, params, ipAddress, userAgent }
   const before = corp;
   await db.corporate.update({ where: { id: params.id }, data: { isActive: false, deletedAt: new Date() } });
   await audit({ actorId: session.id, action: 'corporate.deactivated', entityType: 'corporate', entityId: params.id, before, after: { isActive: false }, ipAddress, userAgent });
-  return { data: { id: params.id, isActive: false } };
+  // INC-02 (#21): DELETE returns 204 with no body.
+  return { status: 204 };
 }
 
 // list ALL corporates (the existing GET /admin/corporates/pending
@@ -287,9 +299,11 @@ export async function DELETE_route({ session, params, ipAddress, userAgent }: an
   if (upcomingTrips > 0) {
     throw new BadRequestError(`Cannot deactivate route with ${upcomingTrips} upcoming scheduled trip(s). Cancel or complete them first.`);
   }
+  const before = route;
   await db.route.update({ where: { id: params.id }, data: { isActive: false } });
-  await audit({ actorId: session.id, action: 'route.deleted', entityType: 'route', entityId: params.id, ipAddress, userAgent });
-  return { data: { id: params.id, isActive: false } };
+  await audit({ actorId: session.id, action: 'route.deleted', entityType: 'route', entityId: params.id, before, after: { isActive: false }, ipAddress, userAgent });
+  // INC-02 (#21): DELETE returns 204 with no body.
+  return { status: 204 };
 }
 
 export async function DELETE_shuttle({ session, params, ipAddress, userAgent }: any) {
@@ -302,9 +316,11 @@ export async function DELETE_shuttle({ session, params, ipAddress, userAgent }: 
   if (upcomingTrips > 0) {
     throw new BadRequestError(`Cannot deactivate shuttle with ${upcomingTrips} upcoming scheduled trip(s). Cancel or complete them first.`);
   }
+  const before = shuttle;
   await db.shuttle.update({ where: { id: params.id }, data: { isActive: false } });
-  await audit({ actorId: session.id, action: 'shuttle.deleted', entityType: 'shuttle', entityId: params.id, ipAddress, userAgent });
-  return { data: { id: params.id, isActive: false } };
+  await audit({ actorId: session.id, action: 'shuttle.deleted', entityType: 'shuttle', entityId: params.id, before, after: { isActive: false }, ipAddress, userAgent });
+  // INC-02 (#21): DELETE returns 204 with no body.
+  return { status: 204 };
 }
 
 const SettingsInput = z.object({
@@ -472,4 +488,36 @@ export async function POST_cancel_refund({ session, params, body, ipAddress, use
     ipAddress, userAgent,
   });
   return { data: { id: params.refundId, cancelled: true } };
+}
+
+// #24: POST /admin/corporates/:id/invoices/:invoiceId/mark-paid — mark a
+// corporate invoice as paid. Only platform_admin can confirm payment receipt.
+// Audit captures the before-state so the change is fully traceable.
+export async function POST_mark_invoice_paid({ session, params, ipAddress, userAgent }: any) {
+  const invoice = await db.corporateInvoice.findUnique({
+    where: { id: params.invoiceId },
+    include: { corporate: { select: { id: true, name: true } } },
+  });
+  if (!invoice) throw new NotFoundError('Invoice not found');
+  if (invoice.corporateId !== params.id) {
+    throw new BadRequestError('Invoice does not belong to the specified corporate');
+  }
+  if (invoice.status === 'paid') throw new ConflictError('Invoice is already marked as paid');
+  if (invoice.status === 'void') throw new BadRequestError('Cannot mark a voided invoice as paid');
+
+  const before = { ...invoice };
+  const updated = await db.corporateInvoice.update({
+    where: { id: params.invoiceId },
+    data: { status: 'paid', paidAt: new Date() },
+  });
+  await audit({
+    actorId: session.id,
+    action: 'corporate.invoice_paid',
+    entityType: 'corporate_invoice',
+    entityId: params.invoiceId,
+    before: { status: before.status, totalCents: before.totalCents },
+    after: { status: 'paid', corporateId: invoice.corporateId, corporateName: invoice.corporate.name },
+    ipAddress, userAgent,
+  });
+  return { data: updated };
 }

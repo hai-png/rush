@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import type { Metadata } from 'next';
 import { requireSession } from '@/lib/session-server';
 import { db } from '@/lib/db';
 import { Card, CardContent } from '@/components/ui/card';
@@ -6,8 +7,11 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { SignOutButton } from '@/components/sign-out-button';
 import { BookRideButton } from './book-ride-button';
+import { formatETB, formatDateTime } from '@/lib/format';
 
 export const dynamic = 'force-dynamic';
+
+export const metadata: Metadata = { title: 'Trips · Addis Ride' };
 
 export default async function TripsPage({ searchParams }: { searchParams: Promise<{ assignment?: string }> }) {
   const session = await requireSession();
@@ -63,10 +67,10 @@ export default async function TripsPage({ searchParams }: { searchParams: Promis
                       <div>
                         <div className="font-medium">{t.route.origin} → {t.route.destination}</div>
                         <div className="text-xs text-muted-foreground">
-                          {new Date(t.departureAt).toLocaleString()} · {t.window} · {t.shuttle.plate} ({t.shuttle.vehicleType})
+                          {formatDateTime(t.departureAt)} · {t.window} · {t.shuttle.plate} ({t.shuttle.vehicleType})
                         </div>
                         <div className="text-xs text-muted-foreground">
-                          Driver: {t.shuttle.contractor.name} · fare {(t.route.fareCents / 100).toFixed(2)} ETB
+                          Driver: {t.shuttle.contractor.name} · fare {formatETB(t.route.fareCents)}
                         </div>
                       </div>
                       <div className="flex flex-col items-end gap-1">

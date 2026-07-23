@@ -1,7 +1,8 @@
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, Alert } from 'react-native';
-import { useState, useEffect } from 'react';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator } from 'react-native';
+import { useState } from 'react';
 import { router } from 'expo-router';
-import { login } from '../../src/lib/auth';
+import { useAuthStore } from '../../src/lib/auth-store';
+import { colors, spacing, radius, fontSize, fontWeight } from '../../src/lib/theme';
 
 // mobile login now supports 2FA.
 //
@@ -12,7 +13,11 @@ import { login } from '../../src/lib/auth';
 // New: after the first login attempt fails with TWO_FACTOR_REQUIRED, show
 // a 2FA code input. The user enters the 6-digit code and submits again —
 // login() then sends phone + password + code together.
+//
+// (INC-06 — migrated from auth.ts plain `login()` to the Zustand store so
+// there is one source of truth for auth state.)
 export default function LoginScreen() {
+  const login = useAuthStore(s => s.login);
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
   const [code, setCode] = useState('');
@@ -25,11 +30,11 @@ export default function LoginScreen() {
     setError('');
     try {
       // Pass code only if the 2FA input is shown.
-      const result = await login(phone, password, needs2FA ? code : undefined);
-      if (result.user.role === 'rider') router.replace('/rider/dashboard');
-      else if (result.user.role === 'contractor') router.replace('/contractor/dashboard');
-      else if (result.user.role === 'corporate_admin') router.replace('/rider/dashboard');
-      else if (result.user.role === 'platform_admin') router.replace('/rider/dashboard');
+      const user = await login(phone, password, needs2FA ? code : undefined);
+      if (user.role === 'rider') router.replace('/rider/dashboard');
+      else if (user.role === 'contractor') router.replace('/contractor/dashboard');
+      else if (user.role === 'corporate_admin') router.replace('/rider/dashboard');
+      else if (user.role === 'platform_admin') router.replace('/rider/dashboard');
       else router.replace('/rider/dashboard');
     } catch (e: any) {
       const msg = e instanceof Error ? e.message : 'Login failed';
@@ -79,7 +84,7 @@ export default function LoginScreen() {
       )}
       {error ? <Text style={styles.error}>{error}</Text> : null}
       <TouchableOpacity style={styles.button} onPress={submit} disabled={loading || !phone || !password}>
-        {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Sign In</Text>}
+        {loading ? <ActivityIndicator color={colors.white} /> : <Text style={styles.buttonText}>Sign In</Text>}
       </TouchableOpacity>
       <TouchableOpacity onPress={() => router.push('/forgot-password')} style={styles.forgotLink}>
         <Text style={styles.forgotText}>Forgot password?</Text>
@@ -89,12 +94,12 @@ export default function LoginScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, justifyContent: 'center', padding: 24, backgroundColor: '#f5f5f5' },
-  title: { fontSize: 32, fontWeight: 'bold', textAlign: 'center', marginBottom: 32, color: '#1a1a1a' },
-  input: { backgroundColor: '#fff', borderRadius: 8, padding: 16, marginBottom: 12, fontSize: 16, borderWidth: 1, borderColor: '#e0e0e0' },
-  button: { backgroundColor: '#2563eb', borderRadius: 8, padding: 16, alignItems: 'center' },
-  buttonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
-  error: { color: '#dc2626', textAlign: 'center', marginBottom: 12, fontSize: 14 },
-  forgotLink: { alignItems: 'center', marginTop: 16 },
-  forgotText: { color: '#2563eb', fontSize: 14 },
+  container: { flex: 1, justifyContent: 'center', padding: spacing.lg, backgroundColor: colors.surface },
+  title: { fontSize: fontSize.xxl, fontWeight: fontWeight.bold, textAlign: 'center', marginBottom: spacing.xl, color: colors.text },
+  input: { backgroundColor: colors.white, borderRadius: radius.md, padding: spacing.md, marginBottom: spacing.sm, fontSize: fontSize.md, borderWidth: 1, borderColor: colors.borderSubtle },
+  button: { backgroundColor: colors.primary, borderRadius: radius.md, padding: spacing.md, alignItems: 'center' },
+  buttonText: { color: colors.white, fontSize: fontSize.md, fontWeight: fontWeight.semibold },
+  error: { color: colors.error, textAlign: 'center', marginBottom: spacing.sm, fontSize: fontSize.sm },
+  forgotLink: { alignItems: 'center', marginTop: spacing.md },
+  forgotText: { color: colors.primary, fontSize: fontSize.sm },
 });

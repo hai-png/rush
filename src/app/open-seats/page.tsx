@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import type { Metadata } from 'next';
 import { requireSession } from '@/lib/session-server';
 import { db } from '@/lib/db';
 import { Card, CardContent } from '@/components/ui/card';
@@ -7,8 +8,11 @@ import { Badge } from '@/components/ui/badge';
 import { SignOutButton } from '@/components/sign-out-button';
 import { Plus } from 'lucide-react';
 import { ClaimButton } from './claim-button';
+import { formatETB, formatDateTime } from '@/lib/format';
 
 export const dynamic = 'force-dynamic';
+
+export const metadata: Metadata = { title: 'Open Seats · Addis Ride' };
 
 export default async function OpenSeatsPage() {
   const session = await requireSession();
@@ -52,7 +56,7 @@ export default async function OpenSeatsPage() {
                     <div>
                       <div className="font-semibold">{r.trip.route.origin} → {r.trip.route.destination}</div>
                       <div className="text-xs text-muted-foreground">
-                        {new Date(r.trip.departureAt).toLocaleString()} · {r.trip.shuttle.plate}
+                        {formatDateTime(r.trip.departureAt)} · {r.trip.shuttle.plate}
                       </div>
                     </div>
                     <Badge variant="outline">{r.window}</Badge>
@@ -60,7 +64,7 @@ export default async function OpenSeatsPage() {
                   <div className="flex items-center justify-between text-sm">
                     <div>
                       <div className="text-xs text-muted-foreground">Fare</div>
-                      <div className="font-semibold">{(r.trip.route.fareCents / 100).toFixed(2)} ETB</div>
+                      <div className="font-semibold">{formatETB(r.trip.route.fareCents)}</div>
                     </div>
                     <div className="text-xs text-muted-foreground">Expires {new Date(r.expiresAt).toLocaleTimeString()}</div>
                   </div>

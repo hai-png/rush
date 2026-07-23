@@ -2,6 +2,7 @@ import { View, Text, FlatList, TouchableOpacity, StyleSheet, ActivityIndicator }
 import { useState, useEffect } from 'react';
 import { router, useLocalSearchParams } from 'expo-router';
 import { api } from '../../src/lib/api';
+import { colors, spacing, radius, fontSize, fontWeight } from '../../src/lib/theme';
 
 type Trip = { id: string; departureAt: string; window: string; seatsBooked: number; shuttle: { capacity: number; plate: string }; route: { origin: string; destination: string; fareCents: number } };
 
@@ -11,12 +12,19 @@ export default function TripsScreen() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    api.get<Trip[]>('/trips').then(data => {
-      setTrips((data || []).filter((t: any) => !assignment || t.assignmentId === assignment));
-    }).finally(() => setLoading(false));
+    let active = true;
+    setLoading(true);
+    api.get<Trip[]>('/trips')
+      .then(data => {
+        if (!active) return;
+        setTrips((data || []).filter((t: any) => !assignment || t.assignmentId === assignment));
+      })
+      .catch(() => { if (active) setTrips([]); })
+      .finally(() => { if (active) setLoading(false); });
+    return () => { active = false; };
   }, [assignment]);
 
-  if (loading) return <View style={styles.center}><ActivityIndicator size="large" /></View>;
+  if (loading) return <View style={styles.center}><ActivityIndicator size="large" color={colors.primary} /></View>;
 
   return (
     <View style={styles.container}>
@@ -42,12 +50,12 @@ export default function TripsScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f5f5f5' },
-  title: { fontSize: 20, fontWeight: 'bold', padding: 16 },
-  center: { flex: 1, justifyContent: 'center', alignItems: 'center' },
-  card: { backgroundColor: '#fff', marginHorizontal: 16, marginBottom: 8, padding: 16, borderRadius: 8 },
-  routeTitle: { fontSize: 16, fontWeight: '600' },
-  routeSub: { fontSize: 12, color: '#666', marginTop: 4 },
-  fare: { fontSize: 14, fontWeight: '600', color: '#2563eb', marginTop: 4 },
-  empty: { textAlign: 'center', color: '#999', padding: 32 },
+  container: { flex: 1, backgroundColor: colors.surface },
+  title: { fontSize: fontSize.lg, fontWeight: fontWeight.bold, padding: spacing.md },
+  center: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: colors.surface },
+  card: { backgroundColor: colors.card, marginHorizontal: spacing.md, marginBottom: spacing.sm, padding: spacing.md, borderRadius: radius.md },
+  routeTitle: { fontSize: fontSize.md, fontWeight: fontWeight.semibold },
+  routeSub: { fontSize: fontSize.xs, color: colors.textMuted, marginTop: spacing.xs },
+  fare: { fontSize: fontSize.sm, fontWeight: fontWeight.semibold, color: colors.primary, marginTop: spacing.xs },
+  empty: { textAlign: 'center', color: colors.textLight, padding: spacing.xl },
 });

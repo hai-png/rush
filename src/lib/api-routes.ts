@@ -56,6 +56,7 @@ import * as telebirr from '@/lib/api-telebirr';
 import * as health from '@/lib/api-health';
 import * as metrics from '@/lib/api-metrics';
 import * as assignments from '@/lib/api-assignments';
+import * as ratings from '@/lib/api-ratings';
 
 // Note: the catch-all mounts at /api/v1, so paths here are relative to that.
 const ROUTES: RouteEntry[] = [
@@ -109,6 +110,7 @@ const ROUTES: RouteEntry[] = [
   r('POST', '/subscriptions/:id/cancel', { requireAuth: true }, subscriptions.POST_cancel),
   r('DELETE', '/subscriptions/:id', { requireAuth: true }, subscriptions.DELETE_subscription),
   r('POST', '/subscriptions/:id/renew', { requireAuth: true }, subscriptions.POST_renew),
+  r('POST', '/subscriptions/:id/change-payment-method', { requireAuth: true }, subscriptions.POST_change_payment_method),
 
   r('POST', '/payments/checkout', { requireAuth: true }, payments.POST_checkout),
   r('GET', '/payments/:id', { requireAuth: true }, payments.GET_one),
@@ -132,6 +134,7 @@ const ROUTES: RouteEntry[] = [
   r('POST', '/rides', { requireAuth: true }, operations.POST_ride),
   r('PATCH', '/rides/:id', { requireAuth: true }, operations.PATCH_ride),
   r('POST', '/rides/:id/cancel', { requireAuth: true }, operations.POST_ride_cancel),
+  r('POST', '/rides/:id/rating', { requireAuth: true }, ratings.POST_create_rating),
   r('POST', '/rides/:id/no-show', { requireAuth: true, requireRole: ['contractor', 'platform_admin'] }, operations.POST_ride_no_show),
   r('POST', '/trips', { requireAuth: true, requireRole: ['contractor', 'platform_admin'] }, operations.POST_trip),
   r('PATCH', '/trips/:id', { requireAuth: true, requireRole: ['contractor', 'platform_admin'] }, operations.PATCH_trip),
@@ -165,6 +168,8 @@ const ROUTES: RouteEntry[] = [
   r('PATCH', '/account', { requireAuth: true }, account.PATCH_account),
   r('GET', '/account/export', { requireAuth: true }, account.GET_export),
   r('POST', '/account/delete', { requireAuth: true, exemptFromTosGate: true }, account.POST_delete),
+  // #5: contractor self-edits their profile.
+  r('PATCH', '/contractor/profile', { requireAuth: true, requireRole: ['contractor', 'platform_admin'] }, account.PATCH_contractor_profile),
 
   r('GET', '/dashboard/rider', { requireAuth: true, requireRole: ['rider', 'platform_admin'] }, dashboard.GET_rider),
   r('GET', '/dashboard/rider/active-trip', { requireAuth: true, requireRole: ['rider', 'platform_admin'] }, dashboard.GET_rider_active_trip),
@@ -222,6 +227,8 @@ const ROUTES: RouteEntry[] = [
   r('PATCH', '/admin/routes/:id/price', { requireAuth: true, requireRole: ['platform_admin'] }, adminAdvanced.PATCH_route_price),
   r('POST', '/admin/faqs', { requireAuth: true, requireRole: ['platform_admin'] }, admin.POST_faq),
   r('DELETE', '/admin/faqs/:id', { requireAuth: true, requireRole: ['platform_admin'] }, admin.DELETE_faq),
+  // #24: corporate billing — mark a corporate invoice as paid.
+  r('POST', '/admin/corporates/:id/invoices/:invoiceId/mark-paid', { requireAuth: true, requireRole: ['platform_admin'] }, adminAdvanced.POST_mark_invoice_paid),
 
   // holiday management (skip trip generation on holidays).
   r('GET', '/admin/holidays', { requireAuth: true, requireRole: ['platform_admin'] }, admin.GET_holidays),
@@ -269,6 +276,8 @@ const ROUTES: RouteEntry[] = [
   r('POST', '/corporate/members/:id/reject', { requireAuth: true, requireRole: ['corporate_admin', 'platform_admin'] }, corporate.POST_reject),
   r('PATCH', '/corporate/members/:id', { requireAuth: true, requireRole: ['corporate_admin', 'platform_admin'] }, corporate.PATCH_member),
   r('DELETE', '/corporate/members/:id', { requireAuth: true, requireRole: ['corporate_admin', 'platform_admin'] }, corporate.DELETE_member),
+  // #24: corporate billing — list invoices for the caller's corporate.
+  r('GET', '/corporate/invoices', { requireAuth: true, requireRole: ['corporate_admin', 'platform_admin'] }, corporate.GET_invoices),
 
   r('GET',  '/contractor/documents', { requireAuth: true, requireRole: ['contractor', 'platform_admin'] }, documents.GET_documents),
   r('GET',  '/contractor/documents/:contractorId', { requireAuth: true, requireRole: ['platform_admin'] }, documents.GET_documents_for),

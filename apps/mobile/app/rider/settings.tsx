@@ -1,23 +1,27 @@
 import { View, Text, TouchableOpacity, StyleSheet, Switch, Alert } from 'react-native';
 import { useState, useEffect } from 'react';
 import { router } from 'expo-router';
-import { logout } from '../../src/lib/auth';
+import { useAuthStore } from '../../src/lib/auth-store';
 import { getSettings, saveSettings, getBiometricsEnabled, setBiometricsEnabled as persistBiometrics } from '../../src/lib/settings-store';
 import { registerForPushNotifications } from '../../src/lib/push';
 import { api } from '../../src/lib/api';
-import { colors } from '../../src/theme/colors';
+import { colors, spacing, radius, fontSize, fontWeight } from '../../src/lib/theme';
 
 export default function SettingsScreen() {
+  const logout = useAuthStore(s => s.logout);
   const [notifEnabled, setNotifEnabled] = useState(true);
   const [emailEnabled, setEmailEnabled] = useState(true);
   const [biometricsEnabled, setBiometricsEnabledState] = useState(false);
 
   useEffect(() => {
+    let active = true;
     getSettings().then(s => {
+      if (!active) return;
       setNotifEnabled(s.notificationEnabled);
       setEmailEnabled(s.emailEnabled);
       setBiometricsEnabledState(s.biometricsEnabled);
     });
+    return () => { active = false; };
   }, []);
 
   async function toggleBiometrics(value: boolean) {
@@ -107,14 +111,14 @@ export default function SettingsScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: colors.background, padding: 16 },
-  title: { fontSize: 24, fontWeight: 'bold', marginBottom: 16, color: colors.text },
-  section: { backgroundColor: colors.card, borderRadius: 8, padding: 16, marginBottom: 16 },
-  sectionTitle: { fontSize: 14, fontWeight: '600', color: colors.textMuted, marginBottom: 8 },
-  row: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: 8 },
-  label: { fontSize: 16, color: colors.text },
+  container: { flex: 1, backgroundColor: colors.surface, padding: spacing.md },
+  title: { fontSize: fontSize.xl, fontWeight: fontWeight.bold, marginBottom: spacing.md, color: colors.text },
+  section: { backgroundColor: colors.card, borderRadius: radius.md, padding: spacing.md, marginBottom: spacing.md },
+  sectionTitle: { fontSize: fontSize.sm, fontWeight: fontWeight.semibold, color: colors.textMuted, marginBottom: spacing.sm },
+  row: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingVertical: spacing.sm },
+  label: { fontSize: fontSize.md, color: colors.text },
   link: { paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: colors.border },
-  linkText: { fontSize: 16, color: colors.primary },
-  signOut: { backgroundColor: colors.errorBg, borderRadius: 8, padding: 14, alignItems: 'center' },
-  signOutText: { color: colors.error, fontSize: 16, fontWeight: '600' },
+  linkText: { fontSize: fontSize.md, color: colors.primary },
+  signOut: { backgroundColor: colors.errorBg, borderRadius: radius.md, padding: 14, alignItems: 'center' },
+  signOutText: { color: colors.error, fontSize: fontSize.md, fontWeight: fontWeight.semibold },
 });

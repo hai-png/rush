@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import type { Metadata } from 'next';
 import { requireSession } from '@/lib/session-server';
 import { db } from '@/lib/db';
 import { Card, CardContent } from '@/components/ui/card';
@@ -8,6 +9,8 @@ import { SignOutButton } from '@/components/sign-out-button';
 import { Plus } from 'lucide-react';
 
 export const dynamic = 'force-dynamic';
+
+export const metadata: Metadata = { title: 'My Tickets · Addis Ride' };
 
 export default async function TicketsPage() {
   const session = await requireSession();

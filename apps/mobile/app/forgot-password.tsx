@@ -1,7 +1,8 @@
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator, ScrollView } from 'react-native';
 import { useState } from 'react';
 import { router } from 'expo-router';
-import { api } from '../../src/lib/api';
+import { api } from '../src/lib/api';
+import { colors, spacing, radius, fontSize, fontWeight } from '../src/lib/theme';
 
 export default function ForgotPasswordScreen() {
   const [step, setStep] = useState<'send' | 'verify'>('send');
@@ -34,7 +35,7 @@ export default function ForgotPasswordScreen() {
         <>
           <TextInput style={styles.input} placeholder="Phone (+2519XXXXXXXX)" value={phone} onChangeText={setPhone} autoCapitalize="none" />
           <TouchableOpacity style={styles.btn} onPress={send} disabled={loading || !phone}>
-            {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.btnText}>Send Code</Text>}
+            {loading ? <ActivityIndicator color={colors.white} /> : <Text style={styles.btnText}>Send Code</Text>}
           </TouchableOpacity>
         </>
       ) : (
@@ -42,7 +43,7 @@ export default function ForgotPasswordScreen() {
           <TextInput style={styles.input} placeholder="6-digit code" value={code} onChangeText={setCode} maxLength={6} keyboardType="numeric" />
           <TextInput style={styles.input} placeholder="New password (min 10 chars)" value={newPw} onChangeText={setNewPw} secureTextEntry />
           <TouchableOpacity style={styles.btn} onPress={verify} disabled={loading || !code || newPw.length < 10}>
-            {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.btnText}>Reset Password</Text>}
+            {loading ? <ActivityIndicator color={colors.white} /> : <Text style={styles.btnText}>Reset Password</Text>}
           </TouchableOpacity>
         </>
       )}
@@ -51,9 +52,9 @@ export default function ForgotPasswordScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 24, backgroundColor: '#f5f5f5' },
-  title: { fontSize: 24, fontWeight: 'bold', textAlign: 'center', marginBottom: 24 },
-  input: { backgroundColor: '#fff', borderRadius: 8, padding: 14, marginBottom: 10, fontSize: 16, borderWidth: 1, borderColor: '#e0e0e0' },
-  btn: { backgroundColor: '#2563eb', borderRadius: 8, padding: 14, alignItems: 'center' },
-  btnText: { color: '#fff', fontSize: 16, fontWeight: '600' },
+  container: { flex: 1, padding: spacing.lg, backgroundColor: colors.surface },
+  title: { fontSize: fontSize.xl, fontWeight: fontWeight.bold, textAlign: 'center', marginBottom: spacing.lg },
+  input: { backgroundColor: colors.card, borderRadius: radius.md, padding: 14, marginBottom: 10, fontSize: fontSize.md, borderWidth: 1, borderColor: colors.borderSubtle },
+  btn: { backgroundColor: colors.primary, borderRadius: radius.md, padding: 14, alignItems: 'center' },
+  btnText: { color: colors.white, fontSize: fontSize.md, fontWeight: fontWeight.semibold },
 });

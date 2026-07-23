@@ -1,12 +1,16 @@
 import Link from 'next/link';
+import type { Metadata } from 'next';
 import { requireRole } from '@/lib/session-server';
 import { db } from '@/lib/db';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { SignOutButton } from '@/components/sign-out-button';
+import { formatETB } from '@/lib/format';
 
 export const dynamic = 'force-dynamic';
+
+export const metadata: Metadata = { title: 'Admin Dashboard · Addis Ride' };
 
 export default async function AdminDashboardPage() {
   await requireRole('platform_admin');
@@ -57,7 +61,7 @@ export default async function AdminDashboardPage() {
           <Stat label="Subscriptions" value={subs} />
           <Stat label="Open tickets" value={tickets} />
           <Stat label="Audit log rows" value={auditLogs} />
-          <Stat label="Revenue" value={(revenueCents / 100).toFixed(2)} suffix="ETB" />
+          <Stat label="Revenue" value={formatETB(revenueCents)} />
         </div>
         <section>
           <h2 className="text-lg font-semibold mb-3">Recent payments</h2>
@@ -72,7 +76,7 @@ export default async function AdminDashboardPage() {
                     <div className="text-xs text-muted-foreground">{p.user?.name} · {p.user?.phone}</div>
                   </div>
                   <div className="flex items-center gap-2">
-                    <span>{(p.amountCents / 100).toFixed(2)} ETB</span>
+                    <span>{formatETB(p.amountCents)}</span>
                     <Badge variant="outline">{p.status}</Badge>
                   </div>
                 </div>

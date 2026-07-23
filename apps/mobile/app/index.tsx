@@ -1,14 +1,22 @@
 import { useEffect } from 'react';
 import { router } from 'expo-router';
 import { View, ActivityIndicator } from 'react-native';
-import { restoreSession } from './src/lib/auth';
+import { useAuthStore } from '../src/lib/auth-store';
+import { colors } from '../src/lib/theme';
 
+// (INC-06 — migrated from auth.ts `restoreSession()` to the Zustand store's
+// `restore()` action so there is one source of truth for session restoration.)
 export default function Index() {
+  const restore = useAuthStore(s => s.restore);
+
   useEffect(() => {
-    restoreSession().then(ok => {
+    let active = true;
+    restore().then(ok => {
+      if (!active) return;
       router.replace(ok ? '/rider/dashboard' : '/auth/login');
     });
-  }, []);
+    return () => { active = false; };
+  }, [restore]);
 
-  return <View style={{ flex: 1, justifyContent: 'center' }}><ActivityIndicator size="large" /></View>;
+  return <View style={{ flex: 1, justifyContent: 'center', backgroundColor: colors.surface }}><ActivityIndicator size="large" color={colors.primary} /></View>;
 }

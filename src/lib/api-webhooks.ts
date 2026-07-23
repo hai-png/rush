@@ -6,6 +6,24 @@ import { toErrorEnvelope } from '@/lib/errors';
 import { logger } from '@/lib/logger';
 import { Prisma } from '@prisma/client';
 
+// BIZ-070 (#19): money formatter for ETB amounts in user-facing notifications.
+// The frontend agent creates @/lib/format.ts with `formatETB(cents) -> string`.
+// We import it lazily so the build doesn't break before that file exists,
+// and fall back to an inline formatter on failure.
+async function formatETB(cents: number): Promise<string> {
+  try {
+    const mod = await import('@/lib/format');
+    if (typeof (mod as any).formatETB === 'function') {
+      return (mod as any).formatETB(cents);
+    }
+  } catch {
+    // fall through to inline
+  }
+  // TODO: remove this fallback once src/lib/format.ts is committed by the
+  // frontend agent.
+  return `${(cents / 100).toFixed(2)} ETB`;
+}
+
 // SEC-20: Telebirr webhook security currently relies solely on signature
 // verification. A defence-in-depth IP allowlist (Telebirr's documented egress
 // ranges) should be added before production — implement by populating
@@ -84,7 +102,7 @@ async function markRefundSucceeded(refundRequestNo: string, raw: unknown): Promi
         userId,
         type: 'refund_completed',
         title: 'Refund completed',
-        body: `Your refund of ${(refundAmount / 100).toFixed(2)} ETB has been processed.`,
+        body: `Your refund of ${await formatETB(refundAmount)} has been processed.`,
       });
     });
   });

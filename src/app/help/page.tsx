@@ -1,10 +1,13 @@
 import Link from 'next/link';
+import type { Metadata } from 'next';
 import { db } from '@/lib/db';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 
 export const dynamic = 'force-dynamic';
+
+export const metadata: Metadata = { title: 'Help & Support · Addis Ride' };
 
 export default async function HelpPage() {
   const faqs = await db.faqArticle.findMany({ where: { isActive: true }, orderBy: [{ category: 'asc' }, { sortOrder: 'asc' }] });

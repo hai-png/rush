@@ -3,20 +3,33 @@ import { useState, useCallback } from 'react';
 import { router } from 'expo-router';
 import { api } from '../../src/lib/api';
 import { useFocusEffect } from '@react-navigation/native';
+import { colors, spacing, radius, fontSize, fontWeight } from '../../src/lib/theme';
 
 export default function ListingsScreen() {
   const [listings, setListings] = useState<any[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [refreshing, setRefreshing] = useState(false);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (isActive: () => boolean = () => true) => {
     setError(null);
     setRefreshing(true);
-    try { setListings(await api.get('/marketplace/my-releases') || []); } catch (e) { setError(e instanceof Error ? e.message : 'Failed to load'); }
-    setRefreshing(false);
+    try {
+      const data = await api.get('/marketplace/my-releases') || [];
+      if (!isActive()) return;
+      setListings(data);
+    } catch (e) {
+      if (!isActive()) return;
+      setError(e instanceof Error ? e.message : 'Failed to load');
+    }
+    if (isActive()) setRefreshing(false);
   }, []);
 
-  useFocusEffect(useCallback(() => { load(); }, [load]));
+  // (MOB-05e — active guard prevents stale setState on blur.)
+  useFocusEffect(useCallback(() => {
+    let active = true;
+    load(() => active);
+    return () => { active = false; };
+  }, [load]));
 
   async function cancel(id: string) {
     Alert.alert('Cancel listing?', 'The seat will no longer be available.', [
@@ -32,14 +45,14 @@ export default function ListingsScreen() {
     <View style={styles.container}>
       <Text style={styles.title}>My Seat Listings</Text>
       {error && (
-        <View style={{ backgroundColor: '#fee2e2', padding: 12, marginHorizontal: 16, borderRadius: 8, marginBottom: 8 }}>
-          <Text style={{ color: '#991b1b', textAlign: 'center', fontSize: 14 }}>Couldn't load — pull to retry</Text>
+        <View style={styles.errorBar}>
+          <Text style={styles.errorText}>Couldn't load — pull to retry</Text>
         </View>
       )}
-<FlatList
+      <FlatList
         data={listings}
         keyExtractor={item => item.id}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={load} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load()} />}
         renderItem={({ item }) => (
           <View style={styles.card}>
             <Text style={styles.route}>{item.trip?.route?.origin} → {item.trip?.route?.destination}</Text>
@@ -62,16 +75,18 @@ export default function ListingsScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f5f5f5' },
-  title: { fontSize: 20, fontWeight: 'bold', padding: 16 },
-  card: { backgroundColor: '#fff', marginHorizontal: 16, marginBottom: 8, padding: 16, borderRadius: 8 },
-  route: { fontSize: 16, fontWeight: '600' },
-  sub: { fontSize: 12, color: '#666', marginTop: 4 },
-  row: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 8 },
-  status: { fontSize: 12, paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4, backgroundColor: '#f0f0f0', color: '#666' },
-  statusOpen: { color: '#fff', backgroundColor: '#2563eb' },
-  cancelBtn: { backgroundColor: '#fee2e2', borderRadius: 6, paddingHorizontal: 12, paddingVertical: 4 },
-  cancelText: { color: '#dc2626', fontSize: 12, fontWeight: '600' },
-  empty: { textAlign: 'center', color: '#999', padding: 32 },
-  link: { color: '#2563eb' },
+  container: { flex: 1, backgroundColor: colors.surface },
+  title: { fontSize: fontSize.lg, fontWeight: fontWeight.bold, padding: spacing.md },
+  card: { backgroundColor: colors.card, marginHorizontal: spacing.md, marginBottom: spacing.sm, padding: spacing.md, borderRadius: radius.md },
+  route: { fontSize: fontSize.md, fontWeight: fontWeight.semibold },
+  sub: { fontSize: fontSize.xs, color: colors.textMuted, marginTop: spacing.xs },
+  row: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: spacing.sm },
+  status: { fontSize: fontSize.xs, paddingHorizontal: spacing.sm, paddingVertical: 2, borderRadius: radius.sm, backgroundColor: colors.badgeBg, color: colors.textMuted },
+  statusOpen: { color: colors.white, backgroundColor: colors.primary },
+  cancelBtn: { backgroundColor: colors.errorBg, borderRadius: 6, paddingHorizontal: 12, paddingVertical: 4 },
+  cancelText: { color: colors.error, fontSize: fontSize.xs, fontWeight: fontWeight.semibold },
+  empty: { textAlign: 'center', color: colors.textLight, padding: spacing.xl },
+  link: { color: colors.primary },
+  errorBar: { backgroundColor: colors.errorBg, padding: 12, marginHorizontal: spacing.md, borderRadius: radius.md, marginBottom: spacing.sm },
+  errorText: { color: colors.errorText, textAlign: 'center', fontSize: fontSize.sm },
 });

@@ -5,14 +5,22 @@
 // writes, and never called db.\$disconnect().
 import { logger } from '@/lib/logger';
 
-// Guard against the Edge Runtime, which doesn't support process.on() or
-// the Node.js process event API. Next.js loads instrumentation.ts in both
-// the Node.js runtime and the Edge Runtime — we only want to register
-// shutdown handlers in the Node.js runtime.
-const isNodeRuntime = typeof process !== 'undefined' && typeof process.on === 'function' && process.versions?.node != null;
+// Edge Runtime guard: check at call-time, not module-eval time, so the Edge
+// Runtime parser doesn't choke on `process.versions`.
+function isNodeRuntime(): boolean {
+  try {
+    return typeof process !== 'undefined'
+      && typeof process.on === 'function'
+      && typeof process.versions === 'object'
+      && process.versions !== null
+      && typeof (process.versions as NodeJS.ProcessVersions).node === 'string';
+  } catch {
+    return false;
+  }
+}
 
 export async function register() {
-  if (!isNodeRuntime) return; // Edge Runtime — no-op
+  if (!isNodeRuntime()) return; // Edge Runtime — no-op
 
   // initialize Sentry if SENTRY_DSN is configured.
   try {

@@ -67,11 +67,19 @@ export function audit(input: AuditInput): Promise<void> {
   auditQueue = auditQueue.then(() => auditInternal(input)).catch((err) => {
     // Always log loudly so an alerting system can pick this up.
     logger.error({ err: (err as Error).message, action: input.action }, '[audit] write failed');
-    // DB-046: for security-critical actions, re-throw so the caller's request
-    // fails — better to refuse the operation than to silently lose the audit
-    // trail. Non-critical actions are still swallowed (best-effort) so the
-    // request can succeed.
-    if (isSecurityCritical) {
+    // DB-046 (#26): emit a separate structured warn line tagged
+    // `dropped_audit` so ops can count dropped-non-critical audits in
+    // isolation from the security-critical errors above. No prom-client is
+    // installed in this repo (see src/lib/api-metrics.ts for the in-memory
+    // Prometheus implementation) — we rely on structured logs being scraped
+    // by Grafana Loki / Datadog.
+    if (!isSecurityCritical) {
+      logger.warn({ action: input.action, error: (err as Error).message, tag: 'dropped_audit' }, 'audit.dropped');
+    }
+    // DB-046 (#26): in AUDIT_STRICT=1 mode, every audit failure propagates
+    // to the caller — useful in CI / staging to catch any audit-write path
+    // that would silently drop in production.
+    if (isSecurityCritical || process.env.AUDIT_STRICT === '1') {
       throw err;
     }
   });

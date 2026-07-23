@@ -32,6 +32,14 @@ export type ApiOptions = {
   requireRole?: Array<'rider' | 'contractor' | 'corporate_admin' | 'platform_admin'>;
   exemptFromTosGate?: boolean;
   // Idempotency is auto-applied to POST with an Idempotency-Key header.
+  // #10: optional deprecation marker. When set, the api() wrapper emits
+  // `Sunset` (RFC 8594) and `Deprecation: true` (RFC 9745) headers so clients
+  // can detect that a route is being phased out. No routes use this yet —
+  // the machinery is in place for future removals.
+  deprecated?: {
+    sunset?: Date;   // when the route will stop responding
+    link?: string;   // docs URL for the migration path
+  };
 };
 
 // SEC-12: walk X-Forwarded-For right-to-left, skipping entries that match
@@ -401,6 +409,19 @@ export function api(options: ApiOptions, handler: Handler) {
       const res = NextResponse.json(responseBody, { status });
       if (headers) {
         for (const [k, v] of Object.entries(headers)) res.headers.set(k, String(v));
+      }
+      // #10: deprecation headers (RFC 8594 Sunset + RFC 9745 Deprecation).
+      // Emitted only when the route was registered with `deprecated: {...}`.
+      if (options.deprecated) {
+        res.headers.set('Deprecation', 'true');
+        if (options.deprecated.sunset) {
+          // RFC 8594: IMF-fixdate format, e.g. "Sun, 31 Dec 2025 23:59:59 GMT".
+          res.headers.set('Sunset', options.deprecated.sunset.toUTCString());
+        }
+        if (options.deprecated.link) {
+          // Link: <https://...>; rel="deprecation"
+          res.headers.set('Link', `<${options.deprecated.link}>; rel="deprecation"`);
+        }
       }
       res.headers.set('x-request-id', requestId);
       // X-RateLimit-* headers so clients can proactively back off.

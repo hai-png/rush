@@ -4,6 +4,7 @@ import { router } from 'expo-router';
 import { api } from '../../src/lib/api';
 import { useFocusEffect } from '@react-navigation/native';
 import { registerForPushNotifications, listenForNotifications } from '../../src/lib/push';
+import { colors, spacing, radius, fontSize, fontWeight } from '../../src/lib/theme';
 
 type Assignment = {
   id: string;
@@ -21,7 +22,7 @@ export default function RiderDashboard() {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (isActive: () => boolean = () => true) => {
     setRefreshing(true);
     setError(null);
     try {
@@ -29,17 +30,25 @@ export default function RiderDashboard() {
         api.get<Assignment[]>('/assignments'),
         api.get<any[]>('/subscriptions'),
       ]);
+      if (!isActive()) return;
       setAssignments(a || []);
       setSubs((s || []).filter((s: any) => s.status === 'active'));
     } catch (e) {
+      if (!isActive()) return;
       setError(e instanceof Error ? e.message : 'Failed to load');
       setAssignments([]);
       setSubs([]);
     }
-    setRefreshing(false);
+    if (isActive()) setRefreshing(false);
   }, []);
 
-  useFocusEffect(useCallback(() => { load(); }, [load]));
+  // (MOB-05e — active guard: when the screen blurs mid-fetch, drop the
+  // result instead of calling setState on an unfocused component.)
+  useFocusEffect(useCallback(() => {
+    let active = true;
+    load(() => active);
+    return () => { active = false; };
+  }, [load]));
 
   // register for push notifications on mount.
   useEffect(() => {
@@ -65,7 +74,7 @@ export default function RiderDashboard() {
       <FlatList
         data={assignments}
         keyExtractor={(item) => item.id}
-        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={load} />}
+        refreshControl={<RefreshControl refreshing={refreshing} onRefresh={() => load()} />}
         renderItem={({ item }) => (
           <TouchableOpacity style={styles.routeCard} onPress={() => router.push(`/rider/trips?assignment=${item.id}`)}>
             <Text style={styles.routeTitle}>{item.route.origin} → {item.route.destination}</Text>
@@ -81,16 +90,16 @@ export default function RiderDashboard() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#f5f5f5' },
-  title: { fontSize: 24, fontWeight: 'bold', padding: 16, color: '#1a1a1a' },
-  card: { backgroundColor: '#fff', margin: 16, padding: 16, borderRadius: 8, borderLeftWidth: 4, borderLeftColor: '#2563eb' },
-  cardTitle: { fontSize: 18, fontWeight: '600' },
-  cardSub: { fontSize: 14, color: '#666', marginTop: 4 },
-  sectionTitle: { fontSize: 16, fontWeight: '600', paddingHorizontal: 16, marginBottom: 8, color: '#333' },
-  routeCard: { backgroundColor: '#fff', marginHorizontal: 16, marginBottom: 8, padding: 16, borderRadius: 8 },
-  routeTitle: { fontSize: 16, fontWeight: '600' },
-  routeSub: { fontSize: 12, color: '#666', marginTop: 4 },
-  routeFare: { fontSize: 14, fontWeight: '600', color: '#2563eb', marginTop: 4 },
-  routePickups: { fontSize: 12, color: '#999', marginTop: 2 },
-  empty: { textAlign: 'center', color: '#999', padding: 32 },
+  container: { flex: 1, backgroundColor: colors.surface },
+  title: { fontSize: fontSize.xl, fontWeight: fontWeight.bold, padding: spacing.md, color: colors.text },
+  card: { backgroundColor: colors.card, margin: spacing.md, padding: spacing.md, borderRadius: radius.md, borderLeftWidth: 4, borderLeftColor: colors.primary },
+  cardTitle: { fontSize: fontSize.lg, fontWeight: fontWeight.semibold },
+  cardSub: { fontSize: fontSize.sm, color: colors.textMuted, marginTop: spacing.xs },
+  sectionTitle: { fontSize: fontSize.md, fontWeight: fontWeight.semibold, paddingHorizontal: spacing.md, marginBottom: spacing.sm, color: colors.text },
+  routeCard: { backgroundColor: colors.card, marginHorizontal: spacing.md, marginBottom: spacing.sm, padding: spacing.md, borderRadius: radius.md },
+  routeTitle: { fontSize: fontSize.md, fontWeight: fontWeight.semibold },
+  routeSub: { fontSize: fontSize.xs, color: colors.textMuted, marginTop: spacing.xs },
+  routeFare: { fontSize: fontSize.sm, fontWeight: fontWeight.semibold, color: colors.primary, marginTop: spacing.xs },
+  routePickups: { fontSize: fontSize.xs, color: colors.textLight, marginTop: 2 },
+  empty: { textAlign: 'center', color: colors.textLight, padding: spacing.xl },
 });

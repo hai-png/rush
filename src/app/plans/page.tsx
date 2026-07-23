@@ -1,12 +1,16 @@
 import Link from 'next/link';
+import type { Metadata } from 'next';
 import { db } from '@/lib/db';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { getSession } from '@/lib/session-server';
 import { CheckoutButton } from './checkout-button';
+import { formatETB } from '@/lib/format';
 
 export const dynamic = 'force-dynamic';
+
+export const metadata: Metadata = { title: 'Subscription Plans · Addis Ride' };
 
 export default async function PlansPage() {
   const plans = await db.subscriptionPlan.findMany({ where: { isActive: true }, orderBy: { sortOrder: 'asc' } });
@@ -46,7 +50,7 @@ export default async function PlansPage() {
               </CardHeader>
               <CardContent>
                 <div className="text-3xl font-bold mb-1">
-                  {plan.priceCents === 0 ? 'Free' : `${(plan.priceCents / 100).toFixed(2)} ETB`}
+                  {plan.priceCents === 0 ? 'Free' : formatETB(plan.priceCents)}
                   <span className="text-sm font-normal text-muted-foreground"> / {plan.durationDays}d</span>
                 </div>
                 <div className="text-sm text-muted-foreground mb-4">

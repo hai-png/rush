@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import type { Metadata } from 'next';
 import { requireRole } from '@/lib/session-server';
 import { db } from '@/lib/db';
 import { Card, CardContent } from '@/components/ui/card';
@@ -6,8 +7,11 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { SignOutButton } from '@/components/sign-out-button';
 import { ListSeatForm } from './list-seat-form';
+import { formatETB, formatDateTime } from '@/lib/format';
 
 export const dynamic = 'force-dynamic';
+
+export const metadata: Metadata = { title: 'List a Seat · Addis Ride' };
 
 export default async function ListSeatPage() {
   const session = await requireRole('rider', 'platform_admin');
@@ -53,10 +57,10 @@ export default async function ListSeatPage() {
                     <div>
                       <div className="font-medium">{r.trip.route.origin} → {r.trip.route.destination}</div>
                       <div className="text-xs text-muted-foreground">
-                        {new Date(r.trip.departureAt).toLocaleString()} · {r.trip.shuttle.plate}
+                        {formatDateTime(r.trip.departureAt)} · {r.trip.shuttle.plate}
                       </div>
                     </div>
-                    <Badge variant="outline">fare {(r.trip.route.fareCents / 100).toFixed(2)} ETB</Badge>
+                    <Badge variant="outline">fare {formatETB(r.trip.route.fareCents)}</Badge>
                   </div>
                   <ListSeatForm ride={r} />
                 </CardContent>

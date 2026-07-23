@@ -1,11 +1,15 @@
 import Link from 'next/link';
+import type { Metadata } from 'next';
 import { requireRole } from '@/lib/session-server';
 import { db } from '@/lib/db';
 import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { SignOutButton } from '@/components/sign-out-button';
+import { formatETB, formatDateTime } from '@/lib/format';
 
 export const dynamic = 'force-dynamic';
+
+export const metadata: Metadata = { title: 'Earnings · Addis Ride' };
 
 export default async function ContractorEarningsPage() {
   const session = await requireRole('contractor', 'platform_admin');
@@ -47,7 +51,7 @@ export default async function ContractorEarningsPage() {
           <Card><CardContent className="py-4"><div className="text-xs text-muted-foreground">Completed trips</div><div className="text-2xl font-bold">{trips}</div></CardContent></Card>
           <Card><CardContent className="py-4"><div className="text-xs text-muted-foreground">Completed rides</div><div className="text-2xl font-bold">{rideCount}</div></CardContent></Card>
           <Card><CardContent className="py-4"><div className="text-xs text-muted-foreground">Active assignments</div><div className="text-2xl font-bold">{assignments}</div></CardContent></Card>
-          <Card><CardContent className="py-4"><div className="text-xs text-muted-foreground">Total earnings</div><div className="text-2xl font-bold">{(totalFareCents / 100).toFixed(2)} ETB</div></CardContent></Card>
+          <Card><CardContent className="py-4"><div className="text-xs text-muted-foreground">Total earnings</div><div className="text-2xl font-bold">{formatETB(totalFareCents)}</div></CardContent></Card>
         </div>
         <div className="mb-3 text-sm text-muted-foreground">Rating: <span className="font-semibold">{profile?.rating.toFixed(1) ?? '—'}</span></div>
         <h2 className="text-lg font-semibold mb-2">Recent completed rides</h2>
@@ -59,9 +63,9 @@ export default async function ContractorEarningsPage() {
               <div key={r.id} className="py-2 flex justify-between items-center text-sm">
                 <div>
                   <div className="font-medium">{r.trip.route.origin} → {r.trip.route.destination}</div>
-                  <div className="text-xs text-muted-foreground">{new Date(r.createdAt).toLocaleString()}</div>
+                  <div className="text-xs text-muted-foreground">{formatDateTime(r.createdAt)}</div>
                 </div>
-                <span className="font-semibold">{(r.trip.route.fareCents / 100).toFixed(2)} ETB</span>
+                <span className="font-semibold">{formatETB(r.trip.route.fareCents)}</span>
               </div>
             ))}
           </CardContent>

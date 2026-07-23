@@ -1,13 +1,14 @@
-import Link from 'next/link';
+import type { Metadata } from 'next';
 import { requireRole } from '@/lib/session-server';
 import { db } from '@/lib/db';
 import { Card, CardContent } from '@/components/ui/card';
-import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
-import { SignOutButton } from '@/components/sign-out-button';
+import { DashboardHeader } from '@/components/dashboard-header';
 import { FaqForm } from './faq-form';
 
 export const dynamic = 'force-dynamic';
+
+export const metadata: Metadata = { title: 'FAQs · Admin' };
 
 export default async function AdminFaqsPage() {
   await requireRole('platform_admin');
@@ -15,12 +16,7 @@ export default async function AdminFaqsPage() {
 
   return (
     <div className="min-h-screen flex flex-col">
-      <header className="border-b">
-        <div className="container mx-auto px-4 py-4 flex items-center justify-between">
-          <Link href="/dashboard/admin" className="text-xl font-bold">Admin · FAQs</Link>
-          <SignOutButton />
-        </div>
-      </header>
+      <DashboardHeader title="Admin · FAQs" backHref="/dashboard/admin" />
       <main className="flex-1 container mx-auto px-4 py-8 max-w-3xl">
         <div className="flex items-center justify-between mb-4">
           <h1 className="text-2xl font-bold">FAQ Articles ({faqs.length})</h1>

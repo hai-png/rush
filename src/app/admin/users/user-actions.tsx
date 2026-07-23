@@ -12,8 +12,26 @@ import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import { api } from '@/lib/api-client';
 
-export function UserActions({ userId, currentRole, isActive }: { userId: string; currentRole: string; isActive: boolean }) {
+// FE-058: an admin must not be able to suspend, reactivate, or change the
+// role of their own account — that's how an admin locks themselves out or
+// accidentally degrades their own privileges. The current user's id is
+// passed in as `currentUserId` and compared against the row's `userId`.
+// (Server-side enforcement is the backend agent's responsibility; this is
+// the client-side guard.)
+export function UserActions({
+  userId,
+  currentRole,
+  isActive,
+  currentUserId,
+}: {
+  userId: string;
+  currentRole: string;
+  isActive: boolean;
+  currentUserId: string;
+}) {
   const router = useRouter();
+  const self = userId === currentUserId;
+  const selfHint = "You can't modify your own account";
 
   const [loading, setLoading] = useState<'suspend' | 'reactivate' | 'role' | 'impersonate' | null>(null);
   const [role, setRole] = useState(currentRole);
@@ -59,8 +77,8 @@ export function UserActions({ userId, currentRole, isActive }: { userId: string;
 
   return (
     <div className="flex items-center gap-1">
-      <Select value={role} onValueChange={setRole} disabled={loading !== null}>
-        <SelectTrigger className="h-8 w-32 text-xs"><SelectValue /></SelectTrigger>
+      <Select value={role} onValueChange={setRole} disabled={loading !== null || self}>
+        <SelectTrigger className="h-8 w-32 text-xs" title={self ? selfHint : undefined}><SelectValue /></SelectTrigger>
         <SelectContent>
           <SelectItem value="rider">rider</SelectItem>
           <SelectItem value="contractor">contractor</SelectItem>
@@ -69,16 +87,37 @@ export function UserActions({ userId, currentRole, isActive }: { userId: string;
         </SelectContent>
       </Select>
       {role !== currentRole && (
-        <Button size="sm" variant="default" className="h-8" disabled={loading !== null} onClick={() => act('change_role')}>
+        <Button
+          size="sm"
+          variant="default"
+          className="h-8"
+          disabled={loading !== null || self}
+          title={self ? selfHint : undefined}
+          onClick={() => act('change_role')}
+        >
           {loading === 'role' ? '…' : 'Set'}
         </Button>
       )}
       {isActive ? (
-        <Button size="sm" variant="outline" className="h-8" disabled={loading !== null} onClick={() => act('suspend')}>
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-8"
+          disabled={loading !== null || self}
+          title={self ? selfHint : undefined}
+          onClick={() => act('suspend')}
+        >
           {loading === 'suspend' ? '…' : 'Suspend'}
         </Button>
       ) : (
-        <Button size="sm" variant="outline" className="h-8" disabled={loading !== null} onClick={() => act('reactivate')}>
+        <Button
+          size="sm"
+          variant="outline"
+          className="h-8"
+          disabled={loading !== null || self}
+          title={self ? selfHint : undefined}
+          onClick={() => act('reactivate')}
+        >
           {loading === 'reactivate' ? '…' : 'Reactivate'}
         </Button>
       )}

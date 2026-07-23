@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import type { Metadata } from 'next';
 import { requireSession } from '@/lib/session-server';
 import { db } from '@/lib/db';
 import { Card, CardContent } from '@/components/ui/card';
@@ -6,8 +7,11 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { SignOutButton } from '@/components/sign-out-button';
 import { NotificationActions } from './notification-actions';
+import { formatDateTime } from '@/lib/format';
 
 export const dynamic = 'force-dynamic';
+
+export const metadata: Metadata = { title: 'Notifications · Addis Ride' };
 
 export default async function NotificationsPage() {
   const session = await requireSession();
@@ -53,7 +57,7 @@ export default async function NotificationsPage() {
                         <div className="font-medium text-sm">{n.title}</div>
                       </div>
                       <div className="text-sm text-muted-foreground">{n.body}</div>
-                      <div className="text-xs text-muted-foreground mt-1">{new Date(n.createdAt).toLocaleString()}</div>
+                      <div className="text-xs text-muted-foreground mt-1">{formatDateTime(n.createdAt)}</div>
                       {n.link && (
                         <Link href={n.link} className="text-xs text-primary hover:underline mt-1 inline-block">View →</Link>
                       )}

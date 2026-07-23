@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import type { Metadata } from 'next';
 import { notFound } from 'next/navigation';
 import { requireSession } from '@/lib/session-server';
 import { db } from '@/lib/db';
@@ -7,8 +8,11 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { SignOutButton } from '@/components/sign-out-button';
 import { RouteMap } from '@/components/route-map-lazy';
+import { formatETB, formatDateTime } from '@/lib/format';
 
 export const dynamic = 'force-dynamic';
+
+export const metadata: Metadata = { title: 'Route Details · Addis Ride' };
 
 export default async function AssignmentDetailPage({ params }: { params: Promise<{ id: string }> }) {
   const session = await requireSession();
@@ -44,7 +48,7 @@ export default async function AssignmentDetailPage({ params }: { params: Promise
             Driver: {assignment.contractor.name} · Rating: {assignment.contractor.contractorProfile?.rating.toFixed(1) ?? '—'} · {assignment.shuttle.plate} ({assignment.shuttle.vehicleType})
           </div>
           <div className="flex flex-wrap gap-2 mt-2">
-            <Badge variant="outline">Fare: {(assignment.route.fareCents / 100).toFixed(2)} ETB</Badge>
+            <Badge variant="outline">Fare: {formatETB(assignment.route.fareCents)}</Badge>
             <Badge variant="outline">Schedule: {pattern.days?.join(', ')}</Badge>
             <Badge variant="outline">Windows: {pattern.windows?.join(', ')}</Badge>
             <Badge>{assignment.status}</Badge>
@@ -85,7 +89,7 @@ export default async function AssignmentDetailPage({ params }: { params: Promise
               {assignment.trips.map(t => (
                 <div key={t.id} className="py-2 flex justify-between items-center text-sm">
                   <div>
-                    <div className="font-medium">{new Date(t.departureAt).toLocaleString()}</div>
+                    <div className="font-medium">{formatDateTime(t.departureAt)}</div>
                     <div className="text-xs text-muted-foreground">{t.window} · {t.seatsBooked}/{assignment.shuttle.capacity} seats booked</div>
                   </div>
                   <Button asChild size="sm"><Link href={`/trips?assignment=${assignment.id}`}>Book</Link></Button>

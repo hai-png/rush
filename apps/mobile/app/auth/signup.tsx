@@ -2,9 +2,12 @@ import { View, Text, TextInput, TouchableOpacity, StyleSheet, ActivityIndicator,
 import { useState } from 'react';
 import { router } from 'expo-router';
 import { api, setToken } from '../../src/lib/api';
+import { useAuthStore } from '../../src/lib/auth-store';
 import * as SecureStore from 'expo-secure-store';
+import { colors, spacing, radius, fontSize, fontWeight } from '../../src/lib/theme';
 
 export default function SignupScreen() {
+  const setUser = useAuthStore(s => s.setUser);
   const [form, setForm] = useState({ name: '', phone: '', password: '', homeArea: '', workArea: '' });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -13,9 +16,10 @@ export default function SignupScreen() {
     setLoading(true); setError('');
     try {
       await api.post('/auth/register', { kind: 'rider', ...form });
-      const result = await api.post<{ accessToken: string }>('/auth/token', { phone: form.phone, password: form.password });
+      const result = await api.post<{ accessToken: string; user: any }>('/auth/token', { phone: form.phone, password: form.password });
       setToken(result.accessToken);
       await SecureStore.setItemAsync('session', result.accessToken);
+      setUser(result.user);
       router.replace('/rider/dashboard');
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Signup failed');
@@ -32,7 +36,7 @@ export default function SignupScreen() {
       <TextInput style={styles.input} placeholder="Work area (e.g. Merkato)" value={form.workArea} onChangeText={v => setForm({ ...form, workArea: v })} />
       {error ? <Text style={styles.error}>{error}</Text> : null}
       <TouchableOpacity style={styles.button} onPress={submit} disabled={loading}>
-        {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Sign Up</Text>}
+        {loading ? <ActivityIndicator color={colors.white} /> : <Text style={styles.buttonText}>Sign Up</Text>}
       </TouchableOpacity>
       <TouchableOpacity onPress={() => router.push('/auth/login')}>
         <Text style={styles.link}>Already have an account? Sign in</Text>
@@ -42,11 +46,11 @@ export default function SignupScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, padding: 24, backgroundColor: '#f5f5f5' },
-  title: { fontSize: 28, fontWeight: 'bold', textAlign: 'center', marginBottom: 24 },
-  input: { backgroundColor: '#fff', borderRadius: 8, padding: 14, marginBottom: 10, fontSize: 16, borderWidth: 1, borderColor: '#e0e0e0' },
-  button: { backgroundColor: '#2563eb', borderRadius: 8, padding: 14, alignItems: 'center' },
-  buttonText: { color: '#fff', fontSize: 16, fontWeight: '600' },
-  error: { color: '#dc2626', textAlign: 'center', marginBottom: 10 },
-  link: { color: '#2563eb', textAlign: 'center', marginTop: 16, fontSize: 14 },
+  container: { flex: 1, padding: spacing.lg, backgroundColor: colors.surface },
+  title: { fontSize: 28, fontWeight: fontWeight.bold, textAlign: 'center', marginBottom: spacing.lg, color: colors.text },
+  input: { backgroundColor: colors.card, borderRadius: radius.md, padding: 14, marginBottom: 10, fontSize: fontSize.md, borderWidth: 1, borderColor: colors.borderSubtle },
+  button: { backgroundColor: colors.primary, borderRadius: radius.md, padding: 14, alignItems: 'center' },
+  buttonText: { color: colors.white, fontSize: fontSize.md, fontWeight: fontWeight.semibold },
+  error: { color: colors.error, textAlign: 'center', marginBottom: 10 },
+  link: { color: colors.primary, textAlign: 'center', marginTop: spacing.md, fontSize: fontSize.sm },
 });
