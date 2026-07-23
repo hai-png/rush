@@ -363,12 +363,15 @@ export function api(options: ApiOptions, handler: Handler) {
       const status = (result && typeof result === 'object' && 'status' in result) ? (result as any).status ?? 200 : 200;
       const data = (result && typeof result === 'object' && 'data' in result) ? (result as any).data : result;
       const headers = (result && typeof result === 'object' && 'headers' in result) ? (result as any).headers : undefined;
+      // P1-56: pass through pagination metadata if present.
+      const pagination = (result && typeof result === 'object' && 'pagination' in result) ? (result as any).pagination : undefined;
 
       if (idem.scopedKey) {
-        await persistIdempotency(idem.scopedKey, status, data === undefined ? null : { data });
+        await persistIdempotency(idem.scopedKey, status, data === undefined ? null : { data, ...(pagination ? { pagination } : {}) });
       }
 
-      const res = NextResponse.json(data === undefined ? null : { data }, { status });
+      const responseBody = data === undefined ? null : (pagination ? { data, pagination } : { data });
+      const res = NextResponse.json(responseBody, { status });
       if (headers) {
         for (const [k, v] of Object.entries(headers)) res.headers.set(k, String(v));
       }
