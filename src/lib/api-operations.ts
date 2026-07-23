@@ -455,7 +455,9 @@ export async function POST_trip({ session, body, ipAddress, userAgent }: any) {
   return { status: 201, data: trip };
 }
 
-// ─── Shuttle positions (in-memory; documented as MVP in AUDIT.md §5.7) ───────
+// ─── Shuttle positions ──────────────────────────────────────────────────────
+// P1-9 / OPS-012: uses Redis when available (shared across instances), falls
+// back to in-memory Map for single-instance deployments.
 const positions = new Map<string, { lat: number; lng: number; heading: number; speed: number; updatedAt: number }>();
 
 // Periodic cleanup so the Map doesn't grow unbounded (P2-78).
@@ -486,17 +488,32 @@ export async function POST_shuttle_position({ session, body }: any) {
     });
     if (!owns) throw new ForbiddenError('You have no active shuttle');
   }
-  positions.set(session.id, {
+  const pos = {
     lat: input.lat,
     lng: input.lng,
     heading: input.heading ?? 0,
     speed: input.speed ?? 0,
     updatedAt: Date.now(),
-  });
+  };
+  // Try Redis first; fall back to in-memory.
+  try {
+    const { redisSetPosition } = await import('@/lib/redis');
+    await redisSetPosition(session.id, pos, 300); // 5-min TTL
+  } catch {
+    positions.set(session.id, pos);
+  }
   return { data: { ok: true } };
 }
 
 export async function GET_shuttle_positions({ session }: any) {
+  // Try Redis first; fall back to in-memory.
+  try {
+    const { redisGetAllPositions } = await import('@/lib/redis');
+    const redisResult = await redisGetAllPositions('pos:*');
+    if (redisResult.length > 0 || (await import('@/lib/redis')).isRedisAvailable()) {
+      return { data: redisResult };
+    }
+  } catch { /* fall through to in-memory */ }
   const result: Array<{ lat: number; lng: number; heading: number; speed: number; updatedAt: number }> = [];
   for (const [, pos] of positions) {
     if (Date.now() - pos.updatedAt < 5 * 60_000) {
