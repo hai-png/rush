@@ -1,4 +1,4 @@
-// / OPS-012: Redis-backed cache with in-memory fallback.
+// Redis-backed cache with in-memory fallback.
 //
 // If REDIS_URL is set, uses Redis for distributed rate limiting + shuttle
 // positions (shared across instances). If not set, falls back to in-memory

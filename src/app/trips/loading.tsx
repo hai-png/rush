@@ -1,7 +1,6 @@
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 
-// FE-01: loading.tsx for /trips. Prevents the 200-800ms blank flash on nav.
 export default function TripsLoading() {
   return (
     <div className="min-h-screen bg-muted/30 p-4 md:p-8">

@@ -14,7 +14,6 @@ export const metadata: Metadata = { title: 'Payments · Admin' };
 
 const PAGE_SIZE = 50;
 
-// FE-044 / INC-09: paginated payments list (was take:200, no pagination UI).
 export default async function AdminPaymentsPage({ searchParams }: { searchParams: Promise<{ page?: string }> }) {
   await requireRole('platform_admin');
   const sp = await searchParams;

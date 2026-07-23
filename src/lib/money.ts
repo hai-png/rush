@@ -11,10 +11,10 @@ export class Money {
   }
   static fromETBString(s: string | null | undefined): Money | undefined {
     if (!s) return undefined;
-    // DB-051: avoid floating-point precision loss. Parse the string directly
-    // into integer cents by splitting on '.' rather than going through
-    // Number(s) * 100 (which can introduce binary-float rounding errors for
-    // values like "0.1" or large amounts).
+    // Avoid floating-point precision loss. Parse the string directly into
+    // integer cents by splitting on '.' rather than going through Number(s) *
+    // 100 (which can introduce binary-float rounding errors for values like
+    // "0.1" or large amounts).
     const trimmed = s.trim();
     if (!/^-?\d+(\.\d+)?$/.test(trimmed)) return undefined;
     const negative = trimmed.startsWith('-');

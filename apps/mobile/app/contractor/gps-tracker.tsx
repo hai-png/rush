@@ -3,8 +3,9 @@ import { useState, useEffect, useRef } from 'react';
 import { api } from '../../src/lib/api';
 import { colors, spacing, radius, fontSize, fontWeight } from '../../src/lib/theme';
 
-// real GPS tracking using expo-location.
-// — riders tracking their shuttle saw nonsense. Now uses actual device GPS.
+// Contractor GPS tracker — posts device GPS coordinates to /shuttle-positions
+// every 10s while the screen is foregrounded (requires foreground location
+// permission).
 export default function GpsTrackerScreen() {
   const [posting, setPosting] = useState(false);
   const [lastPosted, setLastPosted] = useState<string | null>(null);
@@ -32,7 +33,6 @@ export default function GpsTrackerScreen() {
         return;
       }
 
-      // Start watching position.
       subscriptionRef.current = await Location.watchPositionAsync(
         {
           accuracy: Location.Accuracy.High,
@@ -51,7 +51,7 @@ export default function GpsTrackerScreen() {
         },
       );
     } catch (e) {
-      // expo-location not installed — fall back to manual posting with error.
+      // expo-location missing or permission denied — fall back to manual posting.
       setError('GPS not available: ' + (e instanceof Error ? e.message : 'unknown'));
     }
   }

@@ -40,7 +40,6 @@ export async function DELETE_pickup({ session, params, ipAddress, userAgent }: a
   if (session.role !== 'platform_admin') throw new ForbiddenError('Admin only');
   await db.pickupLocation.update({ where: { id: params.id }, data: { isActive: false } });
   await audit({ actorId: session.id, action: 'pickup.deleted', entityType: 'pickup_location', entityId: params.id, ipAddress, userAgent });
-  // INC-02 (#21): DELETE returns 204 with no body.
   return { status: 204 };
 }
 
@@ -86,11 +85,9 @@ const AssignmentInput = z.object({
   schedulePattern: z.object({
     days: z.array(z.enum(['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'])),
     windows: z.array(z.enum(['morning', 'evening'])),
-    // BIZ-13: optional per-window departure times in "HH:MM" format (24h,
-    // server-local time — the Dockerfile pins TZ=Africa/Addis_Ababa). When
-    // omitted, defaults to 07:30 for morning and 17:30 for evening (the
-    // historical hardcoded values). Allows per-route / per-assignment
-    // scheduling without code changes.
+    // Optional per-window departure times in "HH:MM" format (24h, server-local
+    // time — the Dockerfile pins TZ=Africa/Addis_Ababa). When omitted,
+    // defaults to 07:30 for morning and 17:30 for evening.
     morningTime: z.string().regex(/^\d{2}:\d{2}$/).optional(),
     eveningTime: z.string().regex(/^\d{2}:\d{2}$/).optional(),
   }),
@@ -128,9 +125,9 @@ export async function POST_assignment({ session, body, ipAddress, userAgent }: a
   if (monthStart < startOfCurrentMonth) throw new BadRequestError('Cannot create assignments for past months');
   const monthEnd = new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 0, 23, 59, 59);
 
-  // BIZ-05: reject past-month assignments — generating trips for historical
-  // dates is wasteful and could trigger retroactive scheduling side effects.
-  // Allow the current month + future months only.
+  // Reject past-month assignments — generating trips for historical dates is
+  // wasteful and could trigger retroactive scheduling side effects. Allow the
+  // current month + future months only.
   const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
   if (monthStart < currentMonthStart) {
     throw new BadRequestError('Cannot create an assignment for a past month. Use the current month or a future month.');
@@ -163,11 +160,11 @@ export async function POST_assignment({ session, body, ipAddress, userAgent }: a
 }
 
 export async function generateTripsFromAssignment(assignment: any): Promise<number> {
-  // DB-025 (#25): validate the schedulePattern JSON before using it. The
-  // schema matches what POST_assignment accepts, but the row may have been
-  // written by an older code path or hand-edited. An invalid pattern logs a
-  // warning and returns 0 — the caller (POST_assignment / scheduler) treats
-  // a 0-return as "no trips generated", which is safe.
+  // Validate the schedulePattern JSON before using it. The schema matches
+  // what POST_assignment accepts, but the row may have been written by an
+  // older code path or hand-edited. An invalid pattern logs a warning and
+  // returns 0 — the caller (POST_assignment / scheduler) treats a 0-return as
+  // "no trips generated", which is safe.
   const SchedulePattern = z.object({
     days: z.array(z.string()),
     windows: z.array(z.string()),
@@ -184,8 +181,8 @@ export async function generateTripsFromAssignment(assignment: any): Promise<numb
   const { days, windows, morningTime, eveningTime } = pattern;
   if (!days || !windows || days.length === 0 || windows.length === 0) return 0;
 
-  // BIZ-13: parse configurable departure times. Fall back to historical
-  // defaults of 07:30 (morning) and 17:30 (evening) for backward compat.
+  // Parse configurable departure times. Fall back to defaults of 07:30
+  // (morning) and 17:30 (evening) for backward compat.
   const parseTime = (t: string | undefined, fallback: [number, number]): [number, number] => {
     if (!t) return fallback;
     const [h, m] = t.split(':').map(n => parseInt(n, 10));
@@ -214,15 +211,14 @@ export async function generateTripsFromAssignment(assignment: any): Promise<numb
     if (targetDays.has(cursor.getDay()) && !holidayDates.has(cursor.toDateString())) {
       for (const window of windows) {
         const departureAt = new Date(cursor);
-        // BIZ-13 (#20): pin departure to Africa/Addis_Ababa local time
-        // (UTC+3, no DST). setHours(h, m, 0, 0) uses the server's local TZ
-        // — when the server's TZ matches the Dockerfile's pinned
-        // TZ=Africa/Addis_Ababa this is correct, but a misconfigured
-        // deployment would silently shift every trip by the offset. We use
-        // setUTCHours(h + 3, m, 0, 0) so the trip's wall-clock time in
-        // Addis is always 07:30 / 17:30 regardless of the server's TZ.
-        // (The +3 offset is Africa/Addis_Ababa's fixed UTC offset — Addis
-        // does not observe DST.)
+        // Pin departure to Africa/Addis_Ababa local time (UTC+3, no DST).
+        // setHours(h, m, 0, 0) uses the server's local TZ — when the server's
+        // TZ matches the Dockerfile's pinned TZ=Africa/Addis_Ababa this is
+        // correct, but a misconfigured deployment would silently shift every
+        // trip by the offset. We use setUTCHours(h + 3, m, 0, 0) so the trip's
+        // wall-clock time in Addis is always 07:30 / 17:30 regardless of the
+        // server's TZ. (The +3 offset is Africa/Addis_Ababa's fixed UTC
+        // offset — Addis does not observe DST.)
         const [h, m] = window === 'morning' ? morningHM : eveningHM;
         departureAt.setUTCHours(h + 3, m, 0, 0);
         trips.push({
@@ -263,16 +259,15 @@ export async function POST_accept_assignment({ session, params, ipAddress, userA
   if (assignment.status !== 'assigned') throw new ConflictError(`Assignment is ${assignment.status}, not assigned`);
 
   // Transition assigned → accepted (contractor acknowledged) → active (trips
-  // generated). For now we accept + activate in one step, but the 'accepted'
-  // intermediate status is preserved per the schema's status comment.
+  // generated). Accept + activate in one step; the 'accepted' intermediate
+  // status is preserved per the schema's status comment.
   await db.routeAssignment.update({
     where: { id: params.id },
     data: { status: 'accepted', acceptedAt: new Date() },
   });
-  // pass the FULL assignment object (re-fetched with the new status),
-  // not the ID string. generateTripsFromAssignment reads assignment.schedulePattern,
-  // assignment.monthStart, etc. — passing assignment.id made all those undefined and
-  // JSON.parse(undefined) threw silently inside the .catch() swallower.
+  // Pass the FULL assignment object (re-fetched with the new status), not
+  // the ID string — generateTripsFromAssignment reads assignment.schedulePattern,
+  // assignment.monthStart, etc.
   const freshAssignment = await db.routeAssignment.findUnique({ where: { id: params.id } });
   if (freshAssignment) {
     await generateTripsFromAssignment(freshAssignment).catch((err) => {
@@ -301,8 +296,7 @@ export async function POST_reject_assignment({ session, params, body, ipAddress,
     where: { id: params.id },
     data: { status: 'cancelled' },
   });
-  // Cancel all generated trips AND their booked rides (P0 / BIZ-011).
-  // Notify affected riders.
+  // Cancel all generated trips AND their booked rides. Notify affected riders.
   const tripsToCancel = await db.trip.findMany({
     where: { assignmentId: params.id, status: 'scheduled' },
     select: { id: true },
@@ -325,7 +319,7 @@ export async function POST_reject_assignment({ session, params, body, ipAddress,
       });
     });
 
-    // BIZ-04: schedule refunds for affected riders who paid via seat claims
+    // Schedule refunds for affected riders who paid via seat claims
     // (subscription-booked rides don't have a per-ride payment to refund —
     // their subscription credit will be restored by the existing releaseRide
     // path). For seat-claim rides, look up the linked Payment + schedule a
@@ -355,10 +349,8 @@ export async function POST_reject_assignment({ session, params, body, ipAddress,
       }
     }
 
-    // BIZ-04 (#12): restore subscription credits for cancelled
-    // subscription-booked rides. The previous comment claimed this was done
-    // but the loop was missing. Mirrors the pattern in
-    // api-operations.ts:POST_trip_cancel.
+    // Restore subscription credits for cancelled subscription-booked rides.
+    // Mirrors the pattern in api-operations.ts:POST_trip_cancel.
     const { releaseRide } = await import('@/lib/subscription');
     for (const r of ridesToCancel) {
       if (r.subscriptionId) {

@@ -9,7 +9,7 @@ import { createId } from '@/lib/id';
 import { enqueueNotification } from '@/lib/outbox';
 import { logger } from '@/lib/logger';
 
-// Single source of truth for corporate subsidy calculation (P2-9, DB-052, BIZ-062).
+// Single source of truth for corporate subsidy calculation.
 export function computeCorporateSubsidy(priceCents: number, subsidyPercent: number): { riderAmountCents: number; corporateSubsidyCents: number } {
   const corporateSubsidyCents = Math.round(priceCents * Math.max(0, Math.min(100, subsidyPercent)) / 100);
   return {
@@ -47,7 +47,7 @@ export async function POST_create({ session, body, ipAddress, userAgent }: any) 
   const plan = await db.subscriptionPlan.findUnique({ where: { id: input.planId } });
   if (!plan || !plan.isActive) throw new NotFoundError('Plan not found');
 
-  // Trial-only-once check (P1-28 race condition: re-validated inside the tx below).
+  // Trial-only-once check (race: re-validated inside the tx below).
   if (plan.isTrial) {
     const priorTrial = await db.subscription.findFirst({
       where: { userId: session.id, plan: { isTrial: true } },
@@ -80,11 +80,10 @@ export async function POST_create({ session, body, ipAddress, userAgent }: any) 
   }
 
   const now = new Date();
-  // BIZ-068 (#17): use calendar-day arithmetic instead of ms-since-epoch.
-  // The previous `new Date(now.getTime() + plan.durationDays * 24 * 3600_000)`
-  // drifts across DST transitions (Africa/Addis_Ababa has no DST today, but
-  // this is the correct general pattern) and accumulates floating-point error
-  // for very large durationDays values.
+  // Use calendar-day arithmetic instead of ms-since-epoch. The previous
+  // `new Date(now.getTime() + plan.durationDays * 24 * 3600_000)` drifts
+  // across DST transitions and accumulates floating-point error for very
+  // large durationDays values.
   const endDate = new Date(now);
   endDate.setDate(endDate.getDate() + plan.durationDays);
 
@@ -92,9 +91,9 @@ export async function POST_create({ session, body, ipAddress, userAgent }: any) 
   const provider = getPaymentProvider(input.paymentMethod);
   const env = loadEnv();
 
-  // Create subscription + payment atomically (already done in original code).
-  // re-check trial inside the tx so two parallel POST /subscriptions calls
-  // for a trial plan can't both succeed.
+  // Create subscription + payment atomically. Re-check trial inside the tx
+  // so two parallel POST /subscriptions calls for a trial plan can't both
+  // succeed.
   const sub = await db.$transaction(async (tx) => {
     if (plan.isTrial) {
       const priorTrialInTx = await tx.subscription.findFirst({
@@ -121,8 +120,7 @@ export async function POST_create({ session, body, ipAddress, userAgent }: any) 
         subscriptionId: created.id,
         method: input.paymentMethod,
         amountCents: riderAmountCents,
-        // BIZ-08 (#24): record the corporate subsidy portion for the monthly
-        // billing job to sum up.
+        // Record the corporate subsidy portion for the monthly billing job.
         subsidyCents: corporateSubsidyCents,
         status: 'pending',
       },
@@ -131,8 +129,9 @@ export async function POST_create({ session, body, ipAddress, userAgent }: any) 
   }, { timeout: 15000, maxWait: 20000 });
 
   // Create the Telebirr checkout *after* the sub+payment row commits, so if
-  // createCheckout throws we still have a pending Payment that the user can retry.
-  // (P1-21 — orphaned Telebirr order if the tx rolls back.)
+  // createCheckout throws we still have a pending Payment that the user can
+  // retry. (Creating it inside the tx would orphan the Telebirr order if the
+  // tx rolls back.)
   let checkout: any;
   try {
     checkout = await provider.createCheckout({
@@ -182,8 +181,8 @@ export async function GET_one({ session, params }: any) {
   return { data: sub };
 }
 
-// Cascade-cancel future rides when a subscription is cancelled (P0-3 / BIZ-005).
-// Restore trip.seatsBooked for each cancelled ride so other riders can book.
+// Cascade-cancel future rides when a subscription is cancelled. Restore
+// trip.seatsBooked for each cancelled ride so other riders can book.
 export async function POST_cancel({ session, params, ipAddress, userAgent }: any) {
   const sub = await db.subscription.findUnique({ where: { id: params.id } });
   if (!sub) throw new NotFoundError('Subscription not found');
@@ -302,7 +301,7 @@ export async function POST_renew({ session, params, body, ipAddress, userAgent }
   // extend the existing subscription's endDate if it's still active,
   // start the new one from now.
   const newStartDate = sub.status === 'active' && sub.endDate > now ? sub.endDate : now;
-  // BIZ-068 (#17): calendar-day arithmetic (see POST_create for rationale).
+  // Calendar-day arithmetic (see POST_create for rationale).
   const newEndDate = new Date(newStartDate);
   newEndDate.setDate(newEndDate.getDate() + sub.plan.durationDays);
 
@@ -325,7 +324,7 @@ export async function POST_renew({ session, params, body, ipAddress, userAgent }
           subscriptionId: extended.id,
           method: paymentMethod,
           amountCents: riderAmountCents,
-          // BIZ-08 (#24): record the corporate subsidy portion.
+          // Record the corporate subsidy portion.
           subsidyCents: sub.plan.priceCents - riderAmountCents,
           status: 'pending',
         },
@@ -351,7 +350,7 @@ export async function POST_renew({ session, params, body, ipAddress, userAgent }
         subscriptionId: created.id,
         method: paymentMethod,
         amountCents: riderAmountCents,
-        // BIZ-08 (#24): record the corporate subsidy portion.
+        // Record the corporate subsidy portion.
         subsidyCents: sub.plan.priceCents - riderAmountCents,
         status: 'pending',
       },
@@ -393,13 +392,13 @@ export async function POST_renew({ session, params, body, ipAddress, userAgent }
 }
 
 export async function DELETE_subscription(ctx: any) {
-  // INC-02 (#21): DELETE returns 204 with no body. Delegate to POST_cancel for
-  // the actual work, then strip the body from the response.
+  // DELETE returns 204 with no body. Delegate to POST_cancel for the actual
+  // work, then strip the body from the response.
   await POST_cancel(ctx);
   return { status: 204 };
 }
 
-// #7: POST /subscriptions/:id/change-payment-method — swap the payment method
+// POST /subscriptions/:id/change-payment-method — swap the payment method
 // for the subscription's NEXT billing cycle. Cancels the existing pending
 // payment (if any) and creates a new pending Payment row with the requested
 // method. Does NOT touch a completed/confirmed payment for the current cycle.

@@ -1,7 +1,6 @@
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 
-// FE-01: loading.tsx for /tickets.
 export default function TicketsLoading() {
   return (
     <div className="min-h-screen bg-muted/30 p-4 md:p-8">

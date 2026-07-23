@@ -1,11 +1,6 @@
-// Design tokens for the Addis Ride mobile app.
-//
-// Single source of truth for colors, spacing, radius, typography, and weight.
-// All screens and components should import from here instead of using raw hex
-// values — this makes future dark-mode / theming work a one-file change.
-//
-// (MOB-05c — every screen previously hardcoded hex codes like `#2563eb`,
-// `#fff`, `#666`, `#f5f5f5`, making theme changes impossible.)
+// Design tokens for the Addis Ride mobile app — single source of truth for
+// colors, spacing, radius, and typography. Import from here instead of raw
+// hex values so theme changes stay a one-file edit.
 
 export const colors = {
   primary: '#2563eb',

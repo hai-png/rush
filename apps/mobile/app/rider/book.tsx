@@ -15,8 +15,6 @@ export default function BookScreen() {
 
   useEffect(() => {
     let active = true;
-    // only fetched /subscriptions and left `pickups` as [], so the screen
-    // title said "Choose Pickup Location" but the list was always empty.
     Promise.all([
       api.get<any>('/subscriptions').then(s => { if (active) setSubs((s || []).filter((x: any) => x.status === 'active')); }).catch(() => { if (active) setSubs([]); }),
       api.get<any>('/trips').then((trips: any) => {

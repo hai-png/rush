@@ -5,20 +5,16 @@ import { getSmsProvider } from '@/lib/sms';
 import { getEmailProvider } from '@/lib/email';
 import { logger } from '@/lib/logger';
 
-// Re-export processRefundRetries so api-cron.ts can run it directly via ?job=refund-retries.
-// The function itself lives in payment-service.ts; the scheduler also calls it
-// on its own 60s timer.
+// Re-exported so api-cron.ts can run it directly via ?job=refund-retries.
 export { processRefundRetries };
 
 let started = false;
 
-// BIZ-12: SINGLE-INSTANCE LIMITATION. The scheduler runs in-process and has
-// no distributed lock (Redlock, PG advisory locks, etc.). On a multi-instance
-// deployment, every instance races the same outbox/refund/expire jobs —
-// causing duplicate push notifications, double-refund attempts, etc. Until a
-// distributed lock is added, deployments MUST run with SCHEDULER_DISABLED=1
-// on all but one instance (the designated worker), or run a single instance.
-// Tracked as future work pending Redis Redlock integration.
+// Single-instance limitation: the scheduler runs in-process with no distributed
+// lock. On a multi-instance deployment, every instance races the same
+// outbox/refund/expire jobs (duplicate notifications, double-refunds). Until
+// a distributed lock is added, deployments MUST run with SCHEDULER_DISABLED=1
+// on all but one instance (or run a single instance).
 
 export function ensureSchedulerStarted(): void {
   if (started) return;
@@ -50,10 +46,8 @@ export function ensureSchedulerStarted(): void {
   logger.info('[scheduler] started: outbox(30s), refunds(60s), expire(5m), hourly(1h)');
 }
 
-// export a single entry point that runs ALL jobs, so the external
-// cron endpoint (api-cron.ts POST_run) can call the same logic as the
-// on expired releases, subscription-expiry notifications, monthly corporate
-// counter reset, outbox drain).
+// Single entry point for all jobs — used by the external cron endpoint
+// (api-cron.ts POST_run) so it calls the same logic as the in-process timers.
 export async function runAllJobs(): Promise<{
   refunds: number;
   expiredSubs: number;
@@ -61,36 +55,25 @@ export async function runAllJobs(): Promise<{
   outboxPending: number;
   outboxProcessing: number;
 }> {
-  // 1. Drain the outbox (SMS/email/notification delivery).
   await drainOutbox();
-
-  // 2. Process refund retries.
   const refundResult = await processRefundRetries(50);
-
-  // 3. Expire stale subscriptions + seat releases (with full cascade:
-  //    seat restoration, notifications, etc.).
   await expireStale();
-
-  // 4. Run hourly jobs (corporate monthly reset, subscription-expiry
-  //    warnings, retention cleanup, stale seat-claim timeout, trip
-  //    generation recovery, hard-delete stale users).
   await hourlyJobs();
 
-  // Report status.
   const pendingOutbox = await db.outboxEvent.count({ where: { status: 'pending' } });
   const processingOutbox = await db.outboxEvent.count({ where: { status: 'processing' } });
 
   return {
     refunds: refundResult.processed,
     expiredSubs: -1, // expireStale handles this internally; count not returned
-    expiredReleases: -1,
+    expiredReleases: -1, // likewise
     outboxPending: pendingOutbox,
     outboxProcessing: processingOutbox,
   };
 }
 
-// BIZ-069 (#18): exported so api-cron.ts can run a single job on demand
-// via ?job=expire-stale. Likewise drainOutbox / hourlyJobs below.
+// Exported so api-cron.ts can run a single job on demand via ?job=expire-stale.
+// Likewise drainOutbox / hourlyJobs below.
 export async function drainOutbox(): Promise<void> {
   // reaper — reset events that have been stuck in 'processing' for >15min.
   // Without this, a process crash mid-drain leaves events stranded forever.
@@ -110,10 +93,8 @@ export async function drainOutbox(): Promise<void> {
   }
 
   let processed = 0;
-  // SCHED-03a: loop 10 iterations × 50 events per tick (was 5 × 20 = 100
-  // events per 30s tick). At the new cap of 500 events per tick the drain
-  // can keep up with ~1000 events/min sustained, which covers typical burst
-  // load (mass notification fan-out, refund retries) without growing backlog.
+  // 500 events per tick (10 × 50) — enough headroom to keep up with
+  // ~1000 events/min sustained (mass notification fan-out, refund retries).
   for (let i = 0; i < 10; i++) {
     const claimed = await db.$transaction(async (tx) => {
       const rows = await tx.outboxEvent.findMany({
@@ -138,12 +119,11 @@ export async function drainOutbox(): Promise<void> {
         const payload = JSON.parse(evt.payload);
         switch (evt.channel) {
           case 'notification':
-            // HALF-01 (#22): enqueueNotification already wrote the Notification
-            // DB row. This channel exists for retry-observability only — emit
-            // a structured log line so alerting can pick up notification
-            // "emissions" even though there's no external system to deliver to.
-            // The Notification row itself is the source of truth for "did the
-            // user see it?" (readAt on the Notification table).
+            // enqueueNotification already wrote the Notification DB row. This
+            // channel is retry-observability only — emit a structured log so
+            // alerting can pick up "emissions" with no external system to
+            // deliver to. The Notification row is the source of truth for
+            // "did the user see it?" (readAt on the Notification table).
             logger.info({ id: evt.id, userId: payload.userId, type: payload.type }, 'outbox.notification.emitted');
             break;
           case 'sms':
@@ -155,8 +135,6 @@ export async function drainOutbox(): Promise<void> {
             if (!emailResult.ok) throw new Error(emailResult.error || 'Email send failed');
             break;
           case 'push':
-            // deliver push notification via Expo Push API.
-            // Read the user's registered device tokens from the Setting table.
             const deviceRows = await db.setting.findMany({
               where: { key: { startsWith: `device:${payload.userId}:` } },
               select: { value: true },
@@ -166,7 +144,6 @@ export async function drainOutbox(): Promise<void> {
               try { return JSON.parse(r.value).pushToken; } catch { return null; }
             }).filter(Boolean);
             if (tokens.length === 0) break;
-            // Send to Expo Push API.
             const pushResponse = await fetch('https://exp.host/--/api/v2/push/send', {
               method: 'POST',
               headers: { 'content-type': 'application/json' },
@@ -217,18 +194,15 @@ export async function drainOutbox(): Promise<void> {
   }
 }
 
-// BIZ-069 (#18): exported for per-job cron trigger.
+// Exported for per-job cron trigger.
 export async function expireStale(): Promise<void> {
-  // BIZ-069 (#18): hoist `now` so all sub-checks use a single timestamp.
-  // Multiple new Date() calls inside the same function can drift across
-  // millisecond boundaries and produce inconsistent filter results
-  // (e.g. an expiringSubs row read with `lt: now1` but written with
-  // `lt: now2` where now2 > now1 — rows that flipped in between are missed).
+  // Hoist `now` so all sub-checks use a single timestamp. Multiple new Date()
+  // calls can drift across millisecond boundaries and produce inconsistent
+  // filter results (rows that flip between now1 and now2 are missed).
   const now = new Date();
-  // Capture the IDs of subs that are about to expire so we can cascade-cancel their future rides.
-  // SCHED-03b: cap at 100 per run so the scheduler can't OOM if thousands of
-  // subs expire at once (e.g. a mass expiry event). Subsequent ticks pick up
-  // the rest.
+  // Capture IDs of subs about to expire so we can cascade-cancel their future rides.
+  // Cap at 100 per run to avoid OOM if thousands of subs expire at once
+  // (e.g. mass expiry event). Subsequent ticks pick up the rest.
   const expiringSubs = await db.subscription.findMany({
     where: { status: 'active', endDate: { lt: now } },
     select: { id: true, userId: true },
@@ -273,7 +247,7 @@ export async function expireStale(): Promise<void> {
   // Before marking releases as expired, collect them so we can restore
   // each seller's ride + trip capacity. A release that expired without a
   // buyer means the seller gets their seat back.
-  // SCHED-03c: cap at 100 per run — same rationale as expiringSubs above.
+  // Cap at 100 per run — same rationale as expiringSubs above.
   const expiringReleases = await db.seatRelease.findMany({
     where: { status: 'open', expiresAt: { lt: now } },
     select: { id: true, tripId: true, userId: true },
@@ -286,7 +260,7 @@ export async function expireStale(): Promise<void> {
   if (expiringReleases.length > 0) {
     for (const r of expiringReleases) {
       await db.$transaction(async (tx) => {
-        // CAS-guarded restoration so concurrent paths can't double-increment seatsBooked (P1-22).
+        // CAS-guarded restoration so concurrent paths can't double-increment seatsBooked.
         const sellerRide = await tx.ride.findFirst({
           where: { tripId: r.tripId, userId: r.userId, status: 'released' },
           select: { id: true },
@@ -301,7 +275,6 @@ export async function expireStale(): Promise<void> {
           }
         }
       }).catch((err) => logger.error({ err: (err as Error).message }, '[scheduler] restore expired release failed'));
-      // Notify the seller their release expired and seat was restored.
       await enqueueNotification({
         userId: r.userId,
         type: 'seat_release_expired',
@@ -329,9 +302,8 @@ export async function expireStale(): Promise<void> {
   }
 }
 
-// BIZ-069 (#18): exported for per-job cron trigger.
-// DB-048 (#27): also calls rolloverAssignments() — see that function for the
-// auto-renewal logic.
+// Exported for per-job cron trigger. Also calls rolloverAssignments()
+// (see that function for the auto-renewal logic).
 export async function hourlyJobs(): Promise<void> {
   await Promise.all([
     resetCorporateMonthlyCounters(),
@@ -362,7 +334,6 @@ async function hardDeleteStaleUsers(): Promise<void> {
   for (const user of staleUsers) {
     try {
       await db.$transaction(async (tx) => {
-        // Nullify PII on the user row.
         await tx.user.update({
           where: { id: user.id },
           data: {
@@ -374,7 +345,6 @@ async function hardDeleteStaleUsers(): Promise<void> {
             phoneVerified: false,
           },
         });
-        // Delete associated PII data (non-financial).
         await tx.session.deleteMany({ where: { userId: user.id } });
         await tx.notification.deleteMany({ where: { userId: user.id } });
         await tx.otpCode.deleteMany({ where: { userId: user.id } });
@@ -396,10 +366,10 @@ async function hardDeleteStaleUsers(): Promise<void> {
   }
 }
 
-// expire pending seat claims that never got paid.
-// If a buyer claims a release but never completes checkout, the claim stays
-// 'pending' and the release stays 'claimed' forever — blocking the seller's
-// marks them as failed, reopens the release, and restores the seller's ride.
+// Expire pending seat claims that never got paid. If a buyer claims a release
+// but never completes checkout, the claim stays 'pending' and the release stays
+// 'claimed' forever — blocking the seller's seat. This marks them as failed,
+// reopens the release, and restores the seller's ride.
 async function expireStaleSeatClaims(): Promise<void> {
   const now = new Date();
   const cutoff = new Date(now.getTime() - 15 * 60_000);
@@ -412,20 +382,18 @@ async function expireStaleSeatClaims(): Promise<void> {
 
   for (const claim of staleClaims) {
     await db.$transaction(async (tx) => {
-      // Mark the claim as 'refunded' (terminal state for failed claims).
+      // 'refunded' is the terminal state for failed claims.
       const claimCas = await tx.seatClaim.updateMany({
         where: { id: claim.id, status: 'pending' },
         data: { status: 'refunded' },
       });
       if (claimCas.count === 0) return; // already processed by another path
 
-      // Reopen the release.
       await tx.seatRelease.updateMany({
         where: { id: claim.seatReleaseId, status: 'claimed' },
         data: { status: 'open' },
       });
 
-      // Mark the payment as failed.
       if (claim.paymentId) {
         await tx.payment.updateMany({
           where: { id: claim.paymentId, status: 'pending' },
@@ -439,16 +407,9 @@ async function expireStaleSeatClaims(): Promise<void> {
   }
 }
 
-// ensure trips exist for all active assignments.
-// If trip generation failed at assignment creation/acceptance time, this job
-// catches up by generating any missing trips for the current month.
-//
-// DB-048: CROSS-MONTH ROLLOVER IS FUTURE WORK. This job only ensures trips
-// for the current active assignment's [monthStart, monthEnd] window. There is
-// no logic to auto-create next month's RouteAssignment when the current one
-// expires — admins must create it manually each month. A future enhancement
-// should auto-renew assignments whose contractor has no cancellations and
-// whose shuttle is still active.
+// Ensure trips exist for all active assignments. Catches up if trip generation
+// failed at assignment creation/acceptance time. Cross-month rollover is
+// handled separately by rolloverAssignments() (gated by `auto_rollover_enabled`).
 async function ensureTripsForActiveAssignments(): Promise<void> {
   const now = new Date();
   const activeAssignments = await db.routeAssignment.findMany({
@@ -478,19 +439,12 @@ async function ensureTripsForActiveAssignments(): Promise<void> {
   }
 }
 
-// OutboxEvent, IdempotencyRecord, OtpCode, TelebirrNotifyEvent, and RefundRetry
-// and queries slow down. We delete rows older than the retention window.
+// Hard-delete rows past their retention window to keep tables small. A future
+// archival pipeline should move aged rows to cold storage (S3/Glacier) before
+// deleting them for audit/dispute/compliance.
 //
-// SCHED-06: ARCHIVAL IS FUTURE WORK. These jobs hard-delete rows past their
-// retention window. For audit/dispute/compliance purposes, a future
-// enhancement should move aged rows to cold storage (S3 + Glacier, or a
-// dedicated analytics DB) BEFORE deleting them, so historical data isn't
-// permanently lost. Tracked as future work pending an archival pipeline.
-//
-// DB-033: AuditLog is intentionally NOT included in these jobs. The audit
-// chain is append-only and must be retained for 7 years for compliance / tax
-// / dispute-resolution purposes. A future archival job should move aged
-// AuditLog rows to cold storage (S3 + Glacier) instead of deleting them.
+// AuditLog is intentionally NOT included here — the audit chain is append-only
+// and must be retained for 7 years for compliance / tax / dispute resolution.
 async function retentionJobs(): Promise<void> {
   const now = new Date();
   const THIRTY_DAYS = new Date(now.getTime() - 30 * 24 * 3600_000);
@@ -527,12 +481,11 @@ async function retentionJobs(): Promise<void> {
 }
 
 async function resetCorporateMonthlyCounters(): Promise<void> {
-  // DB-049: reset on calendar-month boundaries, not a rolling 30-day window.
-  // A rolling window is off by up to ~15 days from the corporate billing
-  // cycle and makes "monthly seat allowance" semantics ambiguous. We compute
-  // the start of the current calendar month (local server time, which the
-  // Dockerfile pins to Africa/Addis_Ababa) and reset any member whose
-  // lastResetAt is before that timestamp.
+  // Reset on calendar-month boundaries, not a rolling 30-day window — a
+  // rolling window drifts from the corporate billing cycle and makes "monthly
+  // seat allowance" ambiguous. We compute the start of the current calendar
+  // month (server time pinned to Africa/Addis_Ababa) and reset any member
+  // whose lastResetAt is before that timestamp.
   const now = new Date();
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1, 0, 0, 0, 0);
   const result = await db.corporateMember.updateMany({
@@ -555,7 +508,7 @@ async function resetCorporateMonthlyCounters(): Promise<void> {
 async function sendSubscriptionExpiryWarnings(): Promise<void> {
   const threeDaysFromNow = new Date(Date.now() + 3 * 24 * 3600_000);
   const oneDayFromNow = new Date(Date.now() + 24 * 3600_000);
-  // SCHED-03c: cap at 100 per run so the scheduler can't OOM under load.
+  // Cap at 100 per run to avoid OOM under load.
   const soonExpiring = await db.subscription.findMany({
     where: {
       status: 'active',
@@ -591,12 +544,11 @@ async function sendSubscriptionExpiryWarnings(): Promise<void> {
   }
 }
 
-// DB-048 (#27): cross-month rollover. For each active RouteAssignment whose
-// monthEnd is within the next 7 days, clone it to next month (shift monthStart
-// and monthEnd by +1 calendar month) so trip generation has somewhere to land
-// when the current month expires. Only fires when an admin has opted in via
-// the `auto_rollover_enabled` Setting (default: off). The contractor must be
-// active and the shuttle must still be active — we don't want to auto-renew
+// Cross-month rollover. For each active RouteAssignment whose monthEnd is
+// within the next 7 days, clone it to next month so trip generation has
+// somewhere to land when the current month expires. Only fires when an admin
+// has opted in via the `auto_rollover_enabled` Setting (default: off). The
+// contractor and shuttle must both still be active — we don't auto-renew
 // assignments for contractors who've left or shuttles that have been retired.
 async function rolloverAssignments(): Promise<void> {
   const setting = await db.setting.findUnique({ where: { key: 'auto_rollover_enabled' } });
@@ -605,7 +557,6 @@ async function rolloverAssignments(): Promise<void> {
   const now = new Date();
   const sevenDaysFromNow = new Date(now.getTime() + 7 * 24 * 3600_000);
 
-  // Active assignments ending within the next 7 days.
   const endingSoon = await db.routeAssignment.findMany({
     where: {
       status: 'active',
@@ -622,7 +573,6 @@ async function rolloverAssignments(): Promise<void> {
 
   let created = 0;
   for (const a of endingSoon) {
-    // Verify contractor is still active + shuttle still active.
     const contractor = await db.user.findUnique({
       where: { id: a.contractorId },
       select: { id: true, isActive: true, deletedAt: true },
@@ -634,7 +584,6 @@ async function rolloverAssignments(): Promise<void> {
     });
     if (!shuttle || !shuttle.isActive) continue;
 
-    // Compute next month's start/end by shifting monthStart by +1 month.
     const nextMonthStart = new Date(a.monthStart.getFullYear(), a.monthStart.getMonth() + 1, 1);
     const nextMonthEnd = new Date(nextMonthStart.getFullYear(), nextMonthStart.getMonth() + 1, 0, 23, 59, 59);
 
@@ -682,20 +631,18 @@ async function rolloverAssignments(): Promise<void> {
   }
 }
 
-// BIZ-08 (#24): monthly corporate billing. For each active Corporate with
-// members, sum the subsidies consumed (Payment.subsidyCents) in the previous
-// calendar month and create a CorporateInvoice row with status='issued' and
-// dueAt = +30 days. Gated by the `corporate_billing_enabled` Setting.
+// Monthly corporate billing. For each active Corporate with members, sum the
+// subsidies consumed (Payment.subsidyCents) in the previous calendar month
+// and create a CorporateInvoice row with status='issued' and dueAt = +30 days.
+// Gated by the `corporate_billing_enabled` Setting.
 async function corporateBilling(): Promise<void> {
   const setting = await db.setting.findUnique({ where: { key: 'corporate_billing_enabled' } });
   if (!setting || setting.value !== 'true') return;
 
   const now = new Date();
-  // Only run on the first day of the month (or close to it — hourly tick
-  // checks). Skip if not the first day.
+  // Only run on the first day of the month (hourly tick checks).
   if (now.getDate() !== 1) return;
 
-  // Previous month boundaries.
   const periodEnd = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
   const periodStart = new Date(now.getFullYear(), now.getMonth() - 1, 1);
 
@@ -715,7 +662,6 @@ async function corporateBilling(): Promise<void> {
     });
     if (existing) continue;
 
-    // Sum subsidies consumed in the previous month for this corporate.
     const agg = await db.payment.aggregate({
       _sum: { subsidyCents: true },
       where: {

@@ -13,7 +13,6 @@ export const metadata: Metadata = { title: 'Plans · Admin' };
 
 const PAGE_SIZE = 50;
 
-// FE-044: paginated plans list (was unbounded, no pagination UI).
 export default async function AdminPlansPage({ searchParams }: { searchParams: Promise<{ page?: string }> }) {
   await requireRole('platform_admin');
   const sp = await searchParams;

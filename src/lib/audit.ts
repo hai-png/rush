@@ -1,12 +1,8 @@
 // Hash-chained append-only audit log. Each entry's hash covers the full
 // payload (actor, action, entity, before/after, ipAddress, userAgent) plus
 // the previous entry's hash — tampering with any field breaks the chain.
-//
-// (millisecond precision), which forked the hash chain when two writes
-// landed in the same millisecond or when multiple process instances raced.
-// Now we use a monotonic `seq` integer that's assigned inside the same
-// transaction as the row insert, so ordering is deterministic regardless
-// of clock skew or concurrency.
+// Ordering uses a monotonic `seq` assigned in the same transaction as the
+// row insert, so it's deterministic regardless of clock skew or concurrency.
 import { db } from '@/lib/db';
 import { createHash } from 'node:crypto';
 import { logger } from '@/lib/logger';
@@ -41,10 +37,10 @@ function computeHash(input: AuditInput, prevHash: string | null): string {
 
 let auditQueue: Promise<void> = Promise.resolve();
 
-// DB-046: audit actions classified as security-critical MUST propagate write
-// failures to the caller (instead of being swallowed by the queue's catch).
-// Without this, a failed audit write for e.g. `user.role_changed` would
-// silently vanish — security reviews would have no record of the change.
+// Security-critical audit actions MUST propagate write failures to the caller
+// (instead of being swallowed by the queue's catch). Without this, a failed
+// audit write for e.g. `user.role_changed` would silently vanish — security
+// reviews would have no record of the change.
 const SECURITY_CRITICAL_ACTIONS = new Set([
   'user.role_changed',
   'user.suspended',
@@ -67,18 +63,16 @@ export function audit(input: AuditInput): Promise<void> {
   auditQueue = auditQueue.then(() => auditInternal(input)).catch((err) => {
     // Always log loudly so an alerting system can pick this up.
     logger.error({ err: (err as Error).message, action: input.action }, '[audit] write failed');
-    // DB-046 (#26): emit a separate structured warn line tagged
-    // `dropped_audit` so ops can count dropped-non-critical audits in
-    // isolation from the security-critical errors above. No prom-client is
-    // installed in this repo (see src/lib/api-metrics.ts for the in-memory
-    // Prometheus implementation) — we rely on structured logs being scraped
-    // by Grafana Loki / Datadog.
+    // Emit a separate structured warn line tagged `dropped_audit` so ops can
+    // count dropped non-critical audits in isolation from security-critical
+    // errors above. We rely on structured logs being scraped by Grafana Loki /
+    // Datadog (no prom-client in this repo — see src/lib/api-metrics.ts).
     if (!isSecurityCritical) {
       logger.warn({ action: input.action, error: (err as Error).message, tag: 'dropped_audit' }, 'audit.dropped');
     }
-    // DB-046 (#26): in AUDIT_STRICT=1 mode, every audit failure propagates
-    // to the caller — useful in CI / staging to catch any audit-write path
-    // that would silently drop in production.
+    // In AUDIT_STRICT=1 mode, every audit failure propagates to the caller —
+    // useful in CI / staging to catch any audit-write path that would silently
+    // drop in production.
     if (isSecurityCritical || process.env.AUDIT_STRICT === '1') {
       throw err;
     }

@@ -68,8 +68,6 @@ export function TwoFactorSetup({ enabled }: { enabled: boolean }) {
           </div>
         ) : (
           <div className="space-y-3">
-            {/* P2-25 / FE-046: render a QR code so users can scan with their
-                authenticator app instead of typing the 32-char base32 secret. */}
             <p className="text-sm">Scan this QR code with your authenticator app (Google Authenticator, Authy, 1Password, etc.):</p>
             <div className="flex justify-center p-4 bg-white rounded-lg">
               <QRCodeSVG value={otpauth} size={200} level="M" />

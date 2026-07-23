@@ -10,6 +10,7 @@ Shuttle subscription platform for Addis Ababa. Riders subscribe to monthly plans
 - **Payments:** Real Telebirr H5 C2B Web Payment integration (RSA-PSS-SHA256 signing) + mock fallback for dev + CBE manual bank transfer
 - **2FA:** otplib TOTP for privileged roles (corporate_admin, platform_admin)
 - **Styling:** Tailwind 4 + shadcn/ui (New York) + lucide-react
+- **Maps:** react-leaflet (route preview in admin/rider pages)
 - **Notifications/audit:** In-process outbox + scheduler (no separate worker)
 
 ## Quick start
@@ -23,15 +24,15 @@ bun run dev                # start dev server on http://localhost:3000
 
 ### Demo credentials (seeded)
 
-| Role             | Phone           | Password           |
-| ---------------- | --------------- | ------------------ |
-| Rider            | +251911000002   | rider-pass-1234    |
+| Role             | Phone           | Password             |
+| ---------------- | --------------- | -------------------- |
+| Rider            | +251911000002   | rider-pass-1234      |
 | Contractor       | +251911000003   | contractor-pass-1234 |
-| Platform admin   | +251911000001   | admin-pass-1234    |
+| Platform admin   | +251911000001   | admin-pass-1234      |
 
 ## Configuration
 
-Copy `.env.example` to `.env` and fill in. All vars have sensible dev defaults; production requires real values for `AUTH_SECRET`, `CRON_SECRET`, and Telebirr creds.
+Copy `.env.example` to `.env` and fill in. All vars have sensible dev defaults; production requires real values for `AUTH_SECRET`, `CRON_SECRET`, and Telebirr creds. See `DEPLOYMENT.md` for the production hardening checklist.
 
 ### Telebirr
 
@@ -51,9 +52,9 @@ The integration uses the H5 C2B Web Payment flow per https://developer.ethiotele
 ## Architecture
 
 ```
-prisma/schema.prisma         — single source of truth (31 models)
+prisma/schema.prisma         — single source of truth (37 models)
 scripts/seed.ts              — seeds demo data
-scripts/e2e-test.sh          — end-to-end flow test (59 assertions)
+scripts/e2e-test.sh          — end-to-end flow test (see script output for assertion count)
 src/lib/                     — primitives: db, auth, api, money, errors, env,
                                audit, outbox, payments, payment-service, otp,
                                phone, id, session-server, api-client,
@@ -63,8 +64,9 @@ src/lib/api-*.ts             — per-module handler functions:
                                marketplace, operations, support, admin,
                                admin-advanced, webhooks, cron, tos, account,
                                dashboard, engagement, corporate, documents,
-                               files, telebirr, health, assignments
-src/lib/api-routes.ts        — single route table (158 endpoints)
+                               files, telebirr, health, metrics, assignments,
+                               ratings
+src/lib/api-routes.ts        — single route table (186 operations / 155 paths)
 src/app/api/v1/[[...route]]/route.ts — single catch-all dispatcher
 src/app/**/page.tsx          — all web pages (57 server components)
 src/components/              — client components (sign-out-button, trip-actions,
@@ -82,17 +84,20 @@ src/components/              — client components (sign-out-button, trip-action
 - **2FA required for privileged roles** (corporate_admin, platform_admin)
 - **Phone verification required for privileged roles**
 - **Refund row-lock:** `scheduleRefund` runs inside a transaction so concurrent refunds can't over-refund
-- **Telebirr dedup:** composite PK `(merch_order_id, out_request_no)` on `TelebirrNotifyEvent` — done right the first time
+- **Telebirr dedup:** composite PK `(merch_order_id, out_request_no)` on `TelebirrNotifyEvent`
 
 ## Testing
 
 ```bash
 bun run lint                # ESLint
 bunx tsc --noEmit           # TypeScript
-bash scripts/e2e-test.sh    # e2e flow test (59 assertions; run while dev server is up)
+bun run test:race           # race-condition integration tests (9 tests)
+bash scripts/e2e-test.sh    # e2e flow test (run while dev server is up;
+                            #   see script output for current assertion count)
+bun run openapi:gen         # regenerate openapi.json from the route table
 ```
 
-The e2e test exercises: public catalog, rider registration + buy plan + Telebirr mock pay + book ride + list seat, contractor document upload + trip creation, admin contractor verification + audit chain verification, corporate onboard (with 2FA gate) + invite + member join + approve, support ticket + admin reply, account data export, cron job, plus feature-parity coverage of 17 additional endpoints.
+The e2e test exercises: public catalog, rider registration + buy plan + Telebirr mock pay + book ride + list seat, contractor document upload + trip creation, admin contractor verification + audit chain verification, corporate onboard (with 2FA gate) + invite + member join + approve, support ticket + admin reply, account data export, cron job, ride ratings, corporate invoices, plus feature-parity coverage of additional endpoints.
 
 ## User flows
 
@@ -104,6 +109,7 @@ The e2e test exercises: public catalog, rider registration + buy plan + Telebirr
 - Browse trips at `/trips`, book a ride against an active subscription
 - List a seat you can't use at `/open-seats/new`
 - Browse + claim seats on the marketplace at `/open-seats`
+- Rate completed rides via `POST /api/v1/rides/:id/rating`
 - Open support tickets at `/tickets/new`
 - Export your data at `/account/export`
 - Soft-delete your account at `/account/delete`
@@ -119,6 +125,7 @@ The e2e test exercises: public catalog, rider registration + buy plan + Telebirr
 - Onboard your company at `/corporate/onboard` (promotes you from rider to corporate_admin)
 - Generate invite codes at `/dashboard/corporate`
 - Approve / reject pending member requests
+- View monthly corporate invoices at `GET /api/v1/corporate/invoices`
 - Members join via `/corporate/signup` with the invite code
 
 ### Platform admin
@@ -127,6 +134,7 @@ The e2e test exercises: public catalog, rider registration + buy plan + Telebirr
 - Create plans, routes, shuttles
 - Reply to support tickets + change status
 - Verify audit chain integrity at `/admin/audit-logs`
+- Mark corporate invoices as paid via `POST /api/v1/admin/corporates/:id/invoices/:invoiceId/mark-paid`
 
 ## Mobile app
 
@@ -134,11 +142,11 @@ A companion Expo React Native app lives in `apps/mobile/` (rider + contractor fl
 
 ```bash
 cd apps/mobile
-npm install
+bun install
 npx expo start
 ```
 
-See `apps/mobile/README.md` for details. The mobile app talks to the web app's API at `http://10.0.2.2:3000` (Android emulator) or `http://localhost:3000` (web) — change `API_BASE` in `apps/mobile/src/lib/api.ts` for production.
+See `apps/mobile/README.md` for details. The mobile app talks to the web app's API — set `EXPO_PUBLIC_API_BASE` to override the default `http://10.0.2.2:3000` (Android emulator) or `http://localhost:3000` (web). Production builds reject `http://` URLs unless `EXPO_PUBLIC_API_ALLOW_HTTP=1` is set.
 
 ## License
 

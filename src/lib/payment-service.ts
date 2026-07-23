@@ -255,8 +255,8 @@ export async function scheduleRefund(paymentId: string, amount: Money, reason: s
   }
 }
 
-// BIZ-09: cancel a mid-flight refund. Only refunds still in 'pending' state
-// (not yet picked up by processRefundRetries) can be cancelled. Reverses the
+// Cancel a mid-flight refund. Only refunds still in 'pending' state (not yet
+// picked up by processRefundRetries) can be cancelled. Reverses the
 // refundAmountCents reservation made by scheduleRefund so the payment's
 // available-for-refund balance is restored.
 export async function cancelRefund(paymentId: string, refundRetryId: string, actorId: string): Promise<void> {

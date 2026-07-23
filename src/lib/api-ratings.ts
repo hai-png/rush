@@ -1,9 +1,9 @@
 // POST /rides/:id/rating — rider rates a completed ride.
 //
-// #3 / BIZ-055: a rider may rate a ride after it's `completed`. One rating
-// per (ride, rider) — the @@unique on RideRating enforces this at the DB layer
-// so we also pre-check here for a clean 409 instead of letting P2002 surface.
-// After a successful insert we recompute the contractor's aggregate rating.
+// A rider may rate a ride after it's `completed`. One rating per (ride, rider)
+// — the @@unique on RideRating enforces this at the DB layer so we also pre-check
+// here for a clean 409 instead of letting P2002 surface. After a successful
+// insert we recompute the contractor's aggregate rating.
 //
 // Auth: the caller must be the rider who took the ride. We accept either a
 // direct Ride (Ride.riderId === session.id) or a subscription-booked ride

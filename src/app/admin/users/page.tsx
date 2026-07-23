@@ -15,7 +15,6 @@ export const metadata: Metadata = { title: 'Users · Admin' };
 
 const PAGE_SIZE = 20;
 
-// FE-043: paginated user list (was take:200, no search, no pagination UI).
 // Reads `page`, `q` (free-text search across name/phone/email), and `role`
 // (filter) from searchParams and feeds them to findMany + count. The shared
 // <Pagination> component renders the prev/next controls and preserves the

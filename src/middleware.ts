@@ -1,19 +1,9 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-// / OPS-021: CORS middleware.
-//
-// anywhere. Same-origin requests (web app calling /api/v1/*) work fine without
-// CORS, but any cross-origin caller (marketing site, partner integration,
-// browser-based admin tool) was blocked by the browser.
-//
-// Behavior:
-//   1. For OPTIONS preflight: respond with CORS headers + 204.
-//   2. For actual requests: add CORS headers to the response.
-//   3. Allowlist of origins (CORS_ORIGINS env var, comma-separated, falls
-//      back to APP_BASE_URL). For credentialed requests (cookies), the
-//      origin must be echoed exactly — '*' is not allowed.
-//   4. Credentials allowed (cookies + Authorization header).
-//   5. Expose x-request-id so clients can correlate errors.
+// CORS middleware for cross-origin API callers. Echoes the request origin
+// exactly (CORS_ORIGINS allowlist) so credentialed requests work; OPTIONS
+// preflight gets a 204 with headers, all other methods add headers to the
+// response.
 
 function getAllowedOrigins(): string[] {
   const fromEnv = process.env.CORS_ORIGINS?.split(',').map(s => s.trim()).filter(Boolean) ?? [];

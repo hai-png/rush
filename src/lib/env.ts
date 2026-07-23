@@ -27,12 +27,12 @@ type Env = {
   RESEND_FROM: string;
   SENTRY_DSN: string;
   REDIS_URL: string;
-  // SEC-03: dedicated field-level encryption key (used by crypto-field.ts).
-  // Falls back to AUTH_SECRET if unset so existing deployments keep working.
+  // Dedicated field-level encryption key (used by crypto-field.ts). Falls
+  // back to AUTH_SECRET if unset so existing deployments keep working.
   FIELD_ENCRYPTION_KEY: string;
-  // SEC-12: comma-separated list of trusted proxy IP/CIDR strings. The
-  // rightmost XFF entry not coming from a trusted proxy is treated as the
-  // real client IP. Empty = trust no proxies (use socket peer).
+  // Comma-separated list of trusted proxy IP/CIDR strings. The rightmost XFF
+  // entry not coming from a trusted proxy is treated as the real client IP.
+  // Empty = trust no proxies (use socket peer).
   TRUSTED_PROXIES: string;
 };
 

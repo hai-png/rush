@@ -14,9 +14,6 @@ export default function ContractorDashboard() {
   const [loadError, setLoadError] = useState<string | null>(null);
 
   useEffect(() => {
-    // MOB-02: surface load errors instead of silently swallowing them.
-    // Previously both .catch(() => {}) hid network/401 failures — the user
-    // saw an empty list with no indication anything went wrong.
     let cancelled = false;
     setLoadError(null);
     Promise.all([

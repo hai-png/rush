@@ -13,7 +13,6 @@ export const metadata: Metadata = { title: 'Subscriptions · Admin' };
 
 const PAGE_SIZE = 50;
 
-// FE-044: paginated admin subscriptions list (was take:200, no pagination UI).
 export default async function AdminSubscriptionsPage({ searchParams }: { searchParams: Promise<{ page?: string }> }) {
   await requireRole('platform_admin');
   const sp = await searchParams;

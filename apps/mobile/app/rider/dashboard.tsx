@@ -42,18 +42,14 @@ export default function RiderDashboard() {
     if (isActive()) setRefreshing(false);
   }, []);
 
-  // (MOB-05e — active guard: when the screen blurs mid-fetch, drop the
-  // result instead of calling setState on an unfocused component.)
   useFocusEffect(useCallback(() => {
     let active = true;
     load(() => active);
     return () => { active = false; };
   }, [load]));
 
-  // register for push notifications on mount.
   useEffect(() => {
     registerForPushNotifications().catch(() => {});
-    // Listen for incoming notifications while the app is foregrounded.
     const unsub = listenForNotifications();
     return unsub;
   }, []);

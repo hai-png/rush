@@ -25,15 +25,15 @@ export async function GET_list({ session }: any) {
   return { data: payments };
 }
 
-// BIZ-03: idempotency window for /payments/checkout. After a successful
-// createCheckout call, we write a Setting row keyed by the payment ID with
-// the current timestamp. A second checkout call within IDEMPOTENCY_WINDOW_MS
-// is rejected with 409 — the client should re-use the original checkout URL
-// (returned in the first response) instead of creating a second Telebirr
-// order with the same merchOrderId. Without this, two checkouts for the same
-// pending Payment would create two valid Telebirr orders; if the user paid
-// both, only the first webhook settles (the second payment is captured at
-// Telebirr but never recorded).
+// Idempotency window for /payments/checkout. After a successful createCheckout
+// call, we write a Setting row keyed by the payment ID with the current
+// timestamp. A second checkout call within IDEMPOTENCY_WINDOW_MS is rejected
+// with 409 — the client should re-use the original checkout URL (returned in
+// the first response) instead of creating a second Telebirr order with the
+// same merchOrderId. Without this, two checkouts for the same pending Payment
+// would create two valid Telebirr orders; if the user paid both, only the
+// first webhook settles (the second payment is captured at Telebirr but never
+// recorded).
 const IDEMPOTENCY_WINDOW_MS = 5 * 60_000; // 5 minutes
 
 export async function POST_checkout({ session, body }: any) {
@@ -43,8 +43,8 @@ export async function POST_checkout({ session, body }: any) {
   if (payment.userId !== session.id) throw new NotFoundError('Payment not found');
   if (payment.status !== 'pending') throw new BadRequestError('Payment is not pending');
 
-  // BIZ-03: idempotency check — reject if a checkout was created for this
-  // payment within the last IDEMPOTENCY_WINDOW_MS.
+  // Idempotency check — reject if a checkout was created for this payment
+  // within the last IDEMPOTENCY_WINDOW_MS.
   const lockKey = `checkout-lock:${paymentId}`;
   const existing = await db.setting.findUnique({ where: { key: lockKey } });
   if (existing) {
@@ -66,8 +66,8 @@ export async function POST_checkout({ session, body }: any) {
     redirectUrl: env.TELEBIRR_REDIRECT_URL || `${env.APP_BASE_URL}/checkout/complete`,
   });
 
-  // BIZ-03: record the checkout timestamp so concurrent/repeated calls are
-  // rejected within the idempotency window.
+  // Record the checkout timestamp so concurrent/repeated calls are rejected
+  // within the idempotency window.
   await db.setting.upsert({
     where: { key: lockKey },
     update: { value: String(Date.now()) },

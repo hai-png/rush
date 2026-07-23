@@ -24,10 +24,9 @@ export async function POST_onboard({ session, body, ipAddress, userAgent }: any)
 
   const code = await generateUniqueCode();
 
-  // move the 2FA + phone-verification check INSIDE the
-  // promotion transaction so a user can't disable 2FA between the check and
-  // the role update. The check reads from tx (the same transaction that does
-  // the promotion) so it's atomic.
+  // Move the 2FA + phone-verification check INSIDE the promotion transaction
+  // so a user can't disable 2FA between the check and the role update. The
+  // check reads from tx (the same transaction that does the promotion).
   const corp = await db.$transaction(async (tx) => {
     if (session.role !== 'platform_admin') {
       const u = await tx.user.findUnique({
@@ -88,9 +87,8 @@ async function generateUniqueCode(): Promise<string> {
   throw new Error('Failed to generate unique corporate code');
 }
 
-// platform_admin MUST supply a corporateId — no more silent
-// findFirst({}) fallback that operates on an arbitrary corporate.
-// This prevents cross-tenant data bugs when multiple corporates exist.
+// platform_admin MUST supply a corporateId — prevents cross-tenant data bugs
+// when multiple corporates exist (no silent findFirst({}) fallback).
 async function resolveCorporate(session: any, corporateId?: string) {
   if (session.role === 'platform_admin') {
     if (!corporateId) {
@@ -106,7 +104,7 @@ export async function GET_current({ session, query }: any) {
   if (session.role !== 'corporate_admin' && session.role !== 'platform_admin') {
     throw new ForbiddenError('Corporate admin only');
   }
-  // use resolveCorporate so platform_admin must supply ?corporateId=
+  // platform_admin must supply ?corporateId= via resolveCorporate.
   const baseCorp = await resolveCorporate(session, query?.corporateId);
   if (!baseCorp) throw new NotFoundError('No corporate found');
   const corp = await db.corporate.findUnique({
@@ -135,8 +133,8 @@ export async function POST_invite({ session, body, query, ipAddress, userAgent }
   const corp = await resolveCorporate(session, query?.corporateId);
   if (!corp) throw new NotFoundError('No corporate found');
 
-  // BIZ-067 (#16): no `before` snapshot — this is a create.
   // Retry on collision (matches generateUniqueCode pattern for corporate codes).
+  // No `before` snapshot — this is a create.
   const { randomInt } = await import('node:crypto');
   const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let invite;
@@ -199,7 +197,6 @@ export async function DELETE_invite({ session, params, query, ipAddress, userAge
   const before = invite;
   await db.corporateInvite.update({ where: { id: params.id }, data: { isActive: false } });
   await audit({ actorId: session.id, action: 'corporate.invite_revoked', entityType: 'corporate_invite', entityId: params.id, before, after: { isActive: false }, ipAddress, userAgent });
-  // INC-02 (#21): DELETE returns 204 with no body.
   return { status: 204 };
 }
 
@@ -219,7 +216,7 @@ export async function POST_signup({ session, body, ipAddress, userAgent }: any) 
   if (!invite || !invite.isActive) throw new BadRequestError('Invalid invite code');
   if (invite.expiresAt && invite.expiresAt < new Date()) throw new BadRequestError('Invite expired');
 
-  // BIZ-06: enforce single corporate membership — a user may only belong to one
+  // Enforce single corporate membership — a user may only belong to one
   // corporate at a time. The (corporateId, userId) unique constraint allows
   // multiple corporates, so we enforce the single-membership rule here.
   const existingAnyCorp = await db.corporateMember.findFirst({
@@ -245,10 +242,10 @@ export async function POST_signup({ session, body, ipAddress, userAgent }: any) 
     throw new ConflictError('You already have a pending request');
   }
 
-  // DB-016: move the maxUses check INSIDE the transaction with a CAS guard so
-  // two concurrent signups can't both pass the check and exceed maxUses. The
-  // updateMany only succeeds if usesCount is still below maxUses; otherwise
-  // we throw and the member row (created in the same tx) is rolled back.
+  // Move the maxUses check INSIDE the transaction with a CAS guard so two
+  // concurrent signups can't both pass and exceed maxUses. The updateMany
+  // only succeeds if usesCount is still below maxUses; otherwise we throw
+  // and the member row (created in the same tx) is rolled back.
   const member = await db.$transaction(async (tx) => {
     const freshInvite = await tx.corporateInvite.findUnique({ where: { id: invite.id } });
     if (!freshInvite || !freshInvite.isActive) throw new BadRequestError('Invalid invite code');
@@ -310,7 +307,6 @@ export async function POST_approve({ session, params, query, ipAddress, userAgen
   if (!member || member.corporateId !== corp.id) throw new NotFoundError('Member not found');
   if (member.approvalStatus !== 'pending') throw new ConflictError('Member is not pending');
 
-  // BIZ-067 (#16): capture `before` snapshot.
   const before = { ...member };
   await db.corporateMember.update({
     where: { id: member.id },
@@ -339,7 +335,6 @@ export async function POST_reject({ session, params, query, ipAddress, userAgent
   if (!member || member.corporateId !== corp.id) throw new NotFoundError('Member not found');
   if (member.approvalStatus !== 'pending') throw new ConflictError('Member is not pending');
 
-  // BIZ-067 (#16): capture `before` snapshot.
   const before = { ...member };
   await db.corporateMember.update({
     where: { id: member.id },
@@ -373,8 +368,7 @@ export async function GET_me({ session, query }: any) {
   if (session.role !== 'corporate_admin' && session.role !== 'platform_admin') {
     throw new ForbiddenError('Corporate admin only');
   }
-  // use resolveCorporate so platform_admin can fetch a corporate
-  // (was hardcoded to findUnique by adminUserId, which always 404'd for admins).
+  // platform_admin can fetch any corporate via resolveCorporate + ?corporateId=.
   const corp = await resolveCorporate(session, query?.corporateId);
   if (!corp) throw new NotFoundError('No corporate found');
   // resolveCorporate returns a minimal corp object; re-fetch with counts.
@@ -404,7 +398,7 @@ export async function PATCH_corporate({ session, body, query, ipAddress, userAge
   const corp = await resolveCorporate(session, query?.corporateId);
   if (!corp) throw new NotFoundError('No corporate found');
 
-  // BIZ-067 (#16): capture `before` snapshot for the audit log.
+  // Capture `before` snapshot for the audit log.
   const before = { ...corp };
   const updated = await db.corporate.update({ where: { id: corp.id }, data: input });
   await audit({ actorId: session.id, action: 'corporate.updated', entityType: 'corporate', entityId: corp.id, before, after: input, ipAddress, userAgent });
@@ -420,12 +414,12 @@ export async function DELETE_member({ session, params, query, ipAddress, userAge
   const member = await db.corporateMember.findUnique({ where: { id: params.id } });
   if (!member || member.corporateId !== corp.id) throw new NotFoundError('Member not found');
 
-  // BIZ-067 (#16): capture `before` snapshot.
+  // Capture `before` snapshot.
   const before = { ...member };
 
-  // BIZ-07: cancel the removed member's corporate-linked subscriptions so they
-  // can no longer ride at the subsidized rate. Non-corporate subscriptions are
-  // untouched. Use a CAS so concurrent removals don't double-cancel.
+  // Cancel the removed member's corporate-linked subscriptions so they can no
+  // longer ride at the subsidized rate. Non-corporate subscriptions are
+  // untouched. CAS-guarded so concurrent removals don't double-cancel.
   await db.$transaction(async (tx) => {
     await tx.corporateMember.update({
       where: { id: params.id },
@@ -450,15 +444,13 @@ export async function DELETE_member({ session, params, query, ipAddress, userAge
     link: '/dashboard/rider',
   }).catch(() => {});
   await audit({ actorId: session.id, action: 'corporate.member_removed', entityType: 'corporate_member', entityId: params.id, before, after: { userId: member.userId, isActive: false }, ipAddress, userAgent });
-  // INC-02 (#21): DELETE returns 204 with no body.
   return { status: 204 };
 }
 
-// removed `ridesUsedThisMonth` from the admin-editable input.
-// Allowing a corporate admin to set this field directly bypassed the
-// corporate seat-allowance quota (now enforced in consumeRide). If a
-// manual reset is needed, a dedicated /members/:id/reset-usage endpoint
-// with stronger audit should be added.
+// `ridesUsedThisMonth` is intentionally NOT admin-editable — allowing a
+// corporate admin to set it directly would bypass the corporate seat-allowance
+// quota (enforced in consumeRide). If a manual reset is needed, a dedicated
+// /members/:id/reset-usage endpoint with stronger audit should be added.
 const UpdateMemberInput = z.object({
   employeeId: z.string().min(1).max(50).optional(),
   isActive: z.boolean().optional(),
@@ -480,7 +472,7 @@ export async function PATCH_member({ session, params, body, query, ipAddress, us
   return { data: updated };
 }
 
-// #24: GET /corporate/invoices — list invoices for the caller's corporate
+// GET /corporate/invoices — list invoices for the caller's corporate
 // (or, for platform_admin, optionally another corporate via ?corporateId=).
 // Includes only issued/paid/void invoices — drafts are admin-internal.
 export async function GET_invoices({ session, query }: any) {

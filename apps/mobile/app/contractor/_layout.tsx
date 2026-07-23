@@ -2,7 +2,6 @@ import { Tabs } from 'expo-router';
 import { Text, View } from 'react-native';
 import { colors, fontSize } from '../../src/lib/theme';
 
-// contractor tab bar.
 function TabIcon({ label }: { label: string }) {
   return (
     <View style={{ paddingVertical: 8, paddingHorizontal: 12, alignItems: 'center' }}>

@@ -1,10 +1,7 @@
-// INC-09: shared formatting helpers for ETB currency and dates.
-// Used across app pages and components so amounts are always rendered
-// consistently with Intl (locale en-ET / en-GB).
-//
-// This module is intentionally standalone (no other project imports) so it
-// can be imported from both client components and server code, and from the
-// backend agent's api-webhooks.ts handler.
+// Shared formatting helpers for ETB currency and dates. Used across app pages
+// and components so amounts are rendered consistently with Intl (en-ET / en-GB).
+// Standalone (no other project imports) so it can be imported from both client
+// components and server code.
 
 const ETB_FORMATTER = new Intl.NumberFormat('en-ET', {
   style: 'currency',

@@ -9,7 +9,6 @@ import {
 import { toast } from 'sonner';
 import { api } from '@/lib/api-client';
 
-// FE-05: replace native confirm() with a styled shadcn/ui Dialog.
 export function CancelReleaseButton({ id }: { id: string }) {
   const router = useRouter();
 

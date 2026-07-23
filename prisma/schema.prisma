@@ -11,8 +11,6 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
-// ─── Identity ────────────────────────────────────────────────────────────────
-
 model User {
   id                  String    @id @default(cuid())
   phone               String    @unique
@@ -27,7 +25,7 @@ model User {
   twoFactorSecret     String?
   twoFactorEnabled    Boolean   @default(false)
   tosVersion          String?
-  // P1-8 / API-030: account lockout after failed login attempts.
+  // Account lockout after failed login attempts.
   failedLoginAttempts Int       @default(0)
   lockedUntil         DateTime?
   createdAt           DateTime  @default(now())
@@ -63,7 +61,7 @@ model User {
   twoFactorBackupCodes    TwoFactorBackupCode[]
 
   @@index([isActive, deletedAt])
-  @@index([role, isActive]) // P1-15: admin lookups (notify all admins)
+  @@index([role, isActive]) // admin lookups (notify all admins)
 }
 
 model RiderProfile {
@@ -93,7 +91,7 @@ model ContractorProfile {
 
   documents ContractorDocument[]
 
-  @@index([verificationStatus]) // P1: admin pending-contractors query
+  @@index([verificationStatus]) // admin pending-contractors query
 }
 
 model Corporate {
@@ -147,13 +145,13 @@ model Session {
   expiresAt  DateTime
   createdAt  DateTime  @default(now())
   revokedAt  DateTime?
-  // DB-056: last time the session was used to authenticate a request. Updated
+  // Last time the session was used to authenticate a request. Updated
   // (best-effort) by verifySession so stale-but-unexpired sessions are visible
   // to admins reviewing active sessions.
   lastSeenAt DateTime?
 
   @@index([userId])
-  @@index([userId, revokedAt, expiresAt]) // P1: revokeAllSessionsForUser + GET /auth/sessions
+  @@index([userId, revokedAt, expiresAt]) // revokeAllSessionsForUser + GET /auth/sessions
 }
 
 model OtpCode {
@@ -183,8 +181,6 @@ model TosAcceptance {
 
   @@index([userId])
 }
-
-// ─── Catalog (plans, routes, shuttles, trips) ────────────────────────────────
 
 model SubscriptionPlan {
   id            String   @id @default(cuid())
@@ -256,7 +252,7 @@ model Shuttle {
   trips       Trip[]
   assignments RouteAssignment[]
 
-  @@index([contractorId]) // P1: contractor dashboard + GET_my_shuttles
+  @@index([contractorId]) // contractor dashboard + GET_my_shuttles
   @@index([contractorId, isActive])
 }
 
@@ -281,21 +277,19 @@ model Trip {
   rides        Ride[]
   seatReleases SeatRelease[]
 
-  @@unique([routeId, departureAt, window]) // P0: prevent duplicate trips from scheduler re-runs
+  @@unique([routeId, departureAt, window]) // prevent duplicate trips from scheduler re-runs
   @@index([routeId, departureAt])
   @@index([shuttleId, departureAt])
   @@index([assignmentId])
-  @@index([driverId, departureAt]) // P1: contractor dashboard + recomputeContractorRating
-  @@index([status, departureAt]) // P1: GET /trips catalog + expireStale
+  @@index([driverId, departureAt]) // contractor dashboard + recomputeContractorRating
+  @@index([status, departureAt]) // GET /trips catalog + expireStale
 }
 
-// ─── Route Assignments (monthly commitments) ────────────────────────────────
 // A contractor commits to serving a route for a month with a specific shuttle
 // and a recurring schedule (e.g. Mon-Fri mornings + evenings). Admin assigns
-// routes to contractors; riders subscribe to assignments.
-//
-// This replaces the old "Trip per day" model. Individual daily trips are
-// generated from the assignment's schedule pattern (Mon-Fri → 20-22 trips/month).
+// routes to contractors; riders subscribe to assignments. Individual daily
+// trips are generated from the assignment's schedule pattern
+// (Mon-Fri → 20-22 trips/month).
 
 model RouteAssignment {
   id           String  @id @default(cuid())
@@ -321,11 +315,11 @@ model RouteAssignment {
 
   // Capacity tracking
   maxSeats    Int @default(0) // copied from shuttle.capacity for quick reference
-  // DB-05/027 / ARCH-05f: DEPRECATED — seatsBooked on RouteAssignment is never
-  // updated by any code path. The authoritative per-trip seat count lives on
-  // Trip.seatsBooked (kept accurate via CAS-guarded increment/decrement).
-  // For per-assignment ride totals, use `_count.rides`. This column is kept
-  // for schema stability but is always 0; will be dropped in a future migration.
+  // DEPRECATED — seatsBooked on RouteAssignment is never updated by any code
+  // path. The authoritative per-trip seat count lives on Trip.seatsBooked (kept
+  // accurate via CAS-guarded increment/decrement). For per-assignment ride
+  // totals, use `_count.rides`. This column is kept for schema stability but
+  // is always 0; will be dropped in a future migration.
   seatsBooked Int @default(0)
 
   assignedById String? // admin who assigned
@@ -344,12 +338,10 @@ model RouteAssignment {
   @@index([status, monthStart])
 }
 
-// ─── Subscriptions + payments ────────────────────────────────────────────────
-
 model Subscription {
   id          String           @id @default(cuid())
   userId      String
-  user        User             @relation(fields: [userId], references: [id], onDelete: Restrict) // DB-01: never cascade-delete a user's subscription history
+  user        User             @relation(fields: [userId], references: [id], onDelete: Restrict) // never cascade-delete a user's subscription history
   planId      String
   plan        SubscriptionPlan @relation(fields: [planId], references: [id], onDelete: Restrict)
   corporateId String?
@@ -368,22 +360,22 @@ model Subscription {
 
   @@index([userId, status])
   @@index([corporateId])
-  @@index([status, endDate]) // P1: expireStale scheduler job
+  @@index([status, endDate]) // expireStale scheduler job
 }
 
 model Payment {
   id                String        @id @default(cuid())
   reference         String        @unique // merchOrderId for Telebirr
   userId            String
-  user              User          @relation(fields: [userId], references: [id], onDelete: Restrict) // DB-01: never cascade-delete a user's payment history
+  user              User          @relation(fields: [userId], references: [id], onDelete: Restrict) // never cascade-delete a user's payment history
   subscriptionId    String?
   subscription      Subscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
   seatClaimId       String?
   method            String // telebirr | cbe
   amountCents       Int
-  // BIZ-08: corporate-subsidy portion of the plan price captured at payment
-  // creation. 0 for non-corporate payments. Used by the monthly corporate
-  // billing job to sum subsidies consumed per corporate.
+  // Corporate-subsidy portion of the plan price captured at payment creation.
+  // 0 for non-corporate payments. Used by the monthly corporate billing job to
+  // sum subsidies consumed per corporate.
   subsidyCents      Int           @default(0)
   status            String        @default("pending") // pending | completed | failed | refunded | partially_refunded
   refundAmountCents Int           @default(0)
@@ -421,9 +413,8 @@ model RefundRetry {
   @@index([status, nextAttemptAt])
 }
 
-// Telebirr webhook dedup — done right the first time.
-// PK is (merchOrderId, outRequestNo) per Telebirr's own dedup semantics.
-// No received_at in the PK (that was the bug that took 3 migrations to fix).
+// Telebirr webhook dedup. PK is (merchOrderId, outRequestNo) per Telebirr's
+// own dedup semantics.
 model TelebirrNotifyEvent {
   // Pure log table — no FK to Payment so Payment deletion can't ripple here.
   merchOrderId String
@@ -436,8 +427,6 @@ model TelebirrNotifyEvent {
   @@id([merchOrderId, outRequestNo])
 }
 
-// ─── Marketplace (seat release / claim) ──────────────────────────────────────
-
 model SeatRelease {
   id         String   @id @default(cuid())
   userId     String
@@ -447,9 +436,9 @@ model SeatRelease {
   window     String // morning | evening
   status     String   @default("open") // open | claimed | expired | cancelled
   expiresAt  DateTime
-  // BIZ-050 / #5: optional override for the route fare. When null (default),
-  // the buyer pays the route's canonical fareCents. When set, the buyer pays
-  // this amount (e.g. a seller offering a discount to move the seat quickly).
+  // Optional override for the route fare. When null (default), the buyer pays
+  // the route's canonical fareCents. When set, the buyer pays this amount
+  // (e.g. a seller offering a discount to move the seat quickly).
   priceCents Int?
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
@@ -478,8 +467,6 @@ model SeatClaim {
   @@index([seatReleaseId])
 }
 
-// ─── Operations (rides) ──────────────────────────────────────────────────────
-
 model Ride {
   id               String           @id @default(cuid())
   tripId           String
@@ -496,9 +483,9 @@ model Ride {
   // Link to the monthly assignment (for reporting — which assignment generated this ride).
   assignmentId     String?
   assignment       RouteAssignment? @relation(fields: [assignmentId], references: [id], onDelete: SetNull)
-  // DB-04: snapshot the fare (in cents) the rider paid at booking time so
-  // historical records aren't skewed by later route price changes — needed
-  // for invoicing, dispute resolution, and audit. Populated in POST_ride.
+  // Snapshot the fare (in cents) the rider paid at booking time so historical
+  // records aren't skewed by later route price changes — needed for invoicing,
+  // dispute resolution, and audit. Populated in POST_ride.
   farePaidCents    Int?
   status           String           @default("booked") // booked | boarded | completed | no_show | cancelled | released
   createdAt        DateTime         @default(now())
@@ -512,14 +499,13 @@ model Ride {
   @@index([seatClaimId])
   @@index([pickupLocationId])
   @@index([assignmentId])
-  @@index([tripId, userId, status]) // P1: marketplace release/claim + double-book check
+  @@index([tripId, userId, status]) // marketplace release/claim + double-book check
 }
 
-// ─── Ride ratings ────────────────────────────────────────────────────────────
-// P2 / #3: riders rate their ride after completion (1-5 stars + optional
-// comment). One rating per (ride, rider) — @@unique prevents double-rating.
-// The contractor's aggregate rating is recomputed by recomputeContractorRating
-// after each new RideRating.
+// Riders rate their ride after completion (1-5 stars + optional comment). One
+// rating per (ride, rider) — @@unique prevents double-rating. The contractor's
+// aggregate rating is recomputed by recomputeContractorRating after each new
+// RideRating.
 model RideRating {
   id           String   @id @default(cuid())
   rideId       String
@@ -532,12 +518,10 @@ model RideRating {
   comment      String?
   createdAt    DateTime @default(now())
 
-  @@unique([rideId, riderId]) // P2: prevent double-rating the same ride
+  @@unique([rideId, riderId]) // prevent double-rating the same ride
   @@index([contractorId, createdAt])
   @@index([rideId])
 }
-
-// ─── Support ─────────────────────────────────────────────────────────────────
 
 model SupportTicket {
   id             String        @id @default(cuid())

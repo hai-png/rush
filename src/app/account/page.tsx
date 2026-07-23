@@ -42,8 +42,6 @@ export default async function AccountPage() {
             <div><span className="text-muted-foreground">Phone:</span> {safe.phone}</div>
             <div><span className="text-muted-foreground">Email:</span> {safe.email ?? '—'}</div>
             <div><span className="text-muted-foreground">Role:</span> {safe.role}</div>
-            {/* FE-055: phoneVerified shown as a status Badge instead of a raw
-                boolean so the meaning is obvious at a glance. */}
             <div className="flex items-center gap-2">
               <span className="text-muted-foreground">Phone verified:</span>
               {safe.phoneVerified ? (
@@ -60,9 +58,6 @@ export default async function AccountPage() {
                 <Badge variant="outline">Disabled</Badge>
               )}
             </div>
-            {/* FE-055: hide the raw tosVersion number; instead render a
-                human-readable "Terms accepted (vX)" line. If they haven't
-                accepted any ToS yet, show "Terms not accepted". */}
             <div>
               <span className="text-muted-foreground">Terms:</span>{' '}
               {safe.tosVersion

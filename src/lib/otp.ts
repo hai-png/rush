@@ -18,10 +18,10 @@ export async function sendOtp(rawPhone: string, purpose: OtpPurpose): Promise<{ 
 
   const code = (100000 + randomInt(900000)).toString();
 
-  // DB-017: wrap the rate-limit check + OTP creation in a single transaction
-  // so two concurrent sendOtp calls can't both pass the count check and
-  // exceed the 3-per-10-min limit. SQLite's serialized writer means the
-  // COUNT and CREATE inside one tx are atomic.
+  // Wrap the rate-limit check + OTP creation in a single transaction so two
+  // concurrent sendOtp calls can't both pass the count check and exceed the
+  // 3-per-10-min limit. SQLite's serialized writer means the COUNT and CREATE
+  // inside one tx are atomic.
   await db.$transaction(async (tx) => {
     const recent = await tx.otpCode.count({
       where: {
@@ -44,8 +44,8 @@ export async function sendOtp(rawPhone: string, purpose: OtpPurpose): Promise<{ 
     });
   });
 
-  // SEC-24: gate OTP logging behind an explicit OTP_DEBUG env var (instead of
-  // just !production) so staging/UAT environments don't leak real OTPs into logs.
+  // Gate OTP logging behind an explicit OTP_DEBUG env var (instead of just
+  // !production) so staging/UAT environments don't leak real OTPs into logs.
   // In production OTP_DEBUG is always treated as false regardless of env value.
   if (process.env.NODE_ENV !== 'production' && process.env.OTP_DEBUG === '1') {
     console.log(`[OTP] ${phone} (${purpose}): ${code}`);

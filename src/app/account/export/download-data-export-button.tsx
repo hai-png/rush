@@ -3,8 +3,8 @@
 import { Button } from '@/components/ui/button';
 import { Download } from 'lucide-react';
 
-// FE-06: client-side download button. Generates a Blob from the pre-serialized
-// JSON (passed as a prop) and triggers a browser download. No server round-trip.
+// Client-side download button. Generates a Blob from the pre-serialized JSON
+// (passed as a prop) and triggers a browser download. No server round-trip.
 export function DownloadDataExportButton({ json, filename }: { json: string; filename: string }) {
   function download() {
     const blob = new Blob([json], { type: 'application/json' });

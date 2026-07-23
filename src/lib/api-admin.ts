@@ -2,12 +2,11 @@
 // (users, contractors, shuttles, routes, plans, faqs, holidays, pickups).
 // Each handler does a single DB operation. Side-effect orchestration
 // (impersonation, CSV export, bulk ops, settings, corporate admin) lives in
-// api-admin-advanced.ts — see the header comment there for the split rationale.
-//
-// ARCH-02 (#28): this file is intentionally narrow. Adding a new admin CRUD
-// endpoint? It belongs here. Adding a new admin ACTION that triggers
-// outbox events, audit chains, or external API calls? It belongs in
 // api-admin-advanced.ts.
+//
+// This file is intentionally narrow. Adding a new admin CRUD endpoint? It
+// belongs here. Adding a new admin ACTION that triggers outbox events, audit
+// chains, or external API calls? It belongs in api-admin-advanced.ts.
 
 import { db } from '@/lib/db';
 import { z } from 'zod';
@@ -19,7 +18,6 @@ import { enqueueNotification } from '@/lib/outbox';
 import { parsePagination, paginatedResponse } from '@/lib/pagination';
 
 export async function GET_users({ session, query }: any) {
-  // cursor-based pagination.
   const page = parsePagination(query);
   const where: any = {};
   if (query?.role) where.role = query.role;
@@ -98,14 +96,13 @@ const PlanInput = z.object({
 
 export async function POST_plans({ body, ipAddress, userAgent }: any) {
   const input = PlanInput.parse(body);
-  // BIZ-067 (#16): no `before` snapshot — this is a create, not an update.
+  // No `before` snapshot — this is a create.
   const plan = await db.subscriptionPlan.create({ data: input });
   await audit({ action: 'plan.created', entityType: 'subscription_plan', entityId: plan.id, after: input, ipAddress, userAgent });
   return { status: 201, data: plan };
 }
 
 export async function GET_contractors({ query }: any) {
-  // #11: cursor-based pagination.
   const page = parsePagination(query);
   const where: any = {};
   if (query?.status) where.verificationStatus = query.status;
@@ -137,7 +134,6 @@ export async function POST_verify_contractor({ params, body, session, ipAddress,
 }
 
 export async function GET_shuttles({ query }: any) {
-  // #11: cursor-based pagination.
   const page = parsePagination(query);
   const where: any = {};
   if (query?.contractorId) where.contractorId = query.contractorId;
@@ -170,14 +166,13 @@ export async function POST_shuttles({ body, session, ipAddress, userAgent }: any
   } else if (!input.contractorId) {
     throw new BadRequestError('contractorId is required');
   }
-  // BIZ-067 (#16): create — no `before` snapshot needed.
+  // No `before` snapshot — this is a create.
   const shuttle = await db.shuttle.create({ data: input });
   await audit({ actorId: session.id, action: 'shuttle.created', entityType: 'shuttle', entityId: shuttle.id, after: input, ipAddress, userAgent });
   return { status: 201, data: shuttle };
 }
 
 export async function GET_routes({ query }: any) {
-  // #11: cursor-based pagination.
   const page = parsePagination(query);
   const where: any = {};
   if (query?.isActive !== undefined) where.isActive = query.isActive === 'true';
@@ -202,14 +197,13 @@ const RouteInput = z.object({
 
 export async function POST_routes({ body, session, ipAddress, userAgent }: any) {
   const input = RouteInput.parse(body);
-  // BIZ-067 (#16): create — no `before` snapshot needed.
+  // No `before` snapshot — this is a create.
   const route = await db.route.create({ data: input });
   await audit({ actorId: session.id, action: 'route.created', entityType: 'route', entityId: route.id, after: input, ipAddress, userAgent });
   return { status: 201, data: route };
 }
 
 export async function GET_tickets({ query }: any) {
-  // #11: cursor-based pagination (was unbounded take:100).
   const page = parsePagination(query);
   const where: any = {};
   if (query?.status) where.status = query.status;
@@ -319,7 +313,7 @@ export async function PATCH_plan({ session, params, body, ipAddress, userAgent }
   if (input.isTrial === true && (input.ridesIncluded ?? existing.ridesIncluded) === -1) {
     throw new BadRequestError('Trial plans cannot be unlimited');
   }
-  // BIZ-067 (#16): capture `before` snapshot for the audit log.
+  // Capture `before` snapshot for the audit log.
   const before = { ...existing };
   const updated = await db.subscriptionPlan.update({ where: { id: params.id }, data: input });
   await audit({ actorId: session.id, action: 'plan.updated', entityType: 'subscription_plan', entityId: params.id, before, after: input, ipAddress, userAgent });
@@ -339,7 +333,7 @@ export async function PATCH_route({ session, params, body, ipAddress, userAgent 
   const input = RouteUpdateInput.parse(body);
   const existing = await db.route.findUnique({ where: { id: params.id } });
   if (!existing) throw new NotFoundError('Route not found');
-  // BIZ-067 (#16): capture `before` snapshot for the audit log.
+  // Capture `before` snapshot for the audit log.
   const before = { ...existing };
   const updated = await db.route.update({ where: { id: params.id }, data: input });
   await audit({ actorId: session.id, action: 'route.updated', entityType: 'route', entityId: params.id, before, after: input, ipAddress, userAgent });
@@ -358,7 +352,7 @@ export async function PATCH_shuttle({ session, params, body, ipAddress, userAgen
   const input = ShuttleUpdateInput.parse(body);
   const existing = await db.shuttle.findUnique({ where: { id: params.id } });
   if (!existing) throw new NotFoundError('Shuttle not found');
-  // BIZ-067 (#16): capture `before` snapshot for the audit log.
+  // Capture `before` snapshot for the audit log.
   const before = { ...existing };
   const updated = await db.shuttle.update({ where: { id: params.id }, data: input });
   await audit({ actorId: session.id, action: 'shuttle.updated', entityType: 'shuttle', entityId: params.id, before, after: input, ipAddress, userAgent });
@@ -366,7 +360,6 @@ export async function PATCH_shuttle({ session, params, body, ipAddress, userAgen
 }
 
 // Trip creation is handled by POST /trips in api-operations.ts.
-// The previous POST /admin/trips duplicate was removed.
 
 export async function GET_my_shuttles({ session }: any) {
   if (session.role !== 'contractor') throw new ForbiddenError('Contractor only');
@@ -386,7 +379,7 @@ export async function GET_my_trips({ session }: any) {
 }
 
 export async function recomputeContractorRating(contractorId: string): Promise<void> {
-  // DB-021: wrap the count reads + rating write in a single transaction so a
+  // Wrap the count reads + rating write in a single transaction so a
   // concurrent ride-state transition can't slip in between the read and the
   // write, producing a rating computed from a stale snapshot.
   await db.$transaction(async (tx) => {
@@ -398,10 +391,10 @@ export async function recomputeContractorRating(contractorId: string): Promise<v
       where: { status: 'cancelled', trip: { driverId: contractorId } },
     });
 
-    // BIZ-055 (#14): enhanced rating formula. Blends rider ratings (70%)
-    // with operational metrics (30%: cancellation ratio + no-show rate over
-    // the last 90 days). Falls back to the legacy cancellation-only formula
-    // when the contractor has no rider ratings yet.
+    // Enhanced rating formula. Blends rider ratings (70%) with operational
+    // metrics (30%: cancellation ratio + no-show rate over the last 90 days).
+    // Falls back to the legacy cancellation-only formula when the contractor
+    // has no rider ratings yet.
     const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 3600_000);
 
     const ratingAgg = await tx.rideRating.aggregate({
@@ -451,7 +444,7 @@ const FaqInput = z.object({
 
 export async function POST_faq({ session, body, ipAddress, userAgent }: any) {
   const input = FaqInput.parse(body);
-  // BIZ-067 (#16): create — no `before` snapshot needed.
+  // No `before` snapshot — this is a create.
   const faq = await db.faqArticle.create({ data: input });
   await audit({ actorId: session.id, action: 'faq.created', entityType: 'faq_article', entityId: faq.id, after: input, ipAddress, userAgent });
   return { status: 201, data: faq };
@@ -469,7 +462,6 @@ export async function DELETE_plan({ session, params, ipAddress, userAgent }: any
   const before = plan;
   await db.subscriptionPlan.update({ where: { id: params.id }, data: { isActive: false } });
   await audit({ actorId: session.id, action: 'plan.deleted', entityType: 'subscription_plan', entityId: params.id, before, after: { isActive: false }, ipAddress, userAgent });
-  // INC-02 (#21): DELETE returns 204 with no body.
   return { status: 204 };
 }
 
@@ -480,11 +472,10 @@ export async function DELETE_faq({ session, params, ipAddress, userAgent }: any)
   const before = faq;
   await db.faqArticle.delete({ where: { id: params.id } });
   await audit({ actorId: session.id, action: 'faq.deleted', entityType: 'faq_article', entityId: params.id, before, ipAddress, userAgent });
-  // INC-02 (#21): DELETE returns 204 with no body.
   return { status: 204 };
 }
 
-// ─── Holiday management ─────────────────────────────────────────────────────
+// Holiday management
 
 export async function GET_holidays() {
   const holidays = await db.holiday.findMany({ where: { isActive: true }, orderBy: { date: 'asc' } });
@@ -500,8 +491,8 @@ export async function POST_holiday({ session, body, ipAddress, userAgent }: any)
   const input = HolidayInput.parse(body);
   const date = new Date(input.date);
   date.setHours(0, 0, 0, 0); // normalize to midnight
-  // BIZ-067 (#16): capture `before` for the upsert — look up any existing
-  // row for this date (the upsert's `where` clause uses date as the key).
+  // Capture `before` for the upsert — look up any existing row for this date
+  // (the upsert's `where` clause uses date as the key).
   const existing = await db.holiday.findUnique({ where: { date } });
   const before = existing ? { ...existing } : null;
   const holiday = await db.holiday.upsert({
@@ -519,7 +510,6 @@ export async function DELETE_holiday({ session, params, ipAddress, userAgent }: 
   const before = holiday;
   await db.holiday.update({ where: { id: params.id }, data: { isActive: false } });
   await audit({ actorId: session.id, action: 'holiday.deleted', entityType: 'holiday', entityId: params.id, before, ipAddress, userAgent });
-  // INC-02 (#21): DELETE returns 204 with no body.
   return { status: 204 };
 }
 

@@ -13,7 +13,6 @@ export const metadata: Metadata = { title: 'Drivers · Admin' };
 
 const PAGE_SIZE = 50;
 
-// FE-044: paginated contractors list (was unbounded, no pagination UI).
 export default async function AdminContractorsPage({ searchParams }: { searchParams: Promise<{ page?: string }> }) {
   await requireRole('platform_admin');
   const sp = await searchParams;

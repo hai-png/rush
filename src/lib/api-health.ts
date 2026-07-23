@@ -1,21 +1,21 @@
 
 import { db } from '@/lib/db';
 
-// / OPS-011: enhanced health checks.
+// Enhanced health checks.
 //
 // /healthz — liveness probe. Always returns 200 if the process is up.
 //   k8s livenessProbe should use this.
 //
 // /health — detailed status for dashboards. Always returns 200 with full
-//   status breakdown. Includes DB + Telebirr + version.
+//   status breakdown. Includes DB + version.
 //
 // /ready — readiness probe. Returns 200 only when the app is ready to serve
 //   traffic: DB reachable, outbox backlog below threshold, scheduler recently
 //   ran. Returns 503 otherwise. k8s readinessProbe should use this.
 //
-// /health no longer leaks DB error strings or Telebirr mode
-// to unauthenticated callers. Detailed errors are only in the response body
-// (which is logged but not displayed to end users).
+// /health does not leak DB error strings or Telebirr mode to unauthenticated
+//   callers. Detailed errors are only in the response body (which is logged
+//   but not displayed to end users).
 
 const READY_OUTBOX_THRESHOLD = 1000; // pending outbox events = degraded
 const READY_REFUND_THRESHOLD = 100;  // pending refund retries = degraded
@@ -33,9 +33,9 @@ export async function GET_health() {
     dbOk = false;
   }
 
-  // SEC-019: do not expose Telebirr configured state — an unauthenticated
-  // caller could learn whether the deployment is wired for live payments
-  // (and thus whether forged webhooks might land). Only DB health is reported.
+  // Do not expose Telebirr configured state — an unauthenticated caller could
+  // learn whether the deployment is wired for live payments (and thus whether
+  // forged webhooks might land). Only DB health is reported.
   return {
     data: {
       status: dbOk ? 'ok' : 'degraded',
@@ -54,7 +54,7 @@ export async function GET_healthz() {
   return { data: { status: 'alive', timestamp: new Date().toISOString() } };
 }
 
-// New: /ready — readiness probe for k8s. Returns 503 if any critical check fails.
+// /ready — readiness probe for k8s. Returns 503 if any critical check fails.
 export async function GET_ready(): Promise<{ status: number; data: any }> {
   const start = Date.now();
   const checks: Record<string, { ok: boolean; latencyMs?: number }> = {};

@@ -10,8 +10,8 @@ import { CURRENT_TOS_VERSION } from '@/lib/env';
 import { ensureSchedulerStarted } from '@/lib/scheduler';
 import { logger } from '@/lib/logger';
 
-// SEC-16: in production, use the __Host- prefix so the cookie can only be set
-// from the origin domain (no subdomain/path overwrite attacks). Requires
+// In production, use the __Host- prefix so the cookie can only be set from
+// the origin domain (no subdomain/path overwrite attacks). Requires the
 // Secure flag (set below in production) and rejects the Domain attribute.
 export const SESSION_COOKIE = process.env.NODE_ENV === 'production' ? '__Host-addis-session' : 'addis-session';
 const CSRF_COOKIE = process.env.NODE_ENV === 'production' ? '__Host-addis-csrf' : 'addis-csrf';
@@ -32,22 +32,22 @@ export type ApiOptions = {
   requireRole?: Array<'rider' | 'contractor' | 'corporate_admin' | 'platform_admin'>;
   exemptFromTosGate?: boolean;
   // Idempotency is auto-applied to POST with an Idempotency-Key header.
-  // #10: optional deprecation marker. When set, the api() wrapper emits
-  // `Sunset` (RFC 8594) and `Deprecation: true` (RFC 9745) headers so clients
-  // can detect that a route is being phased out. No routes use this yet —
-  // the machinery is in place for future removals.
+  // Optional deprecation marker. When set, the api() wrapper emits `Sunset`
+  // (RFC 8594) and `Deprecation: true` (RFC 9745) headers so clients can
+  // detect that a route is being phased out. No routes use this yet — the
+  // machinery is in place for future removals.
   deprecated?: {
     sunset?: Date;   // when the route will stop responding
     link?: string;   // docs URL for the migration path
   };
 };
 
-// SEC-12: walk X-Forwarded-For right-to-left, skipping entries that match
-// a trusted proxy (configured via TRUSTED_PROXIES). The rightmost non-trusted
-// entry is treated as the real client IP. If TRUSTED_PROXIES is empty, the
-// XFF header is ignored entirely and the socket peer (x-real-ip) is used —
-// this is the safest default because an attacker cannot forge XFF when the
-// app is directly exposed.
+// Walk X-Forwarded-For right-to-left, skipping entries that match a trusted
+// proxy (configured via TRUSTED_PROXIES). The rightmost non-trusted entry is
+// treated as the real client IP. If TRUSTED_PROXIES is empty, the XFF header
+// is ignored entirely and the socket peer (x-real-ip) is used — this is the
+// safest default because an attacker cannot forge XFF when the app is
+// directly exposed.
 function parseTrustedProxies(): Set<string> {
   const raw = process.env.TRUSTED_PROXIES || '';
   return new Set(raw.split(',').map(s => s.trim()).filter(Boolean));
@@ -92,13 +92,13 @@ const RATE_RULES: RateRule[] = [
   { pattern: /\/api\/v1\/auth\/password\/reset$/, limit: 3, windowSec: 600, keyFn: ({ body }) => `phone:${body?.phone ?? 'unknown'}` },
   { pattern: /\/api\/v1\/auth\/password\/reset\/confirm$/, limit: 5, windowSec: 600, keyFn: ({ body }) => `phone:${body?.phone ?? 'unknown'}` },
   { pattern: /\/api\/v1\/subscriptions$/, limit: 10, windowSec: 3600, keyFn: ({ session }) => session ? `user:${session.id}` : null },
-  // SEC-14: corporate invite generation — rogue admin could generate unlimited
+  // Corporate invite generation — a rogue admin could generate unlimited
   // invite codes without this. Cap at 50/hour per admin.
   { pattern: /\/api\/v1\/corporate\/invites$/, limit: 50, windowSec: 3600, keyFn: ({ session }) => session ? `user:${session.id}` : null },
-  // SEC-21: webhook-specific rule. Telebirr can burst payment notifications
-  // during peak hours — the default 60/min anonymous cap could drop real
-  // settlement events. Allow 600/min per IP (high enough for legit bursts,
-  // low enough to blunt a naive flood).
+  // Webhook-specific rule. Telebirr can burst payment notifications during
+  // peak hours — the default 60/min anonymous cap could drop real settlement
+  // events. Allow 600/min per IP (high enough for legit bursts, low enough
+  // to blunt a naive flood).
   { pattern: /\/api\/v1\/webhooks\//, limit: 600, windowSec: 60, keyFn: ({ ip }) => ip ? `ip:${ip}` : null },
 ];
 
@@ -112,6 +112,8 @@ export async function rateLimitCheck(
   method: string,
   ctx: { session: Session | null; body: any; ip: string | undefined },
 ): Promise<RateLimitInfo | null> {
+  if (process.env.RATE_LIMIT_DISABLED === '1') return null;
+
   const matchingRules = RATE_RULES.filter(r => r.pattern.test(path));
   let maxRetry = 0;
   let info: RateLimitInfo | null = null;
@@ -318,7 +320,7 @@ export function api(options: ApiOptions, handler: Handler) {
 
     let idem: { replay?: any; scopedKey?: string; bodyHash?: string } | undefined;
     try {
-      // ── Auth ────────────────────────────────────────────────────────────
+      // ── Auth ──
       let session: Session | null = null;
       const bearer = req.headers.get('authorization')?.replace(/^Bearer\s+/i, '');
       // Read the session cookie from the request's Cookie header directly —
@@ -336,7 +338,7 @@ export function api(options: ApiOptions, handler: Handler) {
       // Update the requestLogger with the resolved userId for completion logging.
       if (session) (requestLogger as any).bindings.userId = session.id;
 
-      // ── CSRF ────────────────────────────────────────────────────────────
+      // ── CSRF ──
       await csrfCheck(req);
 
       let body: any = undefined;
@@ -466,7 +468,7 @@ export function api(options: ApiOptions, handler: Handler) {
 }
 
 export async function setSessionCookie(res: NextResponse, token: string): Promise<void> {
-  // SEC-16: __Host- prefix requires Secure + path=/ + no Domain attribute.
+  // __Host- prefix requires Secure + path=/ + no Domain attribute.
   // sameSite='lax' is preserved (browser still sends it on top-level navigations).
   res.cookies.set(SESSION_COOKIE, token, {
     httpOnly: true,

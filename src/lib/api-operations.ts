@@ -70,7 +70,7 @@ export async function POST_ride({ session, body, ipAddress, userAgent }: any) {
     if (sub.userId !== session.id) throw new ForbiddenError('Not your subscription');
     if (sub.status !== 'active') throw new BadRequestError('Subscription not active');
   }
-  // DB-04: capture the fare paid at booking time so historical records aren't
+  // Capture the fare paid at booking time so historical records aren't
   // skewed by later route price changes. For subscription-booked rides, this
   // is the route's canonical fare. For seat-claim rides, the actual paid
   // amount is on the linked Payment (resolved at claim time); we use the
@@ -128,8 +128,7 @@ export async function POST_ride({ session, body, ipAddress, userAgent }: any) {
         seatClaimId: input.seatClaimId,
         pickupLocationId: input.pickupLocationId,
         assignmentId: trip.assignmentId,
-        // DB-04: snapshot the fare at booking time.
-        farePaidCents,
+        farePaidCents, // snapshot at booking time
         status: 'booked',
       },
     });
@@ -158,10 +157,10 @@ export async function POST_board({ session, params, ipAddress, userAgent }: any)
     throw new ForbiddenError('Not your trip');
   }
 
-  // BIZ-067 (#16): capture `before` snapshot for the audit log.
+  // Capture `before` snapshot for the audit log.
   const before = { ...trip };
 
-  // wrap in a transaction; use CAS on trip.status to prevent concurrent boards.
+  // Wrap in a transaction; CAS on trip.status prevents concurrent boards.
   await db.$transaction(async (tx) => {
     const tripCas = await tx.trip.updateMany({
       where: { id: trip.id, status: 'scheduled' },
@@ -169,11 +168,12 @@ export async function POST_board({ session, params, ipAddress, userAgent }: any)
     });
     if (tripCas.count === 0) throw new ConflictError('Trip is no longer in a boardable state');
 
-    // P0-3+P0-4 cascade: only board rides whose subscription is still active
-    // (or whose ride is via a seat claim). Cancel-on-board for expired subs is handled
-    // by the scheduler; here we simply skip them so they don't get marked 'boarded'.
-    // We do a best-effort filter using a sub-query through relation — Prisma's updateMany
-    // doesn't support relation filters, so we look up the affected ride IDs first.
+    // Only board rides whose subscription is still active (or whose ride is
+    // via a seat claim). Cancel-on-board for expired subs is handled by the
+    // scheduler; here we simply skip them so they don't get marked 'boarded'.
+    // We do a best-effort filter using a sub-query through relation — Prisma's
+    // updateMany doesn't support relation filters, so we look up the affected
+    // ride IDs first.
     const boardableRideIds = await tx.ride.findMany({
       where: { tripId: trip.id, status: 'booked' },
       select: { id: true, subscriptionId: true, subscription: { select: { status: true } } },
@@ -209,10 +209,10 @@ export async function POST_complete({ session, params, ipAddress, userAgent }: a
     throw new ForbiddenError('Not your trip');
   }
 
-  // BIZ-01: refuse to complete a trip with zero boarded rides. Without this,
-  // a contractor could mark an empty trip as completed and still get credit
-  // for the run. Allow a no-show (boarded → completed with no-shows) but
-  // require at least one rider to have actually boarded.
+  // Refuse to complete a trip with zero boarded rides. Without this, a
+  // contractor could mark an empty trip as completed and still get credit for
+  // the run. Allow a no-show (boarded → completed with no-shows) but require
+  // at least one rider to have actually boarded.
   const boardedCount = await db.ride.count({
     where: { tripId: trip.id, status: 'boarded' },
   });
@@ -220,7 +220,7 @@ export async function POST_complete({ session, params, ipAddress, userAgent }: a
     throw new BadRequestError('Cannot complete a trip with no boarded rides. Cancel the trip instead.');
   }
 
-  // BIZ-067 (#16): capture `before` snapshot.
+  // Capture `before` snapshot.
   const before = { ...trip };
 
   await db.$transaction(async (tx) => {
@@ -236,7 +236,7 @@ export async function POST_complete({ session, params, ipAddress, userAgent }: a
     // Boarded rides complete; booked rides (no-shows) cascade to no_show.
     await tx.ride.updateMany({ where: { tripId: trip.id, status: 'boarded' }, data: { status: 'completed' } });
     const noShowResult = await tx.ride.updateMany({ where: { tripId: trip.id, status: 'booked' }, data: { status: 'no_show' } });
-    // decrement seatsBooked by the no-show count so trip capacity is accurate.
+    // Decrement seatsBooked by the no-show count so trip capacity is accurate.
     if (noShowResult.count > 0) {
       await tx.trip.updateMany({
         where: { id: trip.id, seatsBooked: { gte: noShowResult.count } },
@@ -286,7 +286,7 @@ export async function POST_trip_cancel({ session, params, body, ipAddress, userA
     ? body.reason
     : 'Trip cancelled';
 
-  // BIZ-067 (#16): capture `before` snapshot.
+  // Capture `before` snapshot.
   const before = { ...trip };
 
   // Cascade-cancel every booked ride, restore seats, restore subscription credits.
@@ -497,9 +497,9 @@ export async function POST_trip({ session, body, ipAddress, userAgent }: any) {
     const profile = await db.contractorProfile.findUnique({ where: { userId: session.id }, select: { verificationStatus: true } });
     if (!profile || profile.verificationStatus !== 'verified') throw new BadRequestError('Contractor must be verified to create trips');
   }
-  // BIZ-060: contractors must be verified before they can create trips. This
-  // prevents an unverified contractor from creating trips and accepting rider
-  // bookings before the admin has reviewed their documents.
+  // Contractors must be verified before they can create trips — prevents
+  // an unverified contractor from creating trips and accepting rider bookings
+  // before the admin has reviewed their documents.
   if (session.role === 'contractor') {
     const profile = await db.contractorProfile.findUnique({
       where: { userId: session.id },
@@ -543,9 +543,8 @@ export async function POST_trip({ session, body, ipAddress, userAgent }: any) {
   return { status: 201, data: trip };
 }
 
-// ─── Shuttle positions ──────────────────────────────────────────────────────
-// uses Redis when available (shared across instances), falls
-// back to in-memory Map for single-instance deployments.
+// Shuttle positions: uses Redis when available (shared across instances),
+// falls back to in-memory Map for single-instance deployments.
 const positions = new Map<string, { lat: number; lng: number; heading: number; speed: number; updatedAt: number }>();
 
 setInterval(() => {
@@ -567,16 +566,16 @@ export async function POST_shuttle_position({ session, body }: any) {
   if (session.role !== 'contractor' && session.role !== 'platform_admin') {
     throw new ForbiddenError('Contractor only');
   }
-  // BIZ-056 (#15): key positions by shuttleId (not userId) — a contractor with
-  // multiple shuttles would otherwise overwrite the position of one shuttle
-  // when posting from another. The position belongs to the SHUTTLE, not the
-  // driver (a relief driver using the same shuttle should update the same
-  // position entry).
+  // Key positions by shuttleId (not userId) — a contractor with multiple
+  // shuttles would otherwise overwrite the position of one shuttle when
+  // posting from another. The position belongs to the SHUTTLE, not the driver
+  // (a relief driver using the same shuttle should update the same position
+  // entry).
   //
   // Contractors may supply an explicit `shuttleId` in the body; we verify
   // ownership before accepting it. If omitted, we fall back to the first
-  // active shuttle the contractor owns (the historical behavior, kept for
-  // backward compatibility with existing mobile clients).
+  // active shuttle the contractor owns (kept for backward compatibility with
+  // existing mobile clients).
   let shuttleId: string | null = null;
   if (session.role === 'contractor') {
     if (body.shuttleId) {
@@ -622,9 +621,7 @@ export async function POST_shuttle_position({ session, body }: any) {
 }
 
 export async function GET_shuttle_positions({ session, query }: any) {
-  // BIZ-053 (#13): role-scoped filtering. Previously returned the entire
-  // positions Map to any authenticated caller, leaking every shuttle's
-  // live location to any rider. Now:
+  // Role-scoped filtering:
   //   - rider: only positions for the trip their active subscription is on
   //   - contractor: only their own shuttles' positions
   //   - platform_admin: all positions

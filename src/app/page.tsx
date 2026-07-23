@@ -193,10 +193,6 @@ export default function Home() {
             <div>
               <div className="font-semibold mb-2">Quick links</div>
               <div className="space-y-1 text-muted-foreground">
-                {/* FE-048: only public pages here — /trips, /open-seats and
-                    /assignments all require auth and would bounce anonymous
-                    visitors to /login. Signposted in the Account column
-                    below instead. */}
                 <Link href="/plans" className="block hover:text-foreground">Pricing</Link>
                 <Link href="/help" className="block hover:text-foreground">Help & FAQ</Link>
                 <Link href="/corporate/onboard" className="block hover:text-foreground">For companies</Link>

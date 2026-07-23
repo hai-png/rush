@@ -4,18 +4,8 @@ import { router } from 'expo-router';
 import { useAuthStore } from '../../src/lib/auth-store';
 import { colors, spacing, radius, fontSize, fontWeight } from '../../src/lib/theme';
 
-// mobile login now supports 2FA.
-//
-// Original: login() only sent phone + password. Users with 2FA enabled saw
-// 'alert('2FA code required')' with no way to enter the code — locked out
-// of the mobile app entirely.
-//
-// New: after the first login attempt fails with TWO_FACTOR_REQUIRED, show
-// a 2FA code input. The user enters the 6-digit code and submits again —
-// login() then sends phone + password + code together.
-//
-// (INC-06 — migrated from auth.ts plain `login()` to the Zustand store so
-// there is one source of truth for auth state.)
+// Mobile login: after a TWO_FACTOR_REQUIRED response, prompt for a 6-digit
+// code and resubmit phone + password + code together.
 export default function LoginScreen() {
   const login = useAuthStore(s => s.login);
   const [phone, setPhone] = useState('');
@@ -38,7 +28,6 @@ export default function LoginScreen() {
       else router.replace('/rider/dashboard');
     } catch (e: any) {
       const msg = e instanceof Error ? e.message : 'Login failed';
-      // Detect 2FA-required and reveal the code input.
       if (msg.includes('2FA') || msg.includes('Two-factor') || msg.includes('TWO_FACTOR')) {
         setNeeds2FA(true);
         setError('Enter your 6-digit 2FA code below and sign in again');

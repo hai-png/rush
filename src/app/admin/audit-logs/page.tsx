@@ -13,7 +13,6 @@ export const metadata: Metadata = { title: 'Audit Logs · Admin' };
 
 const PAGE_SIZE = 50;
 
-// FE-044: paginated audit log list (was take:200, no pagination UI).
 export default async function AdminAuditLogsPage({ searchParams }: { searchParams: Promise<{ page?: string }> }) {
   await requireRole('platform_admin');
   const sp = await searchParams;

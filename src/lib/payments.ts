@@ -626,10 +626,10 @@ class CbeProvider implements PaymentProvider {
     return { status: 'manual', instructions };
   }
 
-  // HALF-04 (#23): CBE has no realtime payment-status API — admins reconcile
-  // manually against bank statements. We can still answer status queries by
-  // looking up the Payment row by reference. A row marked 'completed' means
-  // an admin has already confirmed the bank transfer.
+  // CBE has no realtime payment-status API — admins reconcile manually against
+  // bank statements. We can still answer status queries by looking up the
+  // Payment row by reference. A row marked 'completed' means an admin has
+  // already confirmed the bank transfer.
   async verifyPayment(reference: string): Promise<PaymentStatusResult> {
     const { db } = await import('@/lib/db');
     const row = await db.payment.findFirst({ where: { reference, method: 'cbe' } });

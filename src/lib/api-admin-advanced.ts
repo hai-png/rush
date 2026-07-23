@@ -4,9 +4,9 @@
 // corporate invoice payment confirmation). Handlers may trigger outbox
 // events, audit chains, or external API calls.
 //
-// ARCH-02 (#28): the split from api-admin.ts is intentional — CRUD + list
-// endpoints stay simple and predictable in api-admin.ts; anything that fans
-// out side effects lives here so reviewers can focus on the audit trail +
+// The split from api-admin.ts is intentional — CRUD + list endpoints stay
+// simple and predictable in api-admin.ts; anything that fans out side
+// effects lives here so reviewers can focus on the audit trail +
 // notification surface area in one place.
 
 import { db } from '@/lib/db';
@@ -54,8 +54,8 @@ export async function PATCH_user({ session, params, body, ipAddress, userAgent }
       }
     }
     await db.user.update({ where: { id: params.id }, data: { isActive: false, tokenVersion: { increment: 1 } } });
-    // DB-019: log session-revocation failures instead of silently swallowing.
-    // A failed revoke leaves the suspended user's sessions live — security
+    // Log session-revocation failures instead of silently swallowing. A
+    // failed revoke leaves the suspended user's sessions live — security
     // needs to know so they can investigate.
     await db.session.updateMany({ where: { userId: params.id, revokedAt: null }, data: { revokedAt: new Date() } })
       .catch((err: unknown) => logger.error({ err: (err as Error).message, userId: params.id }, '[admin.suspend] session revoke failed'));
@@ -68,9 +68,9 @@ export async function PATCH_user({ session, params, body, ipAddress, userAgent }
     if (input.role === 'corporate_admin' || input.role === 'platform_admin') {
       await assertTwoFactorEnabled(params.id, input.role);
     }
-    // use a CAS-guarded transaction for the last-admin check + demotion.
-    // Two concurrent demotion requests could both pass the count check and
-    // demote the last platform_admin. Now the count check + update are atomic.
+    // CAS-guarded transaction for the last-admin check + demotion. Two
+    // concurrent demotion requests could both pass the count check and demote
+    // the last platform_admin. The count check + update are atomic.
     if (input.role !== 'platform_admin') {
       const target = await db.user.findUnique({ where: { id: params.id }, select: { role: true } });
       if (target?.role === 'platform_admin') {
@@ -82,7 +82,7 @@ export async function PATCH_user({ session, params, body, ipAddress, userAgent }
     }
     await db.user.update({ where: { id: params.id }, data: { role: input.role, tokenVersion: { increment: 1 } } });
     // Revoke existing sessions — the new role may have different access.
-    // DB-019: log failures instead of silently swallowing.
+    // Log failures instead of silently swallowing.
     await db.session.updateMany({ where: { userId: params.id, revokedAt: null }, data: { revokedAt: new Date() } })
       .catch((err: unknown) => logger.error({ err: (err as Error).message, userId: params.id }, '[admin.role_change] session revoke failed'));
     await audit({ actorId: session.id, action: 'user.role_changed', entityType: 'user', entityId: params.id, after: { role: input.role }, ipAddress, userAgent });
@@ -172,12 +172,11 @@ export async function DELETE_corporate({ session, params, ipAddress, userAgent }
   const before = corp;
   await db.corporate.update({ where: { id: params.id }, data: { isActive: false, deletedAt: new Date() } });
   await audit({ actorId: session.id, action: 'corporate.deactivated', entityType: 'corporate', entityId: params.id, before, after: { isActive: false }, ipAddress, userAgent });
-  // INC-02 (#21): DELETE returns 204 with no body.
   return { status: 204 };
 }
 
-// list ALL corporates (the existing GET /admin/corporates/pending
-// returns active corporates, which is misleading).
+// list ALL corporates (GET /admin/corporates/pending returns active corporates
+// only, which is misleading for admin browsing).
 export async function GET_corporates({ query }: any) {
   const filter: any = {};
   if (query?.status === 'active') filter.isActive = true;
@@ -215,10 +214,10 @@ export async function POST_verify_payment({ session, params, body, ipAddress, us
   return { data: { id: params.id, status: 'completed' } };
 }
 
-// per-resource allow-list of safe columns. Excludes passwordHash,
-// twoFactorSecret, and any other sensitive fields. Without this, `findMany()`
-// returned ALL columns including the bcrypt password hashes and plaintext TOTP
-// secrets — a CSV download gave an admin every user's credentials.
+// Per-resource allow-list of safe columns. Excludes passwordHash,
+// twoFactorSecret, and any other sensitive fields — `findMany()` returns
+// ALL columns by default, which would leak bcrypt hashes + plaintext TOTP
+// secrets in CSV downloads.
 const EXPORT_TABLES: Record<string, { model: string; label: string; select?: string[] }> = {
   users: {
     model: 'user',
@@ -302,7 +301,6 @@ export async function DELETE_route({ session, params, ipAddress, userAgent }: an
   const before = route;
   await db.route.update({ where: { id: params.id }, data: { isActive: false } });
   await audit({ actorId: session.id, action: 'route.deleted', entityType: 'route', entityId: params.id, before, after: { isActive: false }, ipAddress, userAgent });
-  // INC-02 (#21): DELETE returns 204 with no body.
   return { status: 204 };
 }
 
@@ -319,7 +317,6 @@ export async function DELETE_shuttle({ session, params, ipAddress, userAgent }: 
   const before = shuttle;
   await db.shuttle.update({ where: { id: params.id }, data: { isActive: false } });
   await audit({ actorId: session.id, action: 'shuttle.deleted', entityType: 'shuttle', entityId: params.id, before, after: { isActive: false }, ipAddress, userAgent });
-  // INC-02 (#21): DELETE returns 204 with no body.
   return { status: 204 };
 }
 
@@ -407,8 +404,8 @@ export async function POST_bulk_suspend({ session, body, ipAddress, userAgent }:
     data: { isActive: false, tokenVersion: { increment: 1 } },
   });
   // Revoke all active sessions for the suspended users — otherwise their
-  // existing JWTs stay valid for up to 30 days.
-  // DB-019: log failures instead of silently swallowing.
+  // existing JWTs stay valid for up to 30 days. Log failures so security can
+  // investigate.
   if (result.count > 0) {
     await db.session.updateMany({
       where: { userId: { in: input.userIds }, revokedAt: null },
@@ -469,8 +466,8 @@ export async function POST_bulk_refund({ session, body, ipAddress, userAgent }: 
   return { data: { scheduled, skipped, total: payments.length } };
 }
 
-// BIZ-09: cancel a mid-flight refund. Allows an admin to abort a refund that
-// was scheduled by mistake, before processRefundRetries picks it up.
+// Cancel a mid-flight refund. Allows an admin to abort a refund that was
+// scheduled by mistake, before processRefundRetries picks it up.
 const CancelRefundInput = z.object({
   reason: z.string().min(1).max(500),
 });
@@ -490,9 +487,9 @@ export async function POST_cancel_refund({ session, params, body, ipAddress, use
   return { data: { id: params.refundId, cancelled: true } };
 }
 
-// #24: POST /admin/corporates/:id/invoices/:invoiceId/mark-paid — mark a
-// corporate invoice as paid. Only platform_admin can confirm payment receipt.
-// Audit captures the before-state so the change is fully traceable.
+// POST /admin/corporates/:id/invoices/:invoiceId/mark-paid — mark a corporate
+// invoice as paid. Only platform_admin can confirm payment receipt. Audit
+// captures the before-state so the change is fully traceable.
 export async function POST_mark_invoice_paid({ session, params, ipAddress, userAgent }: any) {
   const invoice = await db.corporateInvoice.findUnique({
     where: { id: params.invoiceId },

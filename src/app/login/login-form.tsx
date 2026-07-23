@@ -14,8 +14,8 @@ import { api, ApiError } from '@/lib/api-client';
 import { Bus, ChevronLeft } from 'lucide-react';
 import { EthiopianPhone } from '@/lib/phone';
 
-// FE-02: client-side validation mirrors the server schema so users get
-// inline feedback before the request is sent.
+// Client-side validation mirrors the server schema so users get inline
+// feedback before the request is sent.
 const LoginSchema = z.object({
   phone: z.string().refine(EthiopianPhone.isValid, 'Enter a valid Ethiopian phone (+2519XXXXXXXX)'),
   password: z.string().min(1, 'Password is required'),
@@ -34,7 +34,6 @@ function LoginInner() {
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    // FE-02: validate before submitting — show inline field errors.
     const parsed = LoginSchema.safeParse({ phone, password, code });
     if (!parsed.success) {
       const fieldErrors: Record<string, string> = {};
@@ -123,9 +122,9 @@ function LoginInner() {
   );
 }
 
-// FE-033: this file holds the client-side login form. The page.tsx wrapper
-// exports `metadata` (only server components can do that) and renders this
-// component inside <Suspense> (required because we use useSearchParams).
+// Client-side login form. The page.tsx wrapper exports `metadata` (only
+// server components can do that) and renders this component inside <Suspense>
+// (required because we use useSearchParams).
 export function LoginForm() {
   return (
     <Suspense fallback={<div className="min-h-screen flex items-center justify-center">Loading…</div>}>

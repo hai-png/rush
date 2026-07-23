@@ -2,16 +2,9 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { api } from './api';
 import { Platform } from 'react-native';
 
-// offline-queue with NetInfo integration.
-//
-// queueOrSend() is the main entry point for mutations. It:
-//   1. Checks NetInfo for connectivity.
-//   2. If online: sends immediately. On network failure, enqueues for retry.
-//   3. If offline: enqueues immediately.
-//   4. Returns the API result if online, or { queued: true } if offline.
-//
-// drainQueue() is called automatically when connectivity is restored
-// (wired in _layout.tsx via NetInfo.addEventListener).
+// Offline-queue: queueOrSend() sends mutations immediately when online (or
+// enqueues on network failure), and enqueues immediately when offline.
+// drainQueue() runs when connectivity is restored (wired in _layout.tsx).
 
 const QUEUE_KEY = 'offline-queue';
 
@@ -58,7 +51,6 @@ export async function getQueueLength(): Promise<number> {
   return (await getQueue()).length;
 }
 
-// Check if the device is currently online.
 let isOnline = true;
 export function getIsOnline(): boolean { return isOnline; }
 export function setIsOnline(online: boolean): void {
@@ -69,14 +61,13 @@ export function setIsOnline(online: boolean): void {
   isOnline = online;
 }
 
-// Initialize NetInfo listener. Call once from _layout.tsx.
+// Call once from _layout.tsx to wire up the NetInfo listener.
 export async function initConnectivity(): Promise<() => void> {
   try {
     const NetInfo = require('@react-native-community/netinfo');
     const unsub = NetInfo.addEventListener((state: any) => {
       setIsOnline(state.isConnected === true && state.isInternetReachable !== false);
     });
-    // Initial check.
     const state = await NetInfo.fetch();
     isOnline = state.isConnected === true && state.isInternetReachable !== false;
     return unsub;
@@ -86,8 +77,8 @@ export async function initConnectivity(): Promise<() => void> {
   }
 }
 
-// the main mutation helper. Use this instead of api.post/patch/del
-// for mutations that should be queued when offline.
+// Main mutation helper — use this instead of api.post/patch/del for mutations
+// that should be queued when offline.
 export async function queueOrSend<T = any>(
   method: 'POST' | 'PATCH' | 'DELETE',
   path: string,

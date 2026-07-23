@@ -7,9 +7,10 @@ bun install
 bun run db:push
 bun run db:seed
 bun run dev                 # http://localhost:3000
-bash scripts/e2e-test.sh    # 59 assertions (run in another shell while dev is up)
+bash scripts/e2e-test.sh    # e2e flow test (run in another shell while dev is up)
 bun run lint
 bunx tsc --noEmit
+bun run test:race           # race-condition integration tests
 ```
 
 ### Demo credentials (seeded)
@@ -30,8 +31,10 @@ All dev defaults work out-of-the-box. Production **requires** real values for:
 - `CRON_SECRET` — 32+ chars
 - `TELEBIRR_*` — full set when `TELEBIRR_ENV=testbed|production`
 - `DATABASE_URL` — `postgresql://...` (SQLite is dev-only)
+- `FIELD_ENCRYPTION_KEY` — recommended (falls back to `AUTH_SECRET` if unset)
+- `TRUSTED_PROXIES` — comma-separated CIDR list if running behind a reverse proxy
 
-Optional but recommended in prod: `TWILIO_*`, `RESEND_*`, `SENTRY_DSN`, `REDIS_URL`.
+Optional but recommended in prod: `TWILIO_*`, `RESEND_*`, `SENTRY_DSN`, `REDIS_URL`, `CORS_ORIGINS`, `SCHEDULER_DISABLED=1`.
 
 ### 2. Build & start
 
@@ -40,17 +43,34 @@ NODE_ENV=production bun run build
 bun run start
 ```
 
-### 3. Cron
-
-The in-process scheduler (driven by `setInterval` in `src/lib/scheduler.ts`) is fine for dev/single-instance. In production (especially multi-instance), disable it and hit the cron endpoint externally:
+Or via Docker (multi-stage build, see `Dockerfile`):
 
 ```bash
-* * * * * curl -X POST https://addisride.et/api/v1/cron/run \
+docker build -t addis-ride .
+docker run -p 3000:3000 --env-file .env addis-ride
+```
+
+The image runs `bunx prisma migrate deploy` before `bun server.js`, runs as a non-root user, sets `TZ=Africa/Addis_Ababa`, and exposes a healthcheck on `/api/v1/healthz`.
+
+### 3. Cron
+
+The in-process scheduler (driven by `setInterval` in `src/lib/scheduler.ts`) is fine for dev/single-instance. In production (especially multi-instance), disable it (`SCHEDULER_DISABLED=1`) and hit the cron endpoint externally.
+
+`POST /api/v1/cron/run` runs every job (drain-outbox, refund-retries, expire-stale, hourly). To run a single job, pass `?job=<name>`:
+
+```bash
+# Run every job (default — equivalent to the old behavior):
+* * * * * curl -X POST "https://addisride.et/api/v1/cron/run" \
+  -H "content-type: application/json" \
+  -d "{\"_cronSecret\":\"$CRON_SECRET\"}"
+
+# Run a single job:
+*/30 * * * * curl -X POST "https://addisride.et/api/v1/cron/run?job=drain-outbox" \
   -H "content-type: application/json" \
   -d "{\"_cronSecret\":\"$CRON_SECRET\"}"
 ```
 
-This drains the outbox, processes refund retries, and expires stale subscriptions/releases.
+Valid `?job=` values: `drain-outbox`, `refund-retries`, `expire-stale`, `hourly`. The job list + intervals are also exposed at `GET /api/v1/cron` (platform-admin only).
 
 ### 4. Telebirr webhook
 
@@ -58,10 +78,10 @@ Register `https://<your-domain>/api/v1/webhooks/telebirr/notify` with Ethio tele
 
 ## Architecture at a glance
 
-- 31 Prisma models — `prisma/schema.prisma` is the single source of truth
-- 158 API routes registered in `src/lib/api-routes.ts`, dispatched by the catch-all at `src/app/api/v1/[[...route]]/route.ts`
+- 37 Prisma models — `prisma/schema.prisma` is the single source of truth
+- 186 API operations across 155 unique paths, registered in `src/lib/api-routes.ts` and dispatched by the catch-all at `src/app/api/v1/[[...route]]/route.ts`
 - 57 server-rendered pages under `src/app/**/page.tsx`
-- 44 library modules in `src/lib/`
+- 52 library modules in `src/lib/`
 
 ## Production hardening status
 
@@ -70,10 +90,12 @@ Register `https://<your-domain>/api/v1/webhooks/telebirr/notify` with Ethio tele
 | Database | SQLite | PostgreSQL via `DATABASE_URL` | Ready |
 | Rate limiter | In-memory `Map` | Redis (`REDIS_URL`) | Stub — swap `rateLimitCheck` in `src/lib/api.ts` |
 | File storage | Local disk (`UPLOAD_DIR`) | S3 | Stub — swap `saveFile`/`readFileBytes` in `src/lib/file-storage.ts` |
+| Field encryption | `AUTH_SECRET` | Dedicated `FIELD_ENCRYPTION_KEY` | Ready — set the env var |
+| Trusted proxy | None (socket peer) | `TRUSTED_PROXIES` CIDR list | Ready — set the env var |
 | SMS | `console.log` | Twilio | Auto-detects creds |
 | Email | `console.log` | Resend | Auto-detects creds |
 | Payments | Mock Telebirr | Real Telebirr H5/InApp/Subscription | Auto-detects creds |
-| Scheduler | In-process `setInterval` | External cron | Ready |
+| Scheduler | In-process `setInterval` | External cron + `SCHEDULER_DISABLED=1` | Ready |
 | Error tracking | Console | Sentry | Stub — `SENTRY_DSN` read but not initialized |
 | Mobile app | Expo (separate project in `apps/mobile/`) | Standalone build | Ready — see `apps/mobile/README.md` |
 

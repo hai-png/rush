@@ -4,8 +4,6 @@ import { useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
-// FE-01: error.tsx for /trips. Without this, a DB error crashed the segment
-// to global-error.tsx with no contextual recovery.
 export default function TripsError({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {
   useEffect(() => {
     console.error('[trips error]', error);

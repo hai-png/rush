@@ -12,7 +12,6 @@ export const metadata: Metadata = { title: 'Shuttles · Admin' };
 
 const PAGE_SIZE = 50;
 
-// FE-044: paginated shuttles list (was unbounded, no pagination UI).
 export default async function AdminShuttlesPage({ searchParams }: { searchParams: Promise<{ page?: string }> }) {
   await requireRole('platform_admin');
   const sp = await searchParams;

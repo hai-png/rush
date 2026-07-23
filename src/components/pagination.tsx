@@ -1,10 +1,10 @@
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 
-// FE-043/FE-044: shared prev/next pagination component used by all admin
-// list pages. Server-rendered; the caller passes the current page, the
-// total row count, the page size, the base path (e.g. "/admin/users"), and
-// any extra query params to preserve (e.g. search string, role filter).
+// Shared prev/next pagination component used by all admin list pages.
+// Server-rendered; the caller passes the current page, the total row count,
+// the page size, the base path (e.g. "/admin/users"), and any extra query
+// params to preserve (e.g. search string, role filter).
 //
 // Renders "Page N of M" plus Prev / Next buttons. Prev/Next are disabled
 // (not hidden) when there is no page to go to so screen-reader users still

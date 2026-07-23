@@ -24,7 +24,6 @@ export default function ContractorTripsScreen() {
     if (isActive()) setRefreshing(false);
   }, []);
 
-  // (MOB-05e — active guard prevents stale setState on blur.)
   useFocusEffect(useCallback(() => {
     let active = true;
     load(() => active);

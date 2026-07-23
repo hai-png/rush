@@ -4,12 +4,10 @@ import { db } from '@/lib/db';
 import { readFileBytes } from '@/lib/file-storage';
 import { NotFoundError, ForbiddenError, toErrorEnvelope } from '@/lib/errors';
 
-// + P1-12 / SEC-015 + P1-37 / API-006:
+// File download handler:
 //   - Sanitize filename for Content-Disposition (strip CR/LF, escape quotes).
 //   - Set X-Content-Type-Options: nosniff so browsers don't sniff HTML.
-//   - Allow ticket participants to view each other's attachments (the
-//     original only allowed the uploader + platform_admin, which meant a
-//     rider couldn't download an admin's reply attachment).
+//   - Allow ticket participants to view each other's attachments.
 //   - Use 'attachment' instead of 'inline' for untrusted uploads to prevent
 //     the browser from rendering them in-page.
 

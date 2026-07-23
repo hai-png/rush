@@ -7,12 +7,11 @@ import { CheckCircle2, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { api, ApiError } from '@/lib/api-client';
 
-// FE-053: polls /api/v1/subscriptions/:id (preferred) or /api/v1/payments/:id
-// every 2.5s. Redirects to /dashboard/rider when the subscription becomes
-// 'active' or the payment becomes 'confirmed' (or 'completed'). After 60s of
-// polling without a terminal state we surface a "taking longer than
-// expected" message with a support link so the user isn't stuck on a
-// spinner.
+// Polls /api/v1/subscriptions/:id (preferred) or /api/v1/payments/:id every
+// 2.5s. Redirects to /dashboard/rider when the subscription becomes 'active'
+// or the payment becomes 'confirmed' (or 'completed'). After 60s of polling
+// without a terminal state we surface a "taking longer than expected" message
+// with a support link so the user isn't stuck on a spinner.
 
 const POLL_INTERVAL_MS = 2500;
 const POLL_TIMEOUT_MS = 60_000;

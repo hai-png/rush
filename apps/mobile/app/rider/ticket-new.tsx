@@ -4,10 +4,8 @@ import { router, useLocalSearchParams } from 'expo-router';
 import { api } from '../../src/lib/api';
 import { colors, spacing, radius, fontSize, fontWeight } from '../../src/lib/theme';
 
-// Picker was removed from react-native core in 0.74 (deprecated since 0.60).
-// We use a runtime require + any-cast so the screen keeps working until we
-// migrate to @react-native-picker/picker. This file's Picker usage is
-// unrelated to the audit findings covered in this pass.
+// Picker was removed from react-native core in 0.74. Runtime require + any-
+// cast keeps the screen working until we migrate to @react-native-picker/picker.
 // eslint-disable-next-line @typescript-eslint/no-var-requires
 const Picker: any = (require('react-native') as any).Picker ?? (() => null);
 

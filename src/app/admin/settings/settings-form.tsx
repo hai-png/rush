@@ -6,12 +6,12 @@ import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import { api } from '@/lib/api-client';
 
-// FE-059: the settings table is a generic key/value store, so without a
-// client-side allowlist an admin could write arbitrary keys (typos, internal
-// names, anything). This allowlist mirrors the keys the backend actually
-// reads, so the form refuses to submit unknown keys with an inline error
-// before the request is sent. The backend should still re-validate
-// server-side — this is defense-in-depth plus a better UX.
+// The settings table is a generic key/value store, so without a client-side
+// allowlist an admin could write arbitrary keys (typos, internal names,
+// anything). This allowlist mirrors the keys the backend actually reads, so
+// the form refuses to submit unknown keys with an inline error before the
+// request is sent. The backend should still re-validate server-side — this is
+// defense-in-depth plus a better UX.
 const ALLOWED_SETTING_KEYS = new Set<string>([
   'otp_expiry_seconds',
   'telebirr_merchant_id',

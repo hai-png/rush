@@ -13,8 +13,8 @@ import { api } from '@/lib/api-client';
 import { ChevronLeft } from 'lucide-react';
 import { EthiopianPhone } from '@/lib/phone';
 
-// FE-02: client-side validation mirrors the server schema so users get
-// inline feedback before the request is sent.
+// Client-side validation mirrors the server schema so users get inline
+// feedback before the request is sent.
 const SignupSchema = z.object({
   name: z.string().min(2, 'Name must be at least 2 characters'),
   phone: z.string().refine(EthiopianPhone.isValid, 'Enter a valid Ethiopian phone (+2519XXXXXXXX)'),
@@ -23,8 +23,8 @@ const SignupSchema = z.object({
   workArea: z.string().min(1, 'Work area is required'),
 });
 
-// FE-033: client-side signup form component. The page.tsx wrapper exports
-// the page metadata and renders this.
+// Client-side signup form. The page.tsx wrapper exports the page metadata
+// and renders this.
 export function RiderSignupForm() {
   const router = useRouter();
   const [form, setForm] = useState({ name: '', phone: '', password: '', homeArea: '', workArea: '' });
@@ -33,7 +33,6 @@ export function RiderSignupForm() {
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    // FE-02: validate before submitting — show inline field errors.
     const parsed = SignupSchema.safeParse(form);
     if (!parsed.success) {
       const fieldErrors: Record<string, string> = {};

@@ -12,12 +12,12 @@ import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import { api } from '@/lib/api-client';
 
-// FE-058: an admin must not be able to suspend, reactivate, or change the
-// role of their own account — that's how an admin locks themselves out or
-// accidentally degrades their own privileges. The current user's id is
-// passed in as `currentUserId` and compared against the row's `userId`.
-// (Server-side enforcement is the backend agent's responsibility; this is
-// the client-side guard.)
+// An admin must not be able to suspend, reactivate, or change the role of
+// their own account — that's how an admin locks themselves out or accidentally
+// degrades their own privileges. The current user's id is passed in as
+// `currentUserId` and compared against the row's `userId`. (Server-side
+// enforcement is the backend agent's responsibility; this is the client-side
+// guard.)
 export function UserActions({
   userId,
   currentRole,

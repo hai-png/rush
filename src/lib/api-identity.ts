@@ -36,11 +36,11 @@ export async function POST_register({ body, ipAddress, userAgent }: any) {
 
   const passwordHash = await hashPassword(input.password);
 
-  // SEC-17: don't reveal phone enumeration. On P2002 (phone already exists),
-  // return the same 201 success response shape so an attacker can't tell
-  // whether the phone was newly registered or already existed. The client
-  // ignores the response body and immediately calls POST /auth/token, which
-  // will fail for the would-be attacker because they don't know the password.
+  // Don't reveal phone enumeration. On P2002 (phone already exists), return
+  // the same 201 success response shape so an attacker can't tell whether the
+  // phone was newly registered or already existed. The client ignores the
+  // response body and immediately calls POST /auth/token, which will fail for
+  // the would-be attacker because they don't know the password.
   const successResponse = (userId: string, role: string) => ({
     status: 201,
     data: {
@@ -72,8 +72,8 @@ export async function POST_register({ body, ipAddress, userAgent }: any) {
     return successResponse(user.id, 'contractor');
   }
   } catch (err: any) {
-    // SEC-17: P2002 (phone already registered) → return the same 201 response
-    // shape so an attacker cannot enumerate registered phones.
+    // P2002 (phone already registered) → return the same 201 response shape
+    // so an attacker cannot enumerate registered phones.
     if (err?.code === 'P2002') {
       // Use a deterministic synthetic ID so the response shape matches a real
       // registration. The client never reads this ID; subsequent login fails.
@@ -87,7 +87,7 @@ const LoginInput = z.object({
   phone: z.string().refine(EthiopianPhone.isValid, 'Invalid Ethiopian phone'),
   password: z.string().min(1),
   code: z.string().length(6).optional(),
-  backupCode: z.string().optional(), // P3-25: 10-char hex backup code
+  backupCode: z.string().optional(), // 10-char hex backup code
 });
 
 export async function POST_token({ body, ipAddress, userAgent }: any) {
@@ -119,8 +119,8 @@ export async function POST_token({ body, ipAddress, userAgent }: any) {
         ...(shouldLock ? { lockedUntil: new Date(Date.now() + LOCKOUT_MS) } : {}),
       },
     });
-    // SEC-018: audit every failed login attempt (not just lockouts) so
-    // security reviews can spot brute-force patterns before lockout triggers.
+    // Audit every failed login attempt (not just lockouts) so security reviews
+    // can spot brute-force patterns before lockout triggers.
     await audit({ actorId: user.id, action: 'user.login_failed', entityType: 'user', entityId: user.id, after: { reason: 'invalid_password', attempts: newAttempts, locked: shouldLock }, ipAddress, userAgent }).catch(() => {});
     if (shouldLock) {
       await audit({ actorId: user.id, action: 'user.account_locked', entityType: 'user', entityId: user.id, after: { reason: 'max_failed_attempts' }, ipAddress, userAgent });
@@ -197,7 +197,7 @@ export async function POST_token({ body, ipAddress, userAgent }: any) {
 export async function POST_logout({ session, ipAddress, userAgent }: any) {
   if (session) {
     await revokeSession(session.jti);
-    // SEC-018: audit logout so security reviews can correlate session activity.
+    // Audit logout so security reviews can correlate session activity.
     await audit({ actorId: session.id, action: 'user.logout', entityType: 'user', entityId: session.id, ipAddress, userAgent }).catch(() => {});
   }
   const res = NextResponse.json({ data: { ok: true } });
@@ -261,8 +261,8 @@ export async function POST_change_password({ session, body, ipAddress, userAgent
     }
   }
   const passwordHash = await hashPassword(newPassword);
-  // DB-015: wrap password update + session revocation in a single transaction
-  // so a crash between the two can't leave stale sessions able to use the old
+  // Wrap password update + session revocation in a single transaction so a
+  // crash between the two can't leave stale sessions able to use the old
   // password (or vice versa).
   await db.$transaction(async (tx) => {
     await tx.user.update({ where: { id: user.id }, data: { passwordHash, tokenVersion: { increment: 1 } } });
@@ -341,8 +341,8 @@ export async function DELETE_session({ session, params, ipAddress, userAgent }: 
     data: { revokedAt: new Date() },
   });
   if (result.count > 0) {
-    // SEC-018: audit session revocation so user-initiated logouts are visible
-    // in the audit trail (was previously silently swallowed).
+    // Audit session revocation so user-initiated logouts are visible in the
+    // audit trail.
     await audit({ actorId: session!.id, action: 'user.session_revoked', entityType: 'session', entityId: params.id, ipAddress, userAgent }).catch(() => {});
   }
   return { status: 204 };
@@ -416,7 +416,7 @@ export async function POST_password_reset_confirm({ body, ipAddress, userAgent }
   const user = await db.user.findUnique({ where: { phone: EthiopianPhone.normalize(phone) } });
   if (!user) throw new UnauthorizedError();
   const passwordHash = await hashPassword(newPassword);
-  // DB-015: wrap password update + session revocation in a single transaction.
+  // Wrap password update + session revocation in a single transaction.
   await db.$transaction(async (tx) => {
     await tx.user.update({ where: { id: user.id }, data: { passwordHash, tokenVersion: { increment: 1 } } });
     await tx.session.updateMany({

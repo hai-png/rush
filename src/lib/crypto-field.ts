@@ -1,6 +1,6 @@
-// field-level encryption for sensitive columns (2FA secrets,
-// etc.) so that DB read access (admin, backup, SQL injection, CSV export)
-// cannot recover the raw secret.
+// Field-level encryption for sensitive columns (2FA secrets, etc.) so that
+// DB read access (admin, backup, SQL injection, CSV export) cannot recover the
+// raw secret.
 //
 // Uses AES-256-GCM with a key derived from FIELD_ENCRYPTION_KEY (preferred)
 // or AUTH_SECRET (fallback) via PBKDF2 (100k iterations, 32-byte key). The
@@ -9,9 +9,8 @@
 // confidentiality and integrity — tampering with the ciphertext or tag
 // fails decryption.
 //
-// SEC-03: a separate FIELD_ENCRYPTION_KEY allows rotating the JWT signing
-// secret (AUTH_SECRET) without invalidating all existing TOTP secrets —
-// rotating AUTH_SECRET previously destroyed all 2FA data.
+// A separate FIELD_ENCRYPTION_KEY allows rotating the JWT signing secret
+// (AUTH_SECRET) without invalidating all existing TOTP secrets.
 import { createCipheriv, createDecipheriv, pbkdf2Sync, randomBytes } from 'node:crypto';
 import { loadEnv } from '@/lib/env';
 
@@ -23,9 +22,9 @@ const VERSION = 'v1';
 let cachedKey: Buffer | null = null;
 function getKey(): Buffer {
   if (cachedKey) return cachedKey;
-  // SEC-03: prefer a dedicated FIELD_ENCRYPTION_KEY if set so that
-  // AUTH_SECRET rotation doesn't invalidate all encrypted TOTP secrets.
-  // Fall back to AUTH_SECRET for backward compatibility.
+  // Prefer a dedicated FIELD_ENCRYPTION_KEY if set so that AUTH_SECRET
+  // rotation doesn't invalidate all encrypted TOTP secrets. Fall back to
+  // AUTH_SECRET for backward compatibility.
   const secret = process.env.FIELD_ENCRYPTION_KEY || loadEnv().AUTH_SECRET;
   cachedKey = pbkdf2Sync(secret, KDF_SALT, KDF_ITERATIONS, 32, 'sha256');
   return cachedKey;

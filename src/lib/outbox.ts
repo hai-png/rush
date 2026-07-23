@@ -16,11 +16,11 @@ export async function enqueue(channel: Channel, payload: unknown): Promise<void>
   });
 }
 
-// BIZ-11 / DB-018: variant of enqueueNotification that accepts an existing
-// transaction client. Use this inside a $transaction callback so the
-// Notification + OutboxEvent rows are committed atomically with the caller's
-// other writes — a crash between the caller's commit and enqueueNotification
-// would otherwise lose the notification.
+// Variant of enqueueNotification that accepts an existing transaction client.
+// Use this inside a $transaction callback so the Notification + OutboxEvent
+// rows are committed atomically with the caller's other writes — a crash
+// between the caller's commit and enqueueNotification would otherwise lose
+// the notification.
 export async function enqueueNotificationTx(tx: TxClient, notif: {
   userId: string; type: string; title: string; body: string; link?: string;
 }): Promise<void> {
@@ -39,11 +39,11 @@ export async function enqueueNotification(notif: {
   // For notifications, write the notification row directly AND enqueue an
   // outbox event for push delivery.
   //
-  // DB-018: wrap Notification + OutboxEvent writes in a single transaction so
-  // a process crash between them can't leave orphan rows. Without this, a
-  // crash after Notification.create but before enqueue could leave the user
-  // with a notification they never got a push for (and vice versa for an
-  // outbox event pointing at nothing).
+  // Wrap Notification + OutboxEvent writes in a single transaction so a
+  // process crash between them can't leave orphan rows. Without this, a crash
+  // after Notification.create but before enqueue could leave the user with a
+  // notification they never got a push for (and vice versa for an outbox
+  // event pointing at nothing).
   //
   // NOTE: this MUST be called from outside another $transaction — Prisma does
   // not support nested interactive transactions. All call sites in the

@@ -9,9 +9,6 @@ import {
 import { toast } from 'sonner';
 import { api } from '@/lib/api-client';
 
-// FE-05 / FE-035: replace native confirm() with a styled shadcn/ui Dialog so
-// the UX matches the rest of the design system and the button uses the
-// shared <Button> component (was a raw <button>).
 export function CancelSubscriptionButton({ id }: { id: string }) {
   const router = useRouter();
 

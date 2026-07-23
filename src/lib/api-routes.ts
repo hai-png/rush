@@ -185,7 +185,7 @@ const ROUTES: RouteEntry[] = [
   r('GET', '/admin/payments', { requireAuth: true, requireRole: ['platform_admin'] }, admin.GET_payments),
   r('GET', '/admin/payments/:id', { requireAuth: true, requireRole: ['platform_admin'] }, admin.GET_payment),
   r('POST', '/admin/payments/:id/refund', { requireAuth: true, requireRole: ['platform_admin'] }, admin.POST_refund),
-  // BIZ-09: cancel a mid-flight refund before processRefundRetries picks it up.
+  // Cancel a mid-flight refund before processRefundRetries picks it up.
   r('POST', '/admin/payments/:id/refunds/:refundId/cancel', { requireAuth: true, requireRole: ['platform_admin'] }, adminAdvanced.POST_cancel_refund),
   r('GET', '/admin/audit-logs', { requireAuth: true, requireRole: ['platform_admin'] }, admin.GET_audit_logs),
   r('GET', '/admin/plans', { requireAuth: true, requireRole: ['platform_admin'] }, admin.GET_plans),
@@ -227,7 +227,7 @@ const ROUTES: RouteEntry[] = [
   r('PATCH', '/admin/routes/:id/price', { requireAuth: true, requireRole: ['platform_admin'] }, adminAdvanced.PATCH_route_price),
   r('POST', '/admin/faqs', { requireAuth: true, requireRole: ['platform_admin'] }, admin.POST_faq),
   r('DELETE', '/admin/faqs/:id', { requireAuth: true, requireRole: ['platform_admin'] }, admin.DELETE_faq),
-  // #24: corporate billing — mark a corporate invoice as paid.
+  // corporate billing — mark a corporate invoice as paid.
   r('POST', '/admin/corporates/:id/invoices/:invoiceId/mark-paid', { requireAuth: true, requireRole: ['platform_admin'] }, adminAdvanced.POST_mark_invoice_paid),
 
   // holiday management (skip trip generation on holidays).
@@ -260,8 +260,8 @@ const ROUTES: RouteEntry[] = [
   r('POST', '/payments/telebirr/mandate/:mctContractNo/cancel', { requireAuth: true }, telebirr.POST_mandate_cancel),
   r('POST', '/payments/telebirr/disburse', { requireAuth: true, requireRole: ['platform_admin'] }, telebirr.POST_disburse),
 
-  // SEC-23: route-level role enforcement — only riders can onboard a new
-  // corporate. Platform admins may also onboard on behalf of a rider.
+  // Route-level role enforcement — only riders can onboard a new corporate.
+  // Platform admins may also onboard on behalf of a rider.
   r('POST', '/corporate/onboard', { requireAuth: true, requireRole: ['rider', 'platform_admin'] }, corporate.POST_onboard),
   r('GET',  '/corporate', { requireAuth: true, requireRole: ['corporate_admin', 'platform_admin'] }, corporate.GET_current),
   r('GET',  '/corporate/me', { requireAuth: true, requireRole: ['corporate_admin', 'platform_admin'] }, corporate.GET_me),

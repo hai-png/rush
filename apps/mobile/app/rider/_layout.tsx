@@ -2,8 +2,6 @@ import { Tabs } from 'expo-router';
 import { Text, View } from 'react-native';
 import { colors, fontSize, fontWeight } from '../../src/lib/theme';
 
-// rider tab bar. Bottom tabs for the five primary rider
-// screens so users can navigate between them without being stranded.
 function TabIcon({ label, active }: { label: string; active: boolean }) {
   return (
     <View style={{ paddingVertical: 8, paddingHorizontal: 12, alignItems: 'center' }}>

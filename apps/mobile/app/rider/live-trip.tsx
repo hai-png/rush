@@ -7,21 +7,15 @@ import { colors, spacing, radius, fontSize, fontWeight } from '../../src/lib/the
 
 type ShuttlePos = { lat: number; lng: number; heading: number; speed: number; updatedAt: number };
 
-// Lazy-load react-native-maps so the web target (where the native module is
-// unavailable) doesn't crash at import time. We resolve it once on first
-// render of a native device.
-//
-// We type the cached module loosely (`any`) because the react-native-maps
-// typings use a default export + named exports and the require() pattern
-// confuses TS when the module may be absent (web). Runtime correctness is
-// what matters here.
+// Lazy-load react-native-maps so the web target (no native module) doesn't
+// crash at import time. Typing is loose (`any`) because the require() pattern
+// confuses TS when the module may be absent on web.
 let MapsModule: any = null;
 function getMaps() {
   if (Platform.OS === 'web') return null;
   if (MapsModule) return MapsModule;
   try {
-    // require() is synchronous and only runs on native — Metro tree-shakes
-    // this branch out of the web bundle.
+    // require() runs only on native — Metro tree-shakes this out of the web bundle.
     MapsModule = require('react-native-maps');
     return MapsModule;
   } catch {
@@ -29,12 +23,9 @@ function getMaps() {
   }
 }
 
-// live trip tracking with position polling.
-// — no map, no polling, no real-time position. Now polls /shuttle-positions
-// every 5 seconds, shows the shuttle's live coordinates + speed + heading,
-// AND renders a real MapView with markers for the shuttle and the rider's
-// pickup origin. Falls back to the text card on web (react-native-maps is
-// native-only) or if the module fails to load.
+// Live trip tracking: polls /shuttle-positions every 5s and renders a MapView
+// with markers for the shuttle and the rider's pickup. Falls back to a text
+// card on web (react-native-maps is native-only).
 export default function LiveTripScreen() {
   const [trip, setTrip] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -42,8 +33,6 @@ export default function LiveTripScreen() {
   const [positions, setPositions] = useState<ShuttlePos[]>([]);
   const mapRef = useRef<any>(null);
 
-  // Fetch the active trip on focus.
-  // (MOB-05e — active guard prevents setState after blur.)
   useFocusEffect(useCallback(() => {
     let active = true;
     setLoading(true);
@@ -67,7 +56,7 @@ export default function LiveTripScreen() {
         }
       } catch { /* silent — position polling is best-effort */ }
     };
-    poll(); // immediate first poll
+    poll();
     const interval = setInterval(poll, 5000);
     return () => { active = false; clearInterval(interval); };
   }, [trip]);

@@ -4,8 +4,6 @@ import { View, ActivityIndicator } from 'react-native';
 import { useAuthStore } from '../src/lib/auth-store';
 import { colors } from '../src/lib/theme';
 
-// (INC-06 — migrated from auth.ts `restoreSession()` to the Zustand store's
-// `restore()` action so there is one source of truth for session restoration.)
 export default function Index() {
   const restore = useAuthStore(s => s.restore);
 

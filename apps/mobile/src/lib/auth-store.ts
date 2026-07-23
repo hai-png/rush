@@ -1,12 +1,6 @@
 // Auth store using Zustand for reactive state management across screens.
-//
-// (INC-06 — this is now the single source of truth for mobile auth. The old
-// `auth.ts` plain-functions module was deleted; its `restoreSession()` helper
-// is now `restore()` here, and `login()`/`logout()` were already identical.)
-//
-// `login()` throws on failure (instead of returning `false`) so that callers
-// like the login screen can inspect the error message to detect the
-// TWO_FACTOR_REQUIRED case. On success it returns the authenticated user.
+// `login()` throws on failure (instead of returning `false`) so callers can
+// inspect the error message to detect TWO_FACTOR_REQUIRED.
 import { create } from 'zustand';
 import { api, setToken } from './api';
 import * as SecureStore from 'expo-secure-store';

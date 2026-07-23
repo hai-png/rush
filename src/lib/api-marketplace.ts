@@ -229,9 +229,9 @@ export async function POST_cancel_release({ session, params, ipAddress, userAgen
   if (!release) throw new NotFoundError('Seat release not found');
   if (release.userId !== session.id) throw new NotFoundError('Seat release not found');
   if (release.status !== 'open') throw new BadRequestError(`Cannot cancel a ${release.status} release`);
-  // BIZ-024: refuse to cancel a release after the trip has departed. Without
-  // this, a seller could "restore" their seat on a trip that's already left,
-  // getting credit for a ride they didn't take.
+  // Refuse to cancel a release after the trip has departed. Without this, a
+  // seller could "restore" their seat on a trip that's already left, getting
+  // credit for a ride they didn't take.
   if (release.trip && release.trip.departureAt.getTime() < Date.now()) {
     throw new BadRequestError('Cannot cancel a release after the trip has departed');
   }

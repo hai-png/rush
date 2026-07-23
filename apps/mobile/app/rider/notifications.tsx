@@ -9,8 +9,6 @@ type Notif = { id: string; title: string; body: string; readAt: string | null; c
 export default function NotificationsScreen() {
   const [notifs, setNotifs] = useState<Notif[]>([]);
 
-  // (MOB-05e — active-guard prevents setState after the screen loses focus
-  // while the fetch is still in flight.)
   useFocusEffect(useCallback(() => {
     let active = true;
     api.get<Notif[]>('/notifications')
