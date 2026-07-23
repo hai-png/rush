@@ -4,7 +4,7 @@ import { MapContainer, TileLayer, Marker, Popup, Polyline } from 'react-leaflet'
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
-// P2-27 / OPS-023: self-host leaflet marker icons instead of loading from
+// self-host leaflet marker icons instead of loading from
 // Cloudflare CDN. The CDN is blocked in Ethiopia (common internet restriction),
 // which made markers disappear. Copy the images to /public/leaflet/ during
 // the build — they ship with the leaflet npm package.

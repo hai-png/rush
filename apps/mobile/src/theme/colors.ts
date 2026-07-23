@@ -1,4 +1,4 @@
-// P2-33 / FE-037 / P2-38: shared color tokens for the mobile app with dark mode.
+// / P2-38: shared color tokens for the mobile app with dark mode.
 // Use useTheme() hook to get the current palette based on the system preference.
 export const lightColors = {
   primary: '#2563eb',

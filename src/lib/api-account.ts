@@ -41,7 +41,7 @@ export async function POST_delete({ session, ipAddress, userAgent }: any) {
       email: null,
       name: 'Deleted User',
       tokenVersion: { increment: 1 },
-      // P2 FIX: also scrub 2FA secret + disable 2FA + clear lockout state.
+      // also scrub 2FA secret + disable 2FA + clear lockout state.
       twoFactorSecret: null,
       twoFactorEnabled: false,
       phoneVerified: false,

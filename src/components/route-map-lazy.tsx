@@ -3,7 +3,7 @@
 import dynamic from 'next/dynamic';
 import { Skeleton } from '@/components/ui/skeleton';
 
-// P2-26 / OPS-022: client-component wrapper that lazy-loads RouteMap.
+// client-component wrapper that lazy-loads RouteMap.
 // `next/dynamic` with `ssr: false` is not allowed in Server Components,
 // so we wrap it here. Server components import this wrapper instead.
 const RouteMap = dynamic(() => import('./route-map').then(m => m.RouteMap), {

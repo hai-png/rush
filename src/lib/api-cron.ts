@@ -9,7 +9,7 @@ export async function POST_run(ctx: any) {
   const requestId = ctx.requestId ?? crypto.randomUUID();
   try {
     const env = loadEnv();
-    // P3 FIX: use constant-time comparison instead of !==.
+    // use constant-time comparison instead of !==.
     const provided = ctx.body?._cronSecret ?? '';
     const expected = env.CRON_SECRET;
     if (!provided || provided.length !== expected.length || !timingSafeEqual(Buffer.from(provided), Buffer.from(expected))) {
@@ -17,9 +17,7 @@ export async function POST_run(ctx: any) {
     }
     ensureSchedulerStarted();
 
-    // C3 FIX: call the SAME functions the scheduler uses, not a partial
-    // inline reimplementation. Previously this endpoint dropped 4 pieces of
-    // business logic: seat restoration on expired releases, subscription-expiry
+    // call the SAME functions the scheduler uses, not a partial
     // notifications, monthly corporate counter reset, and outbox drain.
     const result = await runAllJobs();
 

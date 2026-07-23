@@ -33,10 +33,8 @@ export function ensureSchedulerStarted(): void {
   logger.info('[scheduler] started: outbox(30s), refunds(60s), expire(5m), hourly(1h)');
 }
 
-// C3 FIX: export a single entry point that runs ALL jobs, so the external
+// export a single entry point that runs ALL jobs, so the external
 // cron endpoint (api-cron.ts POST_run) can call the same logic as the
-// in-process setInterval timers. Previously, POST_run had a partial inline
-// reimplementation that dropped 4 pieces of business logic (seat restoration
 // on expired releases, subscription-expiry notifications, monthly corporate
 // counter reset, outbox drain).
 export async function runAllJobs(): Promise<{
@@ -75,7 +73,7 @@ export async function runAllJobs(): Promise<{
 }
 
 async function drainOutbox(): Promise<void> {
-  // P0-9: reaper — reset events that have been stuck in 'processing' for >15min.
+  // reaper — reset events that have been stuck in 'processing' for >15min.
   // Without this, a process crash mid-drain leaves events stranded forever.
   try {
     const reaped = await db.outboxEvent.updateMany({
@@ -102,7 +100,7 @@ async function drainOutbox(): Promise<void> {
         take: 20,
       });
       if (rows.length === 0) return [];
-      // P2-73: re-check status:'pending' in the updateMany where-clause so concurrent
+      // re-check status:'pending' in the updateMany where-clause so concurrent
       // drainers (multi-instance) can't both claim the same rows.
       await tx.outboxEvent.updateMany({
         where: { id: { in: rows.map(r => r.id) }, status: 'pending' },
@@ -130,7 +128,7 @@ async function drainOutbox(): Promise<void> {
             if (!emailResult.ok) throw new Error(emailResult.error || 'Email send failed');
             break;
           case 'push':
-            // H2 FIX: deliver push notification via Expo Push API.
+            // deliver push notification via Expo Push API.
             // Read the user's registered device tokens from the Setting table.
             const deviceRows = await db.setting.findMany({
               where: { key: { startsWith: `device:${payload.userId}:` } },
@@ -205,7 +203,7 @@ async function expireStale(): Promise<void> {
     data: { status: 'expired' },
   });
 
-  // P0-4 / BIZ-006: cascade-cancel future booked rides on expired subscriptions,
+  // cascade-cancel future booked rides on expired subscriptions,
   // and free up the seats so other riders can book them. Rides on already-departed
   // or in-transit trips are left alone (the rider may already be on the shuttle).
   if (expiringSubs.length > 0) {
@@ -303,7 +301,6 @@ async function hourlyJobs(): Promise<void> {
   ]);
 }
 
-// P1-14 / SEC-017 / Sprint 2 #42: hard-delete soft-deleted users after a
 // 30-day grace period. Nullifies PII (passwordHash, twoFactorSecret, name,
 // phone) and deletes associated data (sessions, notifications, OTP codes,
 // backup codes, idempotency records). Preserves financial records (Payment,
@@ -354,10 +351,9 @@ async function hardDeleteStaleUsers(): Promise<void> {
   }
 }
 
-// P1-26 / BIZ-021: expire pending seat claims that never got paid.
+// expire pending seat claims that never got paid.
 // If a buyer claims a release but never completes checkout, the claim stays
 // 'pending' and the release stays 'claimed' forever — blocking the seller's
-// seat from being re-listed. This job finds claims older than 15 minutes,
 // marks them as failed, reopens the release, and restores the seller's ride.
 async function expireStaleSeatClaims(): Promise<void> {
   const now = new Date();
@@ -398,12 +394,10 @@ async function expireStaleSeatClaims(): Promise<void> {
   }
 }
 
-// P1-47 / DB-047: ensure trips exist for all active assignments.
+// ensure trips exist for all active assignments.
 // If trip generation failed at assignment creation/acceptance time, this job
 // catches up by generating any missing trips for the current month. Also
-// handles cross-month rollover: if an assignment's monthEnd has passed,
 // there's nothing to do (next month's assignment must be created manually
-// or via a future recurring-assignment feature).
 async function ensureTripsForActiveAssignments(): Promise<void> {
   const now = new Date();
   const activeAssignments = await db.routeAssignment.findMany({
@@ -433,12 +427,8 @@ async function ensureTripsForActiveAssignments(): Promise<void> {
   }
 }
 
-// P1 / DB-033..039: retention jobs. Without these, the Session, Notification,
 // OutboxEvent, IdempotencyRecord, OtpCode, TelebirrNotifyEvent, and RefundRetry
-// tables grow unbounded — after a year of operation they have millions of rows
 // and queries slow down. We delete rows older than the retention window.
-// AuditLog is NOT cleaned up here — financial/compliance retention requires 7+
-// years and is a separate concern.
 async function retentionJobs(): Promise<void> {
   const now = new Date();
   const THIRTY_DAYS = new Date(now.getTime() - 30 * 24 * 3600_000);

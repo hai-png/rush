@@ -4,7 +4,7 @@ import { db } from '@/lib/db';
 import { readFileBytes } from '@/lib/file-storage';
 import { NotFoundError, ForbiddenError, toErrorEnvelope } from '@/lib/errors';
 
-// P1-11 / SEC-014 + P1-12 / SEC-015 + P1-37 / API-006:
+// + P1-12 / SEC-015 + P1-37 / API-006:
 //   - Sanitize filename for Content-Disposition (strip CR/LF, escape quotes).
 //   - Set X-Content-Type-Options: nosniff so browsers don't sniff HTML.
 //   - Allow ticket participants to view each other's attachments (the
@@ -37,7 +37,7 @@ export async function handleFileDownload(req: NextRequest, session: any, params:
     const isOwner = file.uploaderId === session.id;
     const isAdmin = session.role === 'platform_admin';
 
-    // P1-37: allow ticket participants to view attachments on tickets they're part of.
+    // allow ticket participants to view attachments on tickets they're part of.
     let isTicketParticipant = false;
     if (!isOwner && !isAdmin) {
       const ticketMsg = await db.ticketMessage.findFirst({
@@ -49,7 +49,7 @@ export async function handleFileDownload(req: NextRequest, session: any, params:
       }
     }
 
-    // P1-37: allow contractors to view their own documents (covered by isOwner)
+    // allow contractors to view their own documents (covered by isOwner)
     // and platform_admins to view any (covered by isAdmin). For contractor docs
     // that another contractor shouldn't see, the isOwner check suffices.
 
@@ -70,7 +70,7 @@ export async function handleFileDownload(req: NextRequest, session: any, params:
         // content in-page. filename* is the RFC 6266 UTF-8 form; filename is the
         // ASCII fallback.
         'content-disposition': `attachment; filename="${safeName}"; filename*=UTF-8''${encodedName}`,
-        // P1-12: prevent MIME sniffing — browsers must respect the declared
+        // prevent MIME sniffing — browsers must respect the declared
         // content-type and not sniff HTML/script out of a binary blob.
         'x-content-type-options': 'nosniff',
         'cache-control': 'private, max-age=3600',

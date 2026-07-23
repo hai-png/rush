@@ -41,9 +41,7 @@ export async function settlePayment(reference: string, reportedAmount: Money | u
     const p = await tx.payment.findUnique({ where: { reference } });
     if (!p) return false;
 
-    // P1-22 / BIZ-029: require reportedAmount for settlement. Previously,
     // if the webhook payload omitted `total_amount`, the amount-mismatch
-    // check was skipped and the payment settled for whatever was originally
     // recorded — a malicious or buggy Telebirr could send a no-amount
     // webhook for a 1-ETB payment on a 1500-ETB order and settle it.
     if (!reportedAmount) {
@@ -153,7 +151,7 @@ export async function failPayment(reference: string, reasonRaw: unknown, outRequ
         const release = await tx.seatRelease.findUnique({ where: { id: claim.seatReleaseId } });
         // Mark the failed claim as 'refunded' and reopen the release.
         await tx.seatClaim.update({ where: { id: p.seatClaimId }, data: { status: 'refunded' } });
-        // P1 FIX: CAS on status:'claimed' so concurrent paths can't double-open.
+        // CAS on status:'claimed' so concurrent paths can't double-open.
         await tx.seatRelease.updateMany({
           where: { id: claim.seatReleaseId, status: 'claimed' },
           data: { status: 'open' },
@@ -218,7 +216,7 @@ export async function scheduleRefund(paymentId: string, amount: Money, reason: s
         reason,
       },
     });
-    // P1-25 / BIZ-032: reserve the refund amount atomically with a CAS on
+    // reserve the refund amount atomically with a CAS on
     // refundAmountCents. Two concurrent scheduleRefund calls both read the
     // same refundAmountCents and both pass the gt(original) check, but only
     // one CAS succeeds — the loser's tx rolls back (the RefundRetry row is
@@ -226,7 +224,6 @@ export async function scheduleRefund(paymentId: string, amount: Money, reason: s
     const reserveCas = await tx.payment.updateMany({
       where: {
         id: paymentId,
-        // Only succeed if the new total still fits within the original amount.
         // SQLite doesn't support expression-based where-clauses, so we re-read
         // the refundAmountCents we just saw — if a concurrent refund bumped
         // it, this CAS won't match and we throw.
@@ -312,7 +309,7 @@ export async function processRefundRetries(limit = 10): Promise<{ processed: num
         });
         if (updated.count === 0) return;
 
-        // P0 FIX: refundAmountCents was ALREADY reserved at scheduleRefund time
+        // refundAmountCents was ALREADY reserved at scheduleRefund time
         // (line 222-235). Do NOT add retry.amountCents again — that would double-count.
         // Just update the status based on the already-reserved amount.
         const fresh = await tx.payment.findUnique({ where: { id: payment.id } });

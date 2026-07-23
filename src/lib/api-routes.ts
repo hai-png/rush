@@ -67,12 +67,12 @@ const ROUTES: RouteEntry[] = [
   r('POST', '/auth/refresh', { exemptFromTosGate: true }, identity.POST_refresh),
   r('GET',  '/auth/me', { requireAuth: true, exemptFromTosGate: true }, identity.GET_me),
   r('POST', '/auth/change-password', { requireAuth: true }, identity.POST_change_password),
-  // P1 / API-009: phone-change flow.
+  // phone-change flow.
   r('POST', '/account/phone/change/request', { requireAuth: true }, identity.POST_phone_change_request),
   r('POST', '/account/phone/change/confirm', { requireAuth: true }, identity.POST_phone_change_confirm),
   r('GET',  '/auth/sessions', { requireAuth: true, exemptFromTosGate: true }, identity.GET_sessions),
   r('DELETE', '/auth/sessions/:id', { requireAuth: true, exemptFromTosGate: true }, identity.DELETE_session),
-  // P1 / API-012: admin session management for any user.
+  // admin session management for any user.
   r('GET',    '/admin/users/:id/sessions', { requireAuth: true, requireRole: ['platform_admin'], exemptFromTosGate: true }, identity.GET_admin_user_sessions),
   r('DELETE', '/admin/users/:id/sessions/:sid', { requireAuth: true, requireRole: ['platform_admin'], exemptFromTosGate: true }, identity.DELETE_admin_user_session),
   r('POST', '/auth/otp/send', { exemptFromTosGate: true }, identity.POST_otp_send),
@@ -219,7 +219,7 @@ const ROUTES: RouteEntry[] = [
   r('POST', '/admin/faqs', { requireAuth: true, requireRole: ['platform_admin'] }, admin.POST_faq),
   r('DELETE', '/admin/faqs/:id', { requireAuth: true, requireRole: ['platform_admin'] }, admin.DELETE_faq),
 
-  // P2 / BIZ-054: holiday management (skip trip generation on holidays).
+  // holiday management (skip trip generation on holidays).
   r('GET', '/admin/holidays', { requireAuth: true, requireRole: ['platform_admin'] }, admin.GET_holidays),
   r('POST', '/admin/holidays', { requireAuth: true, requireRole: ['platform_admin'] }, admin.POST_holiday),
   r('DELETE', '/admin/holidays/:id', { requireAuth: true, requireRole: ['platform_admin'] }, admin.DELETE_holiday),
@@ -233,11 +233,11 @@ const ROUTES: RouteEntry[] = [
   r('GET', '/healthz', { exemptFromTosGate: true }, health.GET_healthz),
   r('GET', '/ready', { exemptFromTosGate: true }, health.GET_ready),
 
-  // P2-66: Prometheus metrics endpoint (admin-only — exposes operational intel).
+  // Prometheus metrics endpoint (admin-only — exposes operational intel).
   r('GET', '/metrics', { requireAuth: true, requireRole: ['platform_admin'], exemptFromTosGate: true }, metrics.GET_metrics),
 
   r('POST', '/cron/run', { exemptFromTosGate: true }, cron.POST_run),
-  // S2 FIX: GET /cron requires admin auth (was public — exposed job routes + intervals).
+  // GET /cron requires admin auth (was public — exposed job routes + intervals).
   r('GET', '/cron', { requireAuth: true, requireRole: ['platform_admin'], exemptFromTosGate: true }, cron.GET_cron_jobs),
 
   r('POST', '/payments/telebirr/inapp-checkout', { requireAuth: true }, telebirr.POST_inapp_checkout),

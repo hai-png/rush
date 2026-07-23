@@ -52,7 +52,6 @@ export async function handleDocumentUpload(req: NextRequest, session: any): Prom
       });
 
       if (existing) {
-        // Re-uploading a previously-verified document must reset verification
         // to 'pending' so an admin re-reviews the new file.
         const updated = await tx.contractorDocument.update({
           where: { id: existing.id },
@@ -70,7 +69,6 @@ export async function handleDocumentUpload(req: NextRequest, session: any): Prom
             },
           });
         }
-        // Schedule the old file for deletion (after the tx commits so we don't
         // lose it if the tx rolls back). The UploadedFile row is deleted too;
         // the FK on ContractorDocument.fileId is Restrict so we null it first
         // by pointing the doc at the new file (done above).

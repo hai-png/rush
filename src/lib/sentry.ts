@@ -1,4 +1,3 @@
-// P1-50 / OPS-006 / Sprint 2 #1: Sentry initialization.
 // Imported by instrumentation.ts when SENTRY_DSN is set.
 import * as Sentry from '@sentry/nextjs';
 import { loadEnv } from '@/lib/env';

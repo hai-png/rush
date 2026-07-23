@@ -1,7 +1,7 @@
 import { Tabs } from 'expo-router';
 import { Platform, Pressable, Text, View } from 'react-native';
 
-// P0-3 / FE-003: rider tab bar. Bottom tabs for the five primary rider
+// rider tab bar. Bottom tabs for the five primary rider
 // screens so users can navigate between them without being stranded.
 function TabIcon({ label, active }: { label: string; active: boolean }) {
   return (

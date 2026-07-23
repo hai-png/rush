@@ -41,7 +41,7 @@ export default function RiderDashboard() {
 
   useFocusEffect(useCallback(() => { load(); }, [load]));
 
-  // P1-45 / FE-022: register for push notifications on mount.
+  // register for push notifications on mount.
   useEffect(() => {
     registerForPushNotifications().catch(() => {});
     // Listen for incoming notifications while the app is foregrounded.

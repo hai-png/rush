@@ -53,7 +53,7 @@ type RateRule = {
 
 const RATE_RULES: RateRule[] = [
   { pattern: /\/api\/v1\/auth\/token$/, limit: 100, windowSec: 60, keyFn: ({ ip }) => ip ? `ip:${ip}` : null },
-  // P1-8 / SEC-010: tightened from 10/min to 5/min per phone. A 6-digit TOTP
+  // tightened from 10/min to 5/min per phone. A 6-digit TOTP
   // has 10^6 possibilities; at 5 attempts/min across rotating 30s windows,
   // a sustained brute-force takes ~140 days for a 50% success chance.
   { pattern: /\/api\/v1\/auth\/token$/, limit: 5, windowSec: 60, keyFn: ({ body }) => body?.phone ? `phone:${body.phone}` : null },
@@ -266,7 +266,7 @@ export function api(options: ApiOptions, handler: Handler) {
     const ip = clientIp(req);
     const ua = req.headers.get('user-agent') ?? undefined;
 
-    // P1-53 / OPS-017: structured request logging with requestId correlation.
+    // structured request logging with requestId correlation.
     // The child logger is available to handlers via ctx, but we also log a
     // completion line at the end of every request for access-log analysis.
     const requestLogger = logger.child({ requestId, method: req.method, path: req.nextUrl.pathname, ip, userId: undefined as string | undefined });
@@ -307,7 +307,7 @@ export function api(options: ApiOptions, handler: Handler) {
       let body: any = undefined;
       let bodyText = '';
       if (req.method !== 'GET' && req.method !== 'HEAD') {
-        // P2-64 / API-053: enforce a max body size to prevent memory-exhaustion
+        // enforce a max body size to prevent memory-exhaustion
         // DoS (a 1GB JSON body would be buffered entirely in memory).
         // 1MB is generous for all current endpoints (file uploads bypass this
         // via the raw handler path). Override via MAX_BODY_BYTES env var.
@@ -363,7 +363,7 @@ export function api(options: ApiOptions, handler: Handler) {
       const status = (result && typeof result === 'object' && 'status' in result) ? (result as any).status ?? 200 : 200;
       const data = (result && typeof result === 'object' && 'data' in result) ? (result as any).data : result;
       const headers = (result && typeof result === 'object' && 'headers' in result) ? (result as any).headers : undefined;
-      // P1-56: pass through pagination metadata if present.
+      // pass through pagination metadata if present.
       const pagination = (result && typeof result === 'object' && 'pagination' in result) ? (result as any).pagination : undefined;
 
       if (idem.scopedKey) {
@@ -376,13 +376,13 @@ export function api(options: ApiOptions, handler: Handler) {
         for (const [k, v] of Object.entries(headers)) res.headers.set(k, String(v));
       }
       res.headers.set('x-request-id', requestId);
-      // P2-52 / API-032: X-RateLimit-* headers so clients can proactively back off.
+      // X-RateLimit-* headers so clients can proactively back off.
       if (rateInfo) {
         res.headers.set('X-RateLimit-Limit', String(rateInfo.limit));
         res.headers.set('X-RateLimit-Remaining', String(rateInfo.remaining));
         res.headers.set('X-RateLimit-Reset', String(rateInfo.resetAt));
       }
-      // P1-53 / OPS-017: request completion log.
+      // request completion log.
       const durationMs = Date.now() - requestStart;
       if (durationMs > 1000) {
         requestLogger.warn({ status, durationMs }, '[api] slow request');
@@ -404,7 +404,7 @@ export function api(options: ApiOptions, handler: Handler) {
       if (err instanceof RateLimitError) {
         res.headers.set('retry-after', String(err.retryAfterSec));
       }
-      // P1-53: error completion log (5xx at error, 4xx at info).
+      // error completion log (5xx at error, 4xx at info).
       const durationMs = Date.now() - requestStart;
       if (status >= 500) {
         requestLogger.error({ status, durationMs, err: (err as Error).message }, '[api] server error');

@@ -66,7 +66,6 @@ async function handleRaw(
     await csrfCheck(req);
 
     // ── Rate limit (shared with api()) ──────────────────────────────────
-    // Raw routes (file uploads, ticket attachments) were previously exempt
     // from rate limiting — that let a malicious user bypass per-IP throttling
     // by hitting /contractor/documents instead of a non-raw equivalent.
     rateLimitCheck(req.nextUrl.pathname, req.method, { session, body: null, ip });

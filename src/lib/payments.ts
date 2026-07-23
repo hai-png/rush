@@ -626,7 +626,7 @@ class CbeProvider implements PaymentProvider {
     return { status: 'manual', instructions };
   }
 
-  // P1 / BIZ-044: CBE has no API for refunds — the admin must manually
+  // CBE has no API for refunds — the admin must manually
   // transfer back via bank. This method marks the refund as "processing"
   // so the admin knows to do the manual transfer. The payment status is
   // then manually updated to 'refunded' after the admin confirms the transfer.

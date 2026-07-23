@@ -149,7 +149,7 @@ export async function generateTripsFromAssignment(assignment: any): Promise<numb
   const { days, windows } = pattern;
   if (!days || !windows || days.length === 0 || windows.length === 0) return 0;
 
-  // P2 / BIZ-054: load active holidays so we skip trip generation on those dates.
+  // load active holidays so we skip trip generation on those dates.
   const holidays = await db.holiday.findMany({
     where: { isActive: true, date: { gte: assignment.monthStart, lte: assignment.monthEnd } },
     select: { date: true },
@@ -218,7 +218,7 @@ export async function POST_accept_assignment({ session, params, ipAddress, userA
     where: { id: params.id },
     data: { status: 'accepted', acceptedAt: new Date() },
   });
-  // P0-10 / BIZ-012: pass the FULL assignment object (re-fetched with the new status),
+  // pass the FULL assignment object (re-fetched with the new status),
   // not the ID string. generateTripsFromAssignment reads assignment.schedulePattern,
   // assignment.monthStart, etc. — passing assignment.id made all those undefined and
   // JSON.parse(undefined) threw silently inside the .catch() swallower.

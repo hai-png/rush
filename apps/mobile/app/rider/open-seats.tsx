@@ -40,7 +40,7 @@ export default function OpenSeatsScreen() {
         router.push('/rider/rides');
         return;
       }
-      // P0-15: checkoutUrl is an EXTERNAL URL (Telebirr or /telebirr-stub).
+      // checkoutUrl is an EXTERNAL URL (Telebirr or /telebirr-stub).
       // Expo Router's router.push only handles internal routes — using it
       // throws "Could not find route" and silently fails the claim.
       // Use Linking.openURL for external URLs.

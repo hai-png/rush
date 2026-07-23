@@ -1,4 +1,3 @@
-// P2 / API-036, API-037 / Sprint 2 #36, #37: webhook signature verification
 // helpers for Twilio and Resend.
 //
 // These verify that incoming webhooks are genuinely from Twilio/Resend and

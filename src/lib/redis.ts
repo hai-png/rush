@@ -1,4 +1,4 @@
-// P1-9 / SEC-011 / OPS-012: Redis-backed cache with in-memory fallback.
+// / OPS-012: Redis-backed cache with in-memory fallback.
 //
 // If REDIS_URL is set, uses Redis for distributed rate limiting + shuttle
 // positions (shared across instances). If not set, falls back to in-memory

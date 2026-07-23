@@ -1,4 +1,3 @@
-// P2-66 / Sprint 2 #48: Prometheus /metrics endpoint.
 //
 // Exports basic counters and gauges in Prometheus text format.
 // Suitable for scraping by a Prometheus instance or Grafana Agent.

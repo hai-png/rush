@@ -33,7 +33,7 @@ export function UserActions({ userId, currentRole, isActive }: { userId: string;
     } finally { setLoading(null); }
   }
 
-  // H5 FIX: impersonation with a UI button + confirmation dialog + 2FA code field.
+  // impersonation with a UI button + confirmation dialog + 2FA code field.
   async function impersonate() {
     setLoading('impersonate');
     try {

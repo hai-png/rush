@@ -42,7 +42,7 @@ export default function SettingsScreen() {
 
   async function toggleNotifications(value: boolean) {
     setNotifEnabled(value);
-    // H4 FIX: persist to the backend API (was only saving to local AsyncStorage).
+    // persist to the backend API (was only saving to local AsyncStorage).
     try { await api.patch('/notifications/preferences', { notificationEnabled: value }); } catch {}
     await saveSettings({ notificationEnabled: value });
     if (value) {
@@ -52,7 +52,7 @@ export default function SettingsScreen() {
 
   async function toggleEmail(value: boolean) {
     setEmailEnabled(value);
-    // H4 FIX: persist to the backend API.
+    // persist to the backend API.
     try { await api.patch('/notifications/preferences', { emailEnabled: value }); } catch {}
     await saveSettings({ emailEnabled: value });
   }

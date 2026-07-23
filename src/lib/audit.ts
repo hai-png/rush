@@ -2,7 +2,6 @@
 // payload (actor, action, entity, before/after, ipAddress, userAgent) plus
 // the previous entry's hash — tampering with any field breaks the chain.
 //
-// P1-3 / DB-044 + DB-045: previously, audit writes ordered by `createdAt`
 // (millisecond precision), which forked the hash chain when two writes
 // landed in the same millisecond or when multiple process instances raced.
 // Now we use a monotonic `seq` integer that's assigned inside the same

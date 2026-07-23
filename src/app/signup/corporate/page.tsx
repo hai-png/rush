@@ -7,7 +7,6 @@ import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card';
 import { ChevronLeft } from 'lucide-react';
 
-// P1-17 / FE-017: this page previously had a dead "Request to join" button that
 // just showed a toast. The working flow is /corporate/signup (which requires
 // auth + uses the real API). This page now redirects there.
 export default function CorporateSignupPage() {

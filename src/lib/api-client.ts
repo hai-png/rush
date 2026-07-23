@@ -15,7 +15,7 @@ export class ApiError extends Error {
   }
 }
 
-// P1-38 / FE-008: 401 interceptor. When a session expires, every subsequent
+// 401 interceptor. When a session expires, every subsequent
 // API call would throw 'HTTP 401' as a sonner toast and the user would be
 // stranded. Now we redirect to /login?next=<current path> on the first 401.
 let onUnauthorized: (() => void) | null = null;
@@ -46,7 +46,7 @@ export async function apiFetch<T = any>(path: string, opts: RequestInit = {}): P
 
   const res = await fetch(path, { ...opts, headers, credentials: 'same-origin' });
 
-  // P1-38: intercept 401 before parsing the body — redirect to login.
+  // intercept 401 before parsing the body — redirect to login.
   if (res.status === 401) {
     handleUnauthorized();
     const err = new ApiError(401, 'UNAUTHORIZED', 'Session expired — please sign in again');

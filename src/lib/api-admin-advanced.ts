@@ -32,7 +32,7 @@ export async function PATCH_user({ session, params, body, ipAddress, userAgent }
   if (!user) throw new NotFoundError('User not found');
   if (user.id === session.id) throw new BadRequestError('Cannot modify your own account');
   if (input.action === 'suspend') {
-    // P1-36 / API-005: last-platform-admin guard. Without this, an admin
+    // last-platform-admin guard. Without this, an admin
     // could suspend the only other platform_admin (or two admins could
     // suspend each other in a race) and lock the system out.
     if (user.role === 'platform_admin') {
@@ -52,7 +52,7 @@ export async function PATCH_user({ session, params, body, ipAddress, userAgent }
     if (input.role === 'corporate_admin' || input.role === 'platform_admin') {
       await assertTwoFactorEnabled(params.id, input.role);
     }
-    // P1 FIX: use a CAS-guarded transaction for the last-admin check + demotion.
+    // use a CAS-guarded transaction for the last-admin check + demotion.
     // Two concurrent demotion requests could both pass the count check and
     // demote the last platform_admin. Now the count check + update are atomic.
     if (input.role !== 'platform_admin') {
@@ -80,7 +80,7 @@ export async function POST_impersonate({ session, params, body, ipAddress, userA
   if (!target) throw new NotFoundError('User not found');
   if (target.role === 'platform_admin') throw new BadRequestError('Cannot impersonate another admin');
 
-  // P1-4 / SEC-008: require admin 2FA re-verification for impersonation.
+  // require admin 2FA re-verification for impersonation.
   // This prevents a compromised admin session from impersonating privileged users.
   const { code } = z.object({ code: z.string().length(6).optional() }).parse(body ?? {});
   if (!code) {
@@ -97,7 +97,7 @@ export async function POST_impersonate({ session, params, body, ipAddress, userA
     throw new UnauthorizedError('Invalid 2FA code');
   }
 
-  // P1-4: short-lived session (1 hour instead of 30 days).
+  // short-lived session (1 hour instead of 30 days).
   const { token, jti } = await issueSession(target, { userAgent: `impersonated-by:${session.id}`, ipAddress });
   // Override the session expiry to 1 hour by revoking it after 1h via the scheduler.
   // (We can't set a custom TTL in issueSession without refactoring — the session
@@ -140,7 +140,7 @@ export async function POST_activate_corporate({ session, params, ipAddress, user
   return { data: { id: params.id, isActive: true } };
 }
 
-// P1 / API-013: deactivate a corporate (soft-delete). Blocks if there are
+// deactivate a corporate (soft-delete). Blocks if there are
 // active subscriptions — admin must expire/cancel them first.
 export async function DELETE_corporate({ session, params, ipAddress, userAgent }: any) {
   const corp = await db.corporate.findUnique({ where: { id: params.id } });
@@ -157,7 +157,7 @@ export async function DELETE_corporate({ session, params, ipAddress, userAgent }
   return { data: { id: params.id, isActive: false } };
 }
 
-// P1 / API-013: list ALL corporates (the existing GET /admin/corporates/pending
+// list ALL corporates (the existing GET /admin/corporates/pending
 // returns active corporates, which is misleading).
 export async function GET_corporates({ query }: any) {
   const filter: any = {};
@@ -196,7 +196,7 @@ export async function POST_verify_payment({ session, params, body, ipAddress, us
   return { data: { id: params.id, status: 'completed' } };
 }
 
-// P0-11 / SEC-003: per-resource allow-list of safe columns. Excludes passwordHash,
+// per-resource allow-list of safe columns. Excludes passwordHash,
 // twoFactorSecret, and any other sensitive fields. Without this, `findMany()`
 // returned ALL columns including the bcrypt password hashes and plaintext TOTP
 // secrets — a CSV download gave an admin every user's credentials.
@@ -330,7 +330,7 @@ export async function POST_bulk_expire({ session, body, ipAddress, userAgent }: 
         }).catch(() => {});
       });
     }
-    // P1 FIX: cancel rides AND decrement trip.seatsBooked for each.
+    // cancel rides AND decrement trip.seatsBooked for each.
     const ridesToCancel = await db.ride.findMany({
       where: { subscriptionId: { in: input.subscriptionIds }, status: 'booked' },
       select: { id: true, tripId: true },
@@ -390,7 +390,7 @@ export async function PATCH_route_price({ session, params, body, ipAddress, user
   return { data: updated };
 }
 
-// P2 / API-041: bulk refund for trip cancellations. Admin provides a list of
+// bulk refund for trip cancellations. Admin provides a list of
 // payment IDs + a reason; each refund is scheduled (async via RefundRetry).
 const BulkRefundInput = z.object({
   paymentIds: z.array(z.string()).min(1).max(100),
@@ -412,7 +412,7 @@ export async function POST_bulk_refund({ session, body, ipAddress, userAgent }: 
   for (const p of payments) {
     const refundable = p.amountCents - p.refundAmountCents;
     if (refundable <= 0) { skipped++; continue; }
-    // P0-18: skip self-refunds.
+    // skip self-refunds.
     if (p.userId === session.id) { skipped++; continue; }
     try {
       await scheduleRefund(p.id, Money.fromCents(refundable), input.reason);

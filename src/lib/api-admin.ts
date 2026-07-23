@@ -8,7 +8,7 @@ import { enqueueNotification } from '@/lib/outbox';
 import { parsePagination, paginatedResponse } from '@/lib/pagination';
 
 export async function GET_users({ session, query }: any) {
-  // P1-56: cursor-based pagination.
+  // cursor-based pagination.
   const page = parsePagination(query);
   const where: any = {};
   if (query?.role) where.role = query.role;
@@ -229,7 +229,7 @@ const RefundInput = z.object({
 
 export async function POST_refund({ session, params, body, ipAddress, userAgent }: any) {
   const input = RefundInput.parse(body);
-  // P0-18 / BIZ-013: admins cannot refund their own payments — conflict of interest
+  // admins cannot refund their own payments — conflict of interest
   // and a direct self-enrichment vector if the admin has a personal subscription.
   const payment = await db.payment.findUnique({ where: { id: params.id }, select: { userId: true } });
   if (!payment) throw new NotFoundError('Payment not found');
@@ -358,7 +358,7 @@ export async function POST_faq({ session, body, ipAddress, userAgent }: any) {
   return { status: 201, data: faq };
 }
 
-// P1 / API-017: soft-delete a plan (set isActive=false). Blocks if there are
+// soft-delete a plan (set isActive=false). Blocks if there are
 // active subscriptions on it.
 export async function DELETE_plan({ session, params, ipAddress, userAgent }: any) {
   const plan = await db.subscriptionPlan.findUnique({ where: { id: params.id } });
@@ -373,7 +373,7 @@ export async function DELETE_plan({ session, params, ipAddress, userAgent }: any
   return { data: { id: params.id, isActive: false } };
 }
 
-// P1 / API-017: hard-delete a FAQ (no FK dependencies).
+// hard-delete a FAQ (no FK dependencies).
 export async function DELETE_faq({ session, params, ipAddress, userAgent }: any) {
   const faq = await db.faqArticle.findUnique({ where: { id: params.id } });
   if (!faq) throw new NotFoundError('FAQ not found');

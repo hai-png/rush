@@ -8,7 +8,7 @@ export type Settings = {
   emailEnabled: boolean;
   quietHoursStart: string | null;
   quietHoursEnd: string | null;
-  // P0-7 / SEC-002: when true, the biometric gate requires FaceID/TouchID/
+  // when true, the biometric gate requires FaceID/TouchID/
   // fingerprint before restoring the session. Defaults to false so existing
   // users aren't locked out after upgrade.
   biometricsEnabled: boolean;

@@ -4,7 +4,7 @@ import { useEffect } from 'react';
 import { Button } from '@/components/ui/button';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 
-// P1-42 / FE-002: error.tsx for the dashboard route group.
+// error.tsx for the dashboard route group.
 // Without this, any DB error crashed the entire route segment to global-error.tsx,
 // showing a full-screen '500 Something went wrong' with no contextual recovery.
 export default function DashboardError({ error, reset }: { error: Error & { digest?: string }; reset: () => void }) {

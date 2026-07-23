@@ -4,7 +4,7 @@ import bcrypt from 'bcryptjs';
 
 const prisma = new PrismaClient();
 
-// P1-2 / SEC-005: refuse to run the seed script in production with hardcoded
+// refuse to run the seed script in production with hardcoded
 // demo credentials. If an operator runs `bun run db:seed` in production and
 // doesn't manually change the admin password, an attacker logs in as
 // +251911000001 / admin-pass-1234 with full platform_admin access.
@@ -19,7 +19,7 @@ if (isProd && !allowProdSeed) {
   console.error('Set SEED_ALLOW_PRODUCTION=1 AND override SEED_ADMIN_PASSWORD / SEED_RIDER_PASSWORD / SEED_CONTRACTOR_PASSWORD to proceed.');
   process.exit(1);
 }
-// P1 FIX: in production with SEED_ALLOW_PRODUCTION=1, require all three
+// in production with SEED_ALLOW_PRODUCTION=1, require all three
 // password env vars to be set — don't fall back to hardcoded defaults.
 if (isProd && allowProdSeed) {
   if (!process.env.SEED_ADMIN_PASSWORD || !process.env.SEED_RIDER_PASSWORD || !process.env.SEED_CONTRACTOR_PASSWORD) {
@@ -214,7 +214,7 @@ async function main() {
   });
   console.log(`  assignment: ${assignment.id} (${assignment.status})`);
 
-  // P3 / DB-047: generate trips from the assignment's schedule pattern.
+  // generate trips from the assignment's schedule pattern.
   // Previously the seed only created one manual trip (trip-demo-001) and
   // never called generateTripsFromAssignment, so the dev environment was
   // sparse — only 1 trip instead of ~22 (Mon-Fri × morning+evening).

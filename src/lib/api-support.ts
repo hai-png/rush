@@ -147,9 +147,8 @@ export async function handleTicketMessageWithAttachment(req: NextRequest, sessio
     let fileId: string | undefined;
     let fileMeta: any;
     if (file && file instanceof File) {
-      // P1 FIX: save file to disk + create UploadedFile row BEFORE the ticketMessage
+      // save file to disk + create UploadedFile row BEFORE the ticketMessage
       // transaction. If the tx fails, we can clean up the orphaned file.
-      // Previously, saveFile wrote to disk before the tx, and if the tx failed,
       // the file was orphaned with no UploadedFile row to track it.
       fileMeta = await saveFile(file, `tickets/${ticket.id}`);
       try {

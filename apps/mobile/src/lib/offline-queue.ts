@@ -2,7 +2,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { api } from './api';
 import { Platform } from 'react-native';
 
-// P1-46 / FE-023: offline-queue with NetInfo integration.
+// offline-queue with NetInfo integration.
 //
 // queueOrSend() is the main entry point for mutations. It:
 //   1. Checks NetInfo for connectivity.
@@ -86,7 +86,7 @@ export async function initConnectivity(): Promise<() => void> {
   }
 }
 
-// P1-46: the main mutation helper. Use this instead of api.post/patch/del
+// the main mutation helper. Use this instead of api.post/patch/del
 // for mutations that should be queued when offline.
 export async function queueOrSend<T = any>(
   method: 'POST' | 'PATCH' | 'DELETE',

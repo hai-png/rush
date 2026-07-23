@@ -73,7 +73,7 @@ export async function POST_create({ session, body, ipAddress, userAgent }: any) 
     riderAmountCents = subsidy.riderAmountCents;
   }
 
-  // P1-27 / BIZ-027: reject zero-amount checkouts (100% subsidy) — Telebirr rejects them
+  // reject zero-amount checkouts (100% subsidy) — Telebirr rejects them
   // and we'd end up with a stuck pending_payment subscription.
   if (riderAmountCents <= 0) {
     throw new BadRequestError('Corporate subsidy cannot cover 100% of the plan price — please contact support');
@@ -87,7 +87,7 @@ export async function POST_create({ session, body, ipAddress, userAgent }: any) 
   const env = loadEnv();
 
   // Create subscription + payment atomically (already done in original code).
-  // P1-28: re-check trial inside the tx so two parallel POST /subscriptions calls
+  // re-check trial inside the tx so two parallel POST /subscriptions calls
   // for a trial plan can't both succeed.
   const sub = await db.$transaction(async (tx) => {
     if (plan.isTrial) {
@@ -265,7 +265,7 @@ export async function POST_renew({ session, params, body, ipAddress, userAgent }
 
   const { paymentMethod } = z.object({ paymentMethod: z.enum(['telebirr', 'cbe']) }).parse(body);
   let riderAmountCents = sub.plan.priceCents;
-  // P1-28 / BIZ-026: re-validate corporate is still active + member still approved.
+  // re-validate corporate is still active + member still approved.
   if (sub.corporateId) {
     const corp = await db.corporate.findUnique({ where: { id: sub.corporateId } });
     if (!corp || !corp.isActive || corp.deletedAt) {
@@ -290,14 +290,12 @@ export async function POST_renew({ session, params, body, ipAddress, userAgent }
   const env = loadEnv();
 
   const now = new Date();
-  // P1-27 / BIZ-025: extend the existing subscription's endDate if it's still active,
-  // rather than creating an overlapping subscription. If the old sub is expired,
+  // extend the existing subscription's endDate if it's still active,
   // start the new one from now.
   const newStartDate = sub.status === 'active' && sub.endDate > now ? sub.endDate : now;
   const newEndDate = new Date(newStartDate.getTime() + sub.plan.durationDays * 24 * 3600_000);
 
   const newSub = await db.$transaction(async (tx) => {
-    // If the old sub is still active, extend its endDate to the new end and reset ridesUsed.
     // Otherwise, create a new subscription row.
     if (sub.status === 'active' && sub.endDate > now) {
       const extended = await tx.subscription.update({

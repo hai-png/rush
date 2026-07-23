@@ -36,7 +36,7 @@ export async function POST_register({ body, ipAddress, userAgent }: any) {
 
   const passwordHash = await hashPassword(input.password);
 
-  // P1 FIX: wrap user creation in try/catch to convert P2002 (unique violation)
+  // wrap user creation in try/catch to convert P2002 (unique violation)
   // on phone to a friendly ConflictError instead of an unhandled 500.
   try {
     if (input.kind === 'rider') {
@@ -61,7 +61,7 @@ export async function POST_register({ body, ipAddress, userAgent }: any) {
     return { status: 201, data: { user: { id: user.id, phone: user.phone, role: user.role, name: user.name }, profile: { id: user.contractorProfile!.id } } };
   }
   } catch (err: any) {
-    // P1 FIX: convert P2002 unique violation on phone to friendly ConflictError.
+    // convert P2002 unique violation on phone to friendly ConflictError.
     if (err?.code === 'P2002') throw new ConflictError('Phone already registered');
     throw err;
   }
@@ -83,7 +83,7 @@ export async function POST_token({ body, ipAddress, userAgent }: any) {
     throw new UnauthorizedError('Invalid credentials');
   }
 
-  // P1-8 / API-030: account lockout. After 5 failed attempts, lock for 15 min.
+  // account lockout. After 5 failed attempts, lock for 15 min.
   const MAX_FAILED_ATTEMPTS = 5;
   const LOCKOUT_MS = 15 * 60_000;
   if (user.lockedUntil && user.lockedUntil > new Date()) {
@@ -110,7 +110,7 @@ export async function POST_token({ body, ipAddress, userAgent }: any) {
   }
 
   if (user.twoFactorEnabled) {
-    // P3-25: check for backup code first, then TOTP code.
+    // check for backup code first, then TOTP code.
     if (input.backupCode) {
       // Try to match a backup code.
       const candidates = await db.twoFactorBackupCode.findMany({
@@ -182,7 +182,7 @@ export async function POST_logout({ session }: any) {
   return res;
 }
 
-// P1 / API-011: POST /auth/logout-all — revoke every active session for the
+// POST /auth/logout-all — revoke every active session for the
 // current user. Useful when a user suspects their account is compromised
 // (e.g. lost phone) and wants to invalidate all sessions at once.
 export async function POST_logout_all({ session, ipAddress, userAgent }: any) {
@@ -196,7 +196,7 @@ export async function POST_logout_all({ session, ipAddress, userAgent }: any) {
 
 export async function POST_refresh({ session, ipAddress, userAgent }: any) {
   if (!session) throw new UnauthorizedError();
-  // P1 FIX: block refresh for impersonation sessions — prevents TTL bypass.
+  // block refresh for impersonation sessions — prevents TTL bypass.
   // The impersonation endpoint sets userAgent to 'impersonated-by:<adminId>'
   // and a 1-hour expiresAt. Allowing refresh would mint a fresh 30-day session
   // for the impersonated user, bypassing the TTL and losing the audit marker.
@@ -236,7 +236,7 @@ export async function POST_change_password({ session, body, ipAddress, userAgent
   return { data: { ok: true } };
 }
 
-// P1 / API-009: Phone-change flow (request + confirm).
+// Phone-change flow (request + confirm).
 // Step 1: POST /account/phone/change/request — sends OTP to the NEW phone.
 // Step 2: POST /account/phone/change/confirm — verifies OTP + updates user.phone.
 // Both require the current session. The confirm step bumps tokenVersion so
@@ -300,7 +300,7 @@ export async function DELETE_session({ session, params }: any) {
   return { status: 204 };
 }
 
-// P1 / API-012: admin endpoints to list + revoke any user's sessions.
+// admin endpoints to list + revoke any user's sessions.
 // Useful for incident response (e.g. suspected account compromise).
 export async function GET_admin_user_sessions({ session, params }: any) {
   if (session.role !== 'platform_admin') throw new ForbiddenError('Admin only');
@@ -388,12 +388,12 @@ export async function POST_2fa_setup({ session, body }: any) {
 export async function POST_2fa_enable({ session, body }: any) {
   const { secret, code } = z.object({ secret: z.string(), code: z.string().length(6) }).parse(body);
   if (!verifySync({ secret, token: code })) throw new BadRequestError('Invalid code');
-  // P1-6 / SEC-013: encrypt the secret at rest so DB read access (admin,
+  // encrypt the secret at rest so DB read access (admin,
   // backup, SQL injection, CSV export) cannot recover the raw TOTP seed.
   const encrypted = encryptField(secret);
   await db.user.update({ where: { id: session!.id }, data: { twoFactorSecret: encrypted, twoFactorEnabled: true } });
 
-  // P3-25 / SEC-025: generate 10 single-use backup codes. Stored bcrypt-hashed.
+  // generate 10 single-use backup codes. Stored bcrypt-hashed.
   const backupCodes: string[] = [];
   const { randomBytes } = await import('node:crypto');
   for (let i = 0; i < 10; i++) {
@@ -422,7 +422,7 @@ export async function POST_2fa_disable({ session, body }: any) {
   if (user.twoFactorEnabled) {
     if (!code) throw new BadRequestError('2FA code is required to disable 2FA');
     if (!user.twoFactorSecret) throw new BadRequestError('Invalid 2FA code');
-    // P1-6: decrypt before verifying.
+    // decrypt before verifying.
     const secret = decryptField(user.twoFactorSecret);
     if (!secret || !verifySync({ secret, token: code })) {
       throw new BadRequestError('Invalid 2FA code');

@@ -2,7 +2,7 @@
 import { db } from '@/lib/db';
 import { loadEnv } from '@/lib/env';
 
-// P1-58 / API-038 / OPS-011: enhanced health checks.
+// / OPS-011: enhanced health checks.
 //
 // /healthz — liveness probe. Always returns 200 if the process is up.
 //   k8s livenessProbe should use this.
@@ -14,7 +14,7 @@ import { loadEnv } from '@/lib/env';
 //   traffic: DB reachable, outbox backlog below threshold, scheduler recently
 //   ran. Returns 503 otherwise. k8s readinessProbe should use this.
 //
-// P3-2 / SEC-019: /health no longer leaks DB error strings or Telebirr mode
+// /health no longer leaks DB error strings or Telebirr mode
 // to unauthenticated callers. Detailed errors are only in the response body
 // (which is logged but not displayed to end users).
 
@@ -41,9 +41,9 @@ export async function GET_health() {
       timestamp: new Date().toISOString(),
       latencyMs: Date.now() - start,
       checks: {
-        // P3-2: don't leak DB error message — just ok + latency.
+        // don't leak DB error message — just ok + latency.
         db: { ok: dbOk, latencyMs: dbLatencyMs },
-        // P3-2: report 'configured' or 'not_configured' instead of the raw mode.
+        // report 'configured' or 'not_configured' instead of the raw mode.
         telebirr: { configured: env.TELEBIRR_ENV !== 'mock' },
       },
       version: process.env.npm_package_version ?? 'dev',
@@ -89,7 +89,7 @@ export async function GET_ready(): Promise<{ status: number; data: any }> {
   }
 
   const allOk = Object.values(checks).every(c => c.ok);
-  // P3 FIX: don't leak operational metrics (outbox depth, refund backlog) to
+  // don't leak operational metrics (outbox depth, refund backlog) to
   // unauthenticated callers. Return only status + timestamp.
   return {
     status: allOk ? 200 : 503,

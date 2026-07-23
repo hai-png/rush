@@ -20,7 +20,7 @@ export async function registerForPushNotifications(): Promise<string | null> {
   return token;
 }
 
-// P1-45 / FE-022: listen for foreground notifications.
+// listen for foreground notifications.
 // Returns an unsubscribe function — callers should call it on unmount.
 export function listenForNotifications(callback?: (title: string, body: string) => void): () => void {
   const sub = Notifications.addNotificationReceivedListener(notification => {

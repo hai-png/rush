@@ -3,7 +3,7 @@ import { useState, useEffect } from 'react';
 import { router } from 'expo-router';
 import { login } from '../../src/lib/auth';
 
-// P1-47 / FE-024: mobile login now supports 2FA.
+// mobile login now supports 2FA.
 //
 // Original: login() only sent phone + password. Users with 2FA enabled saw
 // 'alert('2FA code required')' with no way to enter the code — locked out

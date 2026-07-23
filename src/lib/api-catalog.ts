@@ -48,7 +48,7 @@ export async function GET_route({ params }: any) {
   return { data: route };
 }
 
-// P1 / API-015: single-trip detail endpoint.
+// single-trip detail endpoint.
 export async function GET_trip({ params }: any) {
   const trip = await db.trip.findUnique({
     where: { id: params.id },

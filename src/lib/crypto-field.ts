@@ -1,4 +1,4 @@
-// P1-6 / SEC-013: field-level encryption for sensitive columns (2FA secrets,
+// field-level encryption for sensitive columns (2FA secrets,
 // etc.) so that DB read access (admin, backup, SQL injection, CSV export)
 // cannot recover the raw secret.
 //

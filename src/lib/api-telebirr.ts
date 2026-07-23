@@ -109,15 +109,14 @@ export async function POST_mandate_sign_url({ session, body }: any) {
     throw new BadRequestError('Subscription Payment not supported by current provider');
   }
 
-  // P1-7 / SEC-009: use crypto.randomInt instead of Math.random for the
+  // use crypto.randomInt instead of Math.random for the
   // mandate contract number. Math.random is not cryptographically secure —
   // an attacker who observes a few outputs can predict future ones.
   const { randomInt } = await import('node:crypto');
   let mctContractNo = '';
   for (let i = 0; i < 32; i++) mctContractNo += randomInt(0, 10).toString();
 
-  // P1 / BIZ-043: persist the mandate so we have a per-user ownership record.
-  // Previously mandates weren't stored, so GET /mandate/:mctContractNo had to
+  // persist the mandate so we have a per-user ownership record.
   // be admin-gated (no way to verify a user owned a given mandate).
   const mandate = await db.mandate.create({
     data: {
@@ -149,7 +148,7 @@ export async function POST_mandate_sign_url({ session, body }: any) {
 }
 
 export async function GET_mandate({ session, params }: any) {
-  // P1 / BIZ-043: check ownership via the Mandate table. The user who created
+  // check ownership via the Mandate table. The user who created
   // the mandate can query it; platform_admin can query any.
   const mandate = await db.mandate.findUnique({
     where: { mctContractNo: params.mctContractNo },
@@ -173,7 +172,7 @@ export async function GET_mandate({ session, params }: any) {
 }
 
 export async function POST_mandate_cancel({ session, params, ipAddress, userAgent }: any) {
-  // P1 / BIZ-043: ownership check — only the mandate owner or admin can cancel.
+  // ownership check — only the mandate owner or admin can cancel.
   const mandate = await db.mandate.findUnique({
     where: { mctContractNo: params.mctContractNo },
   });

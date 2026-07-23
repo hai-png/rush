@@ -13,7 +13,6 @@ export default function BookScreen() {
   const [booking, setBooking] = useState(false);
 
   useEffect(() => {
-    // P0-14: fetch the trip + its route's pickup locations. The original code
     // only fetched /subscriptions and left `pickups` as [], so the screen
     // title said "Choose Pickup Location" but the list was always empty.
     Promise.all([

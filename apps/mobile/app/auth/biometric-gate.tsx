@@ -4,7 +4,7 @@ import { useAuthStore } from '../../src/lib/auth-store';
 import { router } from 'expo-router';
 import { getBiometricsEnabled, setBiometricsEnabled } from '../../src/lib/settings-store';
 
-// P0-7 / SEC-002: real biometric gate.
+// real biometric gate.
 //
 // Original behavior: this file was named biometric-gate.tsx but contained
 // zero biometric API calls — it just called `restore()` from useAuthStore,

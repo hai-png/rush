@@ -1,4 +1,4 @@
-// P1-49 / OPS-005: Next.js 16 instrumentation hook.
+// Next.js 16 instrumentation hook.
 // Runs once at server startup (register() is called before any request).
 // Also handles graceful shutdown on SIGTERM/SIGINT — without this, k8s
 // rolling deploys aborted in-flight requests, abandoned mid-transaction DB
@@ -14,7 +14,7 @@ const isNodeRuntime = typeof process !== 'undefined' && typeof process.on === 'f
 export async function register() {
   if (!isNodeRuntime) return; // Edge Runtime — no-op
 
-  // P1-50 / OPS-006: initialize Sentry if SENTRY_DSN is configured.
+  // initialize Sentry if SENTRY_DSN is configured.
   try {
     const { initSentry } = await import('@/lib/sentry');
     initSentry();
@@ -29,7 +29,7 @@ export async function register() {
   // Startup
   logger.info('[instrumentation] server starting');
 
-  // P1-49: graceful shutdown handlers.
+  // graceful shutdown handlers.
   let shuttingDown = false;
   async function shutdown(signal: string) {
     if (shuttingDown) return; // second signal forces exit
@@ -52,7 +52,7 @@ export async function register() {
   process.on('SIGTERM', () => shutdown('SIGTERM'));
   process.on('SIGINT', () => shutdown('SIGINT'));
 
-  // P1-50 / OPS-018: catch unhandled rejections so they don't crash the
+  // catch unhandled rejections so they don't crash the
   // process silently. Particularly important for the audit queue and
   // scheduler timers, which can throw outside their try/catch.
   process.on('unhandledRejection', (reason) => {

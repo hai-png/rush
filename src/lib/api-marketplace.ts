@@ -39,17 +39,17 @@ export async function POST_create_release({ session, body, ipAddress, userAgent 
   const trip = await db.trip.findUnique({ where: { id: input.tripId }, include: { shuttle: true } });
   if (!trip) throw new NotFoundError('Trip not found');
   if (trip.status !== 'scheduled') throw new BadRequestError('Trip is not scheduled');
-  // P1-19 / BIZ-019: cannot release a seat on a trip that has already departed.
+  // cannot release a seat on a trip that has already departed.
   if (trip.departureAt.getTime() < Date.now()) {
     throw new BadRequestError('Cannot release a seat on a trip that has already departed');
   }
-  // P1 / BIZ-024: expiresAt must be before trip departure (otherwise the
+  // expiresAt must be before trip departure (otherwise the
   // release outlives the trip and a buyer could pay for a seat they can't use).
   const expiresAtDate = new Date(input.expiresAt);
   if (expiresAtDate > trip.departureAt) {
     throw new BadRequestError('Release expiry must be before trip departure');
   }
-  // P2 / BIZ-058: window must match the trip's window.
+  // window must match the trip's window.
   if (input.window !== trip.window) {
     throw new BadRequestError(`Release window (${input.window}) does not match trip window (${trip.window})`);
   }
@@ -69,7 +69,7 @@ export async function POST_create_release({ session, body, ipAddress, userAgent 
       data: { status: 'released' },
     });
     if (rideCas.count === 0) throw new ConflictError('Ride is no longer booked (already released or cancelled)');
-    // P1-20 / BIZ-020: CAS-guarded decrement with lower bound.
+    // CAS-guarded decrement with lower bound.
     const tripCas = await tx.trip.updateMany({
       where: { id: trip.id, seatsBooked: { gt: 0 } },
       data: { seatsBooked: { decrement: 1 } },
@@ -118,8 +118,7 @@ export async function POST_claim({ session, body, params, ipAddress, userAgent }
   const provider = getPaymentProvider(input.paymentMethod);
   const env = loadEnv();
 
-  // P1-21 / BIZ-004: create the SeatRelease claim + Payment row BEFORE calling
-  // createCheckout. Previously, createCheckout was called first — if the tx
+  // create the SeatRelease claim + Payment row BEFORE calling
   // below rolled back (e.g. release already claimed by another buyer), the
   // Telebirr order had been created with no matching Payment row. When the
   // buyer completed payment at Telebirr, the webhook arrived for an unknown

@@ -1,4 +1,4 @@
-// P1-56 / API-031: cursor-based pagination helper.
+// cursor-based pagination helper.
 //
 // Usage in a handler:
 //   const page = parsePagination(query);

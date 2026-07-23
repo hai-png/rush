@@ -6,8 +6,7 @@ import { useFocusEffect } from '@react-navigation/native';
 
 type ShuttlePos = { lat: number; lng: number; heading: number; speed: number; updatedAt: number };
 
-// P2-35 / FE-040: live trip tracking with position polling.
-// Previously this screen fetched the trip once and showed a static detail card
+// live trip tracking with position polling.
 // — no map, no polling, no real-time position. Now polls /shuttle-positions
 // every 5 seconds and shows the shuttle's live coordinates + speed + heading.
 export default function LiveTripScreen() {

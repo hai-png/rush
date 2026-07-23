@@ -4,8 +4,7 @@ import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { useEffect } from 'react';
 import { initConnectivity } from '../src/lib/offline-queue';
 
-// P0-3 / FE-003: replace the bare <Stack> with a Tabs-based layout for
-// rider and contractor. The original _layout.tsx was just <Stack> with
+// replace the bare <Stack> with a Tabs-based layout for
 // headerShown: false — no tab bar, no drawer, no global header. Once a
 // user navigated to rider/payments or rider/tickets, there was no UI to
 // navigate anywhere — they were stranded.
@@ -21,7 +20,7 @@ import { initConnectivity } from '../src/lib/offline-queue';
 // each role's _layout.tsx. For now, this root layout just adds a header
 // with a back button where appropriate.
 export default function Layout() {
-  // P1-46 / FE-023: initialize NetInfo connectivity listener on app startup.
+  // initialize NetInfo connectivity listener on app startup.
   // When the device comes back online, the offline queue is drained automatically.
   useEffect(() => {
     let unsub: (() => void) | undefined;

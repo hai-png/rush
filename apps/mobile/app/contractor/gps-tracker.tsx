@@ -2,8 +2,7 @@ import { View, Text, TouchableOpacity, StyleSheet, Alert } from 'react-native';
 import { useState, useEffect, useRef } from 'react';
 import { api } from '../../src/lib/api';
 
-// P2-34 / FE-039: real GPS tracking using expo-location.
-// Previously this screen posted random coordinates around Addis Ababa center
+// real GPS tracking using expo-location.
 // — riders tracking their shuttle saw nonsense. Now uses actual device GPS.
 export default function GpsTrackerScreen() {
   const [posting, setPosting] = useState(false);

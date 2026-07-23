@@ -24,7 +24,7 @@ export async function POST_onboard({ session, body, ipAddress, userAgent }: any)
 
   const code = await generateUniqueCode();
 
-  // P1-5 / SEC-007: move the 2FA + phone-verification check INSIDE the
+  // move the 2FA + phone-verification check INSIDE the
   // promotion transaction so a user can't disable 2FA between the check and
   // the role update. The check reads from tx (the same transaction that does
   // the promotion) so it's atomic.
@@ -88,7 +88,7 @@ async function generateUniqueCode(): Promise<string> {
   throw new Error('Failed to generate unique corporate code');
 }
 
-// C2 FIX: platform_admin MUST supply a corporateId — no more silent
+// platform_admin MUST supply a corporateId — no more silent
 // findFirst({}) fallback that operates on an arbitrary corporate.
 // This prevents cross-tenant data bugs when multiple corporates exist.
 async function resolveCorporate(session: any, corporateId?: string) {
@@ -106,7 +106,7 @@ export async function GET_current({ session, query }: any) {
   if (session.role !== 'corporate_admin' && session.role !== 'platform_admin') {
     throw new ForbiddenError('Corporate admin only');
   }
-  // C2 FIX: use resolveCorporate so platform_admin must supply ?corporateId=
+  // use resolveCorporate so platform_admin must supply ?corporateId=
   const baseCorp = await resolveCorporate(session, query?.corporateId);
   if (!baseCorp) throw new NotFoundError('No corporate found');
   const corp = await db.corporate.findUnique({
@@ -185,7 +185,7 @@ export async function GET_invites({ session, query }: any) {
   return { data: invites };
 }
 
-// P1 / API-014: revoke a corporate invite (set isActive=false). A revoked
+// revoke a corporate invite (set isActive=false). A revoked
 // invite can no longer be used to sign up.
 export async function DELETE_invite({ session, params, query, ipAddress, userAgent }: any) {
   if (session.role !== 'corporate_admin' && session.role !== 'platform_admin') {
@@ -339,7 +339,7 @@ export async function GET_me({ session, query }: any) {
   if (session.role !== 'corporate_admin' && session.role !== 'platform_admin') {
     throw new ForbiddenError('Corporate admin only');
   }
-  // P1-33 / API-002: use resolveCorporate so platform_admin can fetch a corporate
+  // use resolveCorporate so platform_admin can fetch a corporate
   // (was hardcoded to findUnique by adminUserId, which always 404'd for admins).
   const corp = await resolveCorporate(session, query?.corporateId);
   if (!corp) throw new NotFoundError('No corporate found');
@@ -392,7 +392,7 @@ export async function DELETE_member({ session, params, query, ipAddress, userAge
   return { data: { id: params.id, isActive: false } };
 }
 
-// P1-35 / API-004: removed `ridesUsedThisMonth` from the admin-editable input.
+// removed `ridesUsedThisMonth` from the admin-editable input.
 // Allowing a corporate admin to set this field directly bypassed the
 // corporate seat-allowance quota (now enforced in consumeRide). If a
 // manual reset is needed, a dedicated /members/:id/reset-usage endpoint

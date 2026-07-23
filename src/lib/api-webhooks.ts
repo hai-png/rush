@@ -14,7 +14,6 @@ export async function handleTelebirrNotify(req: NextRequest, _session: any, _par
       return NextResponse.json({ error: { code: 'NOT_IMPLEMENTED', message: 'Provider does not support webhooks', requestId } }, { status: 501 });
     }
 
-    // Pass the original Request through verbatim so the provider can verify
     // the signature against the raw body + headers. Re-serialising ctx.body
     // would mangle field ordering and break real Telebirr signatures.
     const event = await provider.parseWebhook(req as unknown as Request);
@@ -60,7 +59,7 @@ async function markRefundSucceeded(refundRequestNo: string, raw: unknown): Promi
     if (!retry) return;
     const fresh = await tx.payment.findUnique({ where: { id: retry.paymentId } });
     if (!fresh) return;
-    // P0 FIX: refundAmountCents was already reserved at scheduleRefund time.
+    // refundAmountCents was already reserved at scheduleRefund time.
     // Do NOT add retry.amountCents again — that would double-count.
     const allRefunded = fresh.refundAmountCents >= fresh.amountCents;
     await tx.payment.update({

@@ -1,8 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 
-// P1-54 / API-033 / OPS-021: CORS middleware.
+// / OPS-021: CORS middleware.
 //
-// Previously there was no middleware.ts and no Access-Control-Allow-* headers
 // anywhere. Same-origin requests (web app calling /api/v1/*) work fine without
 // CORS, but any cross-origin caller (marketing site, partner integration,
 // browser-based admin tool) was blocked by the browser.
