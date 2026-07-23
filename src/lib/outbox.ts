@@ -1,6 +1,9 @@
 import { db } from '@/lib/db';
 
-export type Channel = 'notification' | 'sms' | 'email' | 'refund' | 'audit' | 'webhook';
+// P2 cleanup: removed dead channel types 'refund' | 'audit' | 'webhook'.
+// Only 'notification' (no-op for retry observability), 'sms', and 'email'
+// are actually produced + consumed by the scheduler's drainOutbox switch.
+export type Channel = 'notification' | 'sms' | 'email';
 
 export async function enqueue(channel: Channel, payload: unknown): Promise<void> {
   await db.outboxEvent.create({
