@@ -149,6 +149,13 @@ export async function generateTripsFromAssignment(assignment: any): Promise<numb
   const { days, windows } = pattern;
   if (!days || !windows || days.length === 0 || windows.length === 0) return 0;
 
+  // P2 / BIZ-054: load active holidays so we skip trip generation on those dates.
+  const holidays = await db.holiday.findMany({
+    where: { isActive: true, date: { gte: assignment.monthStart, lte: assignment.monthEnd } },
+    select: { date: true },
+  });
+  const holidayDates = new Set(holidays.map(h => h.date.toDateString()));
+
   // Walk through each day from monthStart to monthEnd
   const trips: any[] = [];
   const dayMap: Record<string, number> = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 };
@@ -158,7 +165,7 @@ export async function generateTripsFromAssignment(assignment: any): Promise<numb
   const end = new Date(assignment.monthEnd);
 
   while (cursor <= end) {
-    if (targetDays.has(cursor.getDay())) {
+    if (targetDays.has(cursor.getDay()) && !holidayDates.has(cursor.toDateString())) {
       for (const window of windows) {
         const departureAt = new Date(cursor);
         // Morning = 7:30 AM, Evening = 5:30 PM
@@ -189,13 +196,10 @@ export async function generateTripsFromAssignment(assignment: any): Promise<numb
       await db.trip.create({ data: trip });
       created++;
     } catch (e: any) {
-      // Only suppress duplicate-key violations; surface all other errors
-      // (DB connection lost, schema mismatch, etc.) so they don't silently
-      // cause missing trips.
       if (e?.code !== 'P2002') throw e;
     }
   }
-  logger.info({ assignmentId: assignment.id, created, total: trips.length }, '[assignment] generated trips');
+  logger.info({ assignmentId: assignment.id, created, total: trips.length, holidaysSkipped: holidayDates.size }, '[assignment] generated trips');
   return created;
 }
 

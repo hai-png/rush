@@ -382,3 +382,37 @@ export async function DELETE_faq({ session, params, ipAddress, userAgent }: any)
   await audit({ actorId: session.id, action: 'faq.deleted', entityType: 'faq_article', entityId: params.id, before, ipAddress, userAgent });
   return { data: { id: params.id, deleted: true } };
 }
+
+// ─── Holiday management ─────────────────────────────────────────────────────
+
+export async function GET_holidays() {
+  const holidays = await db.holiday.findMany({ where: { isActive: true }, orderBy: { date: 'asc' } });
+  return { data: holidays };
+}
+
+const HolidayInput = z.object({
+  date: z.string().datetime(),
+  name: z.string().min(1).max(200),
+});
+
+export async function POST_holiday({ session, body, ipAddress, userAgent }: any) {
+  const input = HolidayInput.parse(body);
+  const date = new Date(input.date);
+  date.setHours(0, 0, 0, 0); // normalize to midnight
+  const holiday = await db.holiday.upsert({
+    where: { date },
+    update: { name: input.name, isActive: true },
+    create: { date, name: input.name },
+  });
+  await audit({ actorId: session.id, action: 'holiday.created', entityType: 'holiday', entityId: holiday.id, after: input, ipAddress, userAgent });
+  return { status: 201, data: holiday };
+}
+
+export async function DELETE_holiday({ session, params, ipAddress, userAgent }: any) {
+  const holiday = await db.holiday.findUnique({ where: { id: params.id } });
+  if (!holiday) throw new NotFoundError('Holiday not found');
+  const before = holiday;
+  await db.holiday.update({ where: { id: params.id }, data: { isActive: false } });
+  await audit({ actorId: session.id, action: 'holiday.deleted', entityType: 'holiday', entityId: params.id, before, ipAddress, userAgent });
+  return { data: { id: params.id, isActive: false } };
+}

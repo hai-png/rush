@@ -539,6 +539,18 @@ model FaqArticle {
   updatedAt  DateTime @updatedAt
 }
 
+// ─── Holidays (skip trip generation) ─────────────────────────────────────────
+// P2 / BIZ-054: admin-managed list of Ethiopian public holidays. The trip
+// generator skips these dates so riders don't book rides on holidays where
+// the shuttle won't run.
+model Holiday {
+  id        String   @id @default(cuid())
+  date      DateTime @unique  // the calendar date (time component ignored)
+  name      String             // e.g. "Ethiopian New Year"
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+}
+
 // ─── Engagement + audit + outbox ─────────────────────────────────────────────
 
 model Notification {

@@ -219,6 +219,11 @@ const ROUTES: RouteEntry[] = [
   r('POST', '/admin/faqs', { requireAuth: true, requireRole: ['platform_admin'] }, admin.POST_faq),
   r('DELETE', '/admin/faqs/:id', { requireAuth: true, requireRole: ['platform_admin'] }, admin.DELETE_faq),
 
+  // P2 / BIZ-054: holiday management (skip trip generation on holidays).
+  r('GET', '/admin/holidays', { requireAuth: true, requireRole: ['platform_admin'] }, admin.GET_holidays),
+  r('POST', '/admin/holidays', { requireAuth: true, requireRole: ['platform_admin'] }, admin.POST_holiday),
+  r('DELETE', '/admin/holidays/:id', { requireAuth: true, requireRole: ['platform_admin'] }, admin.DELETE_holiday),
+
   r('GET', '/contractor/shuttles', { requireAuth: true, requireRole: ['contractor'] }, admin.GET_my_shuttles),
   r('GET', '/contractor/trips', { requireAuth: true, requireRole: ['contractor'] }, admin.GET_my_trips),
 
