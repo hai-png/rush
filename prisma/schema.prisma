@@ -57,6 +57,7 @@ model User {
   otpCodes           OtpCode[]
   uploadedFiles      UploadedFile[]       @relation("FileUploader")
   corporateInvites   CorporateInvite[]    @relation("InviteCreator")
+  mandates           Mandate[]
 
   @@index([isActive, deletedAt])
   @@index([role, isActive])           // P1-15: admin lookups (notify all admins)
@@ -679,4 +680,25 @@ model CorporateInvite {
   createdAt   DateTime  @default(now())
 
   @@index([corporateId])
+}
+
+// ─── Telebirr Mandates (recurring billing authorization) ─────────────────────
+// P1 / BIZ-043: persisted mandate records so we can track which user signed
+// which mandate, and use it for recurring disbursement against subscriptions.
+model Mandate {
+  id                String   @id @default(cuid())
+  userId            String
+  user              User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  subscriptionId    String?
+  mctContractNo     String   @unique  // 32-digit numeric, generated via crypto.randomInt
+  mandateTemplateId String?
+  status            String   @default("pending") // pending | signed | cancelled | expired
+  signedAt          DateTime?
+  cancelledAt       DateTime?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  @@index([userId])
+  @@index([subscriptionId])
+  @@index([status])
 }

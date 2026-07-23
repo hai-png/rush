@@ -625,6 +625,14 @@ class CbeProvider implements PaymentProvider {
     ].join('\n');
     return { status: 'manual', instructions };
   }
+
+  // P1 / BIZ-044: CBE has no API for refunds — the admin must manually
+  // transfer back via bank. This method marks the refund as "processing"
+  // so the admin knows to do the manual transfer. The payment status is
+  // then manually updated to 'refunded' after the admin confirms the transfer.
+  async refund(req: RefundRequest): Promise<RefundResult> {
+    return { status: 'processing', retryAfterMs: 86_400_000 }; // 24h — admin checks back next day
+  }
 }
 
 let cachedProviders: Record<string, PaymentProvider> | null = null;

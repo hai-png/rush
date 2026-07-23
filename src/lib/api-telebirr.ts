@@ -109,8 +109,25 @@ export async function POST_mandate_sign_url({ session, body }: any) {
     throw new BadRequestError('Subscription Payment not supported by current provider');
   }
 
+  // P1-7 / SEC-009: use crypto.randomInt instead of Math.random for the
+  // mandate contract number. Math.random is not cryptographically secure —
+  // an attacker who observes a few outputs can predict future ones.
+  const { randomInt } = await import('node:crypto');
   let mctContractNo = '';
-  for (let i = 0; i < 32; i++) mctContractNo += Math.floor(Math.random() * 10).toString();
+  for (let i = 0; i < 32; i++) mctContractNo += randomInt(0, 10).toString();
+
+  // P1 / BIZ-043: persist the mandate so we have a per-user ownership record.
+  // Previously mandates weren't stored, so GET /mandate/:mctContractNo had to
+  // be admin-gated (no way to verify a user owned a given mandate).
+  const mandate = await db.mandate.create({
+    data: {
+      userId: session.id,
+      subscriptionId: input.subscriptionId,
+      mctContractNo,
+      mandateTemplateId: input.mandateTemplateId,
+      status: 'pending',
+    },
+  });
 
   const result = provider.buildMandateSignUrl({
     mctContractNo,
@@ -120,45 +137,69 @@ export async function POST_mandate_sign_url({ session, body }: any) {
   await audit({
     actorId: session.id,
     action: 'telebirr.mandate_sign_url_generated',
-    entityType: 'subscription',
-    entityId: input.subscriptionId ?? 'unknown',
+    entityType: 'mandate',
+    entityId: mandate.id,
     after: { mctContractNo, mandateTemplateId: input.mandateTemplateId },
   });
 
   return {
     status: 201,
-    data: result,
+    data: { ...result, mandateId: mandate.id },
   };
 }
 
 export async function GET_mandate({ session, params }: any) {
-  // Mandates aren't persisted in our DB, so there's no per-user ownership
-  // concept. Restrict to platform_admin to prevent enumeration by any user.
-  if (session?.role !== 'platform_admin') {
-    throw new ForbiddenError('Admin only — mandate queries are admin-gated');
+  // P1 / BIZ-043: check ownership via the Mandate table. The user who created
+  // the mandate can query it; platform_admin can query any.
+  const mandate = await db.mandate.findUnique({
+    where: { mctContractNo: params.mctContractNo },
+  });
+  if (!mandate) throw new NotFoundError('Mandate not found');
+  if (mandate.userId !== session.id && session.role !== 'platform_admin') {
+    throw new ForbiddenError('Not your mandate');
   }
+
+  // If Telebirr supports mandate queries, fetch the live status from their API.
   const provider = getPaymentProvider('telebirr');
-  if (!provider.queryMandate) {
-    throw new BadRequestError('Subscription Payment not supported by current provider');
+  if (provider.queryMandate) {
+    try {
+      const remote = await provider.queryMandate(params.mctContractNo);
+      return { data: { ...mandate, remote } };
+    } catch {
+      // Remote query failed — return local record only.
+    }
   }
-  const result = await provider.queryMandate(params.mctContractNo);
-  return { data: result };
+  return { data: mandate };
 }
 
 export async function POST_mandate_cancel({ session, params, ipAddress, userAgent }: any) {
-  if (session?.role !== 'platform_admin') {
-    throw new ForbiddenError('Admin only — mandate cancellation is admin-gated');
+  // P1 / BIZ-043: ownership check — only the mandate owner or admin can cancel.
+  const mandate = await db.mandate.findUnique({
+    where: { mctContractNo: params.mctContractNo },
+  });
+  if (!mandate) throw new NotFoundError('Mandate not found');
+  if (mandate.userId !== session.id && session.role !== 'platform_admin') {
+    throw new ForbiddenError('Not your mandate');
   }
+  if (mandate.status === 'cancelled') throw new BadRequestError('Mandate already cancelled');
+
   const provider = getPaymentProvider('telebirr');
   if (!provider.cancelMandate) {
     throw new BadRequestError('Subscription Payment not supported by current provider');
   }
   const result = await provider.cancelMandate(params.mctContractNo);
+
+  // Update local mandate record.
+  await db.mandate.update({
+    where: { id: mandate.id },
+    data: { status: 'cancelled', cancelledAt: new Date() },
+  });
+
   await audit({
     actorId: session.id,
     action: 'telebirr.mandate_cancelled',
     entityType: 'mandate',
-    entityId: params.mctContractNo,
+    entityId: mandate.id,
     after: { ok: result.ok },
     ipAddress, userAgent,
   });
