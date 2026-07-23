@@ -25,10 +25,10 @@ webhookRoutes.post('/telebirr/notify', async (c) => {
 
   if (event.type === 'payment.settled' || event.type === 'payment.failed') {
 
-    const nonceStr = event.nonceStr || `auto-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
+    const dedupKey = event.nonceStr || `auto-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`;
     try {
       await db.insert(schema.telebirrNotifyEvents)
-        .values({ merchOrderId: event.merchOrderId, tradeStatus: event.type, nonceStr });
+        .values({ merchOrderId: event.merchOrderId, tradeStatus: event.type, outRequestNo: dedupKey });
     } catch (err: any) {
       if (err.code === '23505') return c.text('SUCCESS');
       throw err;
@@ -37,7 +37,7 @@ webhookRoutes.post('/telebirr/notify', async (c) => {
     const [payment] = await db.select().from(schema.payments).where(eq(schema.payments.reference, event.merchOrderId));
     if (!payment) {
       c.get('logger')?.error(
-        { merchOrderId: event.merchOrderId, nonceStr },
+        { merchOrderId: event.merchOrderId, dedupKey },
         'webhook: notification for unknown payment reference — returning 404 so Telebirr retries',
       );
       try {
@@ -46,7 +46,7 @@ webhookRoutes.post('/telebirr/notify', async (c) => {
           payload: {
             action: 'webhook.unknown_payment_reference',
             entityId: event.merchOrderId,
-            after: { nonceStr, type: event.type },
+            after: { dedupKey, type: event.type },
           },
         });
       } catch {}
