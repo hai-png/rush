@@ -227,7 +227,92 @@ async function expireStale(): Promise<void> {
 }
 
 async function hourlyJobs(): Promise<void> {
-  await Promise.all([resetCorporateMonthlyCounters(), sendSubscriptionExpiryWarnings(), retentionJobs()]);
+  await Promise.all([
+    resetCorporateMonthlyCounters(),
+    sendSubscriptionExpiryWarnings(),
+    retentionJobs(),
+    expireStaleSeatClaims(),
+    ensureTripsForActiveAssignments(),
+  ]);
+}
+
+// P1-26 / BIZ-021: expire pending seat claims that never got paid.
+// If a buyer claims a release but never completes checkout, the claim stays
+// 'pending' and the release stays 'claimed' forever — blocking the seller's
+// seat from being re-listed. This job finds claims older than 15 minutes,
+// marks them as failed, reopens the release, and restores the seller's ride.
+async function expireStaleSeatClaims(): Promise<void> {
+  const now = new Date();
+  const cutoff = new Date(now.getTime() - 15 * 60_000);
+  const staleClaims = await db.seatClaim.findMany({
+    where: { status: 'pending', createdAt: { lt: cutoff } },
+    select: { id: true, seatReleaseId: true, paymentId: true },
+    take: 50,
+  });
+  if (staleClaims.length === 0) return;
+
+  for (const claim of staleClaims) {
+    await db.$transaction(async (tx) => {
+      // Mark the claim as 'refunded' (terminal state for failed claims).
+      const claimCas = await tx.seatClaim.updateMany({
+        where: { id: claim.id, status: 'pending' },
+        data: { status: 'refunded' },
+      });
+      if (claimCas.count === 0) return; // already processed by another path
+
+      // Reopen the release.
+      await tx.seatRelease.updateMany({
+        where: { id: claim.seatReleaseId, status: 'claimed' },
+        data: { status: 'open' },
+      });
+
+      // Mark the payment as failed.
+      if (claim.paymentId) {
+        await tx.payment.updateMany({
+          where: { id: claim.paymentId, status: 'pending' },
+          data: { status: 'failed' },
+        });
+      }
+    }).catch((err) => logger.error({ err: (err as Error).message, claimId: claim.id }, '[scheduler] expire stale seat claim failed'));
+  }
+  if (staleClaims.length > 0) {
+    logger.info({ count: staleClaims.length }, '[scheduler] expired stale seat claims');
+  }
+}
+
+// P1-47 / DB-047: ensure trips exist for all active assignments.
+// If trip generation failed at assignment creation/acceptance time, this job
+// catches up by generating any missing trips for the current month. Also
+// handles cross-month rollover: if an assignment's monthEnd has passed,
+// there's nothing to do (next month's assignment must be created manually
+// or via a future recurring-assignment feature).
+async function ensureTripsForActiveAssignments(): Promise<void> {
+  const now = new Date();
+  const activeAssignments = await db.routeAssignment.findMany({
+    where: {
+      status: 'active',
+      monthEnd: { gt: now },
+    },
+    select: { id: true, schedulePattern: true, monthStart: true, monthEnd: true, routeId: true, shuttleId: true, contractorId: true },
+    take: 50,
+  });
+
+  let generated = 0;
+  for (const assignment of activeAssignments) {
+    try {
+      const { generateTripsFromAssignment } = await import('@/lib/api-assignments');
+      // generateTripsFromAssignment is idempotent — it catches P2002 (duplicate)
+      // and skips existing trips. So calling it again is safe.
+      // Note: the function needs the full assignment object.
+      await generateTripsFromAssignment(assignment);
+      generated++;
+    } catch (err) {
+      logger.error({ err: (err as Error).message, assignmentId: assignment.id }, '[scheduler] trip generation failed');
+    }
+  }
+  if (generated > 0) {
+    logger.info({ generated }, '[scheduler] ensured trips for active assignments');
+  }
 }
 
 // P1 / DB-033..039: retention jobs. Without these, the Session, Notification,
