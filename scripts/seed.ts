@@ -19,6 +19,15 @@ if (isProd && !allowProdSeed) {
   console.error('Set SEED_ALLOW_PRODUCTION=1 AND override SEED_ADMIN_PASSWORD / SEED_RIDER_PASSWORD / SEED_CONTRACTOR_PASSWORD to proceed.');
   process.exit(1);
 }
+// P1 FIX: in production with SEED_ALLOW_PRODUCTION=1, require all three
+// password env vars to be set — don't fall back to hardcoded defaults.
+if (isProd && allowProdSeed) {
+  if (!process.env.SEED_ADMIN_PASSWORD || !process.env.SEED_RIDER_PASSWORD || !process.env.SEED_CONTRACTOR_PASSWORD) {
+    console.error('SEED_ALLOW_PRODUCTION=1 is set but SEED_ADMIN_PASSWORD / SEED_RIDER_PASSWORD / SEED_CONTRACTOR_PASSWORD are not all provided.');
+    console.error('Refusing to seed with hardcoded demo passwords in production.');
+    process.exit(1);
+  }
+}
 
 const adminPwd = process.env.SEED_ADMIN_PASSWORD ?? 'admin-pass-1234';
 const riderPwd = process.env.SEED_RIDER_PASSWORD ?? 'rider-pass-1234';

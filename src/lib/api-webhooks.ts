@@ -60,14 +60,13 @@ async function markRefundSucceeded(refundRequestNo: string, raw: unknown): Promi
     if (!retry) return;
     const fresh = await tx.payment.findUnique({ where: { id: retry.paymentId } });
     if (!fresh) return;
-    const currentRefund = fresh.refundAmountCents;
-    const newRefund = currentRefund + retry.amountCents;
-    const allRefunded = newRefund === fresh.amountCents;
+    // P0 FIX: refundAmountCents was already reserved at scheduleRefund time.
+    // Do NOT add retry.amountCents again — that would double-count.
+    const allRefunded = fresh.refundAmountCents >= fresh.amountCents;
     await tx.payment.update({
       where: { id: fresh.id },
       data: {
         status: allRefunded ? 'refunded' : 'partially_refunded',
-        refundAmountCents: newRefund,
         refundedAt: new Date(),
       },
     });

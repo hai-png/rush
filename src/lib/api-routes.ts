@@ -233,8 +233,8 @@ const ROUTES: RouteEntry[] = [
   r('GET', '/healthz', { exemptFromTosGate: true }, health.GET_healthz),
   r('GET', '/ready', { exemptFromTosGate: true }, health.GET_ready),
 
-  // P2-66: Prometheus metrics endpoint (public — no PII, just counts).
-  r('GET', '/metrics', { exemptFromTosGate: true }, metrics.GET_metrics),
+  // P2-66: Prometheus metrics endpoint (admin-only — exposes operational intel).
+  r('GET', '/metrics', { requireAuth: true, requireRole: ['platform_admin'], exemptFromTosGate: true }, metrics.GET_metrics),
 
   r('POST', '/cron/run', { exemptFromTosGate: true }, cron.POST_run),
   r('GET', '/cron', { exemptFromTosGate: true }, cron.GET_cron_jobs),

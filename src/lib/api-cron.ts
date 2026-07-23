@@ -5,12 +5,16 @@ import { toErrorEnvelope } from '@/lib/errors';
 import { ensureSchedulerStarted } from '@/lib/scheduler';
 import { loadEnv } from '@/lib/env';
 import { logger } from '@/lib/logger';
+import { timingSafeEqual } from 'node:crypto';
 
 export async function POST_run(ctx: any) {
   const requestId = ctx.requestId ?? crypto.randomUUID();
   try {
     const env = loadEnv();
-    if (!ctx.body?._cronSecret || ctx.body._cronSecret !== env.CRON_SECRET) {
+    // P3 FIX: use constant-time comparison instead of !==.
+    const provided = ctx.body?._cronSecret ?? '';
+    const expected = env.CRON_SECRET;
+    if (!provided || provided.length !== expected.length || !timingSafeEqual(Buffer.from(provided), Buffer.from(expected))) {
       return NextResponse.json({ error: { code: 'UNAUTHORIZED', message: 'Invalid cron secret', requestId } }, { status: 401 });
     }
     ensureSchedulerStarted();

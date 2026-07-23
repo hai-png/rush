@@ -36,7 +36,7 @@ export function middleware(req: NextRequest) {
       res.headers.set('Access-Control-Allow-Methods', 'GET, POST, PUT, PATCH, DELETE, OPTIONS');
       res.headers.set('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-CSRF-Token, Idempotency-Key');
       res.headers.set('Access-Control-Max-Age', '86400');
-      res.headers.set('Access-Control-Expose-Headers', 'x-request-id, retry-after');
+      res.headers.set('Access-Control-Expose-Headers', 'x-request-id, retry-after, X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset');
     }
     return res;
   }
@@ -45,7 +45,7 @@ export function middleware(req: NextRequest) {
   if (isAllowed) {
     res.headers.set('Access-Control-Allow-Origin', origin);
     res.headers.set('Access-Control-Allow-Credentials', 'true');
-    res.headers.set('Access-Control-Expose-Headers', 'x-request-id, retry-after');
+    res.headers.set('Access-Control-Expose-Headers', 'x-request-id, retry-after, X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset');
   }
   return res;
 }

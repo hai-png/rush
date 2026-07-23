@@ -89,13 +89,17 @@ export async function GET_ready(): Promise<{ status: number; data: any }> {
   }
 
   const allOk = Object.values(checks).every(c => c.ok);
+  // P3 FIX: don't leak operational metrics (outbox depth, refund backlog) to
+  // unauthenticated callers. Return only status + timestamp.
   return {
     status: allOk ? 200 : 503,
     data: {
       status: allOk ? 'ready' : 'not ready',
       timestamp: new Date().toISOString(),
-      latencyMs: Date.now() - start,
-      checks,
+      // Only expose check details (not counts) — counts are admin-only via /metrics.
+      checks: Object.fromEntries(
+        Object.entries(checks).map(([k, v]) => [k, { ok: v.ok }])
+      ),
     },
   };
 }

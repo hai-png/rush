@@ -190,6 +190,14 @@ export async function POST_logout_all({ session, ipAddress, userAgent }: any) {
 
 export async function POST_refresh({ session, ipAddress, userAgent }: any) {
   if (!session) throw new UnauthorizedError();
+  // P1 FIX: block refresh for impersonation sessions — prevents TTL bypass.
+  // The impersonation endpoint sets userAgent to 'impersonated-by:<adminId>'
+  // and a 1-hour expiresAt. Allowing refresh would mint a fresh 30-day session
+  // for the impersonated user, bypassing the TTL and losing the audit marker.
+  const sessionRow = await db.session.findUnique({ where: { jti: session.jti }, select: { userAgent: true } });
+  if (sessionRow?.userAgent?.startsWith('impersonated-by:')) {
+    throw new ForbiddenError('Cannot refresh an impersonation session. Please sign in directly.');
+  }
   const user = await db.user.findUnique({ where: { id: session.id } });
   if (!user) throw new UnauthorizedError();
   const { token } = await issueSession(user, { userAgent, ipAddress });

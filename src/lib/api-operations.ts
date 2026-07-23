@@ -200,9 +200,18 @@ export async function POST_complete({ session, params, ipAddress, userAgent }: a
     });
     if (tripCas.count === 0) throw new ConflictError('Trip is no longer in transit');
 
-    // Boarded rides complete; booked rides (no-shows) cascade to no_show (P2-2).
+    // Boarded rides complete; booked rides (no-shows) cascade to no_show.
     await tx.ride.updateMany({ where: { tripId: trip.id, status: 'boarded' }, data: { status: 'completed' } });
-    await tx.ride.updateMany({ where: { tripId: trip.id, status: 'booked' }, data: { status: 'no_show' } });
+    const noShowResult = await tx.ride.updateMany({ where: { tripId: trip.id, status: 'booked' }, data: { status: 'no_show' } });
+    // P2 FIX: decrement seatsBooked by the no-show count so trip capacity is accurate.
+    if (noShowResult.count > 0) {
+      await tx.trip.updateMany({
+        where: { id: trip.id, seatsBooked: { gte: noShowResult.count } },
+        data: { seatsBooked: { decrement: noShowResult.count } },
+      });
+    }
+    // Also transition any 'released' rides to 'cancelled' (trip is over).
+    await tx.ride.updateMany({ where: { tripId: trip.id, status: 'released' }, data: { status: 'cancelled' } });
   }, { timeout: 15000, maxWait: 20000 });
   await audit({
     actorId: session.id,

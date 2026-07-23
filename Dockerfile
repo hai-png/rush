@@ -54,12 +54,16 @@ COPY --from=builder --chown=nextjs:nodejs /app/node_modules/@prisma ./node_modul
 # Create the uploads + db directory with correct ownership.
 RUN mkdir -p /app/db/uploads && chown -R nextjs:nodejs /app/db
 
+# P2 #32: run prisma migrations at startup.
+COPY --from=builder --chown=nextjs:nodejs /app/node_modules/prisma ./node_modules/prisma
+
 USER nextjs
 
 EXPOSE 3000
 
-# Healthcheck using the /ready endpoint.
+# P2 #42: use bun fetch instead of wget (oven/bun may not include wget).
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
-  CMD wget -qO- http://localhost:3000/api/v1/ready > /dev/null 2>&1 || exit 1
+  CMD bun -e "fetch('http://localhost:3000/api/v1/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
-CMD ["bun", "server.js"]
+# P2 #32: run prisma migrate deploy before starting the server.
+CMD ["sh", "-c", "bunx prisma migrate deploy --schema prisma/schema.prisma && bun server.js"]

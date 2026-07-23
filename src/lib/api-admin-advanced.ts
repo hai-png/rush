@@ -328,10 +328,25 @@ export async function POST_bulk_expire({ session, body, ipAddress, userAgent }: 
         }).catch(() => {});
       });
     }
-    await db.ride.updateMany({
+    // P1 FIX: cancel rides AND decrement trip.seatsBooked for each.
+    const ridesToCancel = await db.ride.findMany({
       where: { subscriptionId: { in: input.subscriptionIds }, status: 'booked' },
-      data: { status: 'cancelled' },
-    }).catch(() => {});
+      select: { id: true, tripId: true },
+    });
+    if (ridesToCancel.length > 0) {
+      await db.ride.updateMany({
+        where: { id: { in: ridesToCancel.map(r => r.id) } },
+        data: { status: 'cancelled' },
+      });
+      // Decrement seatsBooked for each affected trip (CAS guarded).
+      const tripIds = [...new Set(ridesToCancel.map(r => r.tripId))];
+      for (const tripId of tripIds) {
+        await db.trip.updateMany({
+          where: { id: tripId, seatsBooked: { gt: 0 } },
+          data: { seatsBooked: { decrement: 1 } },
+        }).catch(() => {});
+      }
+    }
   }
   for (const fx of sideEffects) { try { await fx(); } catch {} }
   await audit({ actorId: session.id, action: 'admin.bulk_expire', entityType: 'subscription', after: { count: result.count }, ipAddress, userAgent });

@@ -153,7 +153,11 @@ export async function failPayment(reference: string, reasonRaw: unknown, outRequ
         const release = await tx.seatRelease.findUnique({ where: { id: claim.seatReleaseId } });
         // Mark the failed claim as 'refunded' and reopen the release.
         await tx.seatClaim.update({ where: { id: p.seatClaimId }, data: { status: 'refunded' } });
-        await tx.seatRelease.update({ where: { id: claim.seatReleaseId }, data: { status: 'open' } });
+        // P1 FIX: CAS on status:'claimed' so concurrent paths can't double-open.
+        await tx.seatRelease.updateMany({
+          where: { id: claim.seatReleaseId, status: 'claimed' },
+          data: { status: 'open' },
+        });
         // Restore the seller's ride + trip capacity — without this, the
         // seller's seat stays 'released' (decremented from seatsBooked) but
         // the release is now 'open' with no buyer, so the seller permanently
@@ -274,7 +278,7 @@ export async function processRefundRetries(limit = 10): Promise<{ processed: num
     });
     if (rows.length === 0) return [];
     await tx.refundRetry.updateMany({
-      where: { id: { in: rows.map(r => r.id) } },
+      where: { id: { in: rows.map(r => r.id) }, status: 'pending' },
       data: { status: 'processing' },
     });
     return rows;
@@ -308,16 +312,16 @@ export async function processRefundRetries(limit = 10): Promise<{ processed: num
         });
         if (updated.count === 0) return;
 
+        // P0 FIX: refundAmountCents was ALREADY reserved at scheduleRefund time
+        // (line 222-235). Do NOT add retry.amountCents again — that would double-count.
+        // Just update the status based on the already-reserved amount.
         const fresh = await tx.payment.findUnique({ where: { id: payment.id } });
         if (!fresh) return;
-        const currentRefund = Money.fromCents(fresh.refundAmountCents);
-        const newRefund = currentRefund.add(Money.fromCents(retry.amountCents));
-        const allRefunded = newRefund.eq(Money.fromCents(fresh.amountCents));
+        const allRefunded = fresh.refundAmountCents >= fresh.amountCents;
         await tx.payment.update({
           where: { id: fresh.id },
           data: {
             status: allRefunded ? 'refunded' : 'partially_refunded',
-            refundAmountCents: newRefund.cents,
             refundedAt: new Date(),
           },
         });

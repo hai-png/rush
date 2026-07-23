@@ -40,6 +40,10 @@ export function loadEnv(): Env {
       throw new Error('AUTH_SECRET must be set in production (>= 32 chars)');
     }
   }
+  // P3 FIX: reject the dev fallback string in production even if it's >= 32 chars.
+  if (process.env.NODE_ENV === 'production' && authSecret === 'dev-only-insecure-secret-32-chars-min') {
+    throw new Error('AUTH_SECRET must not equal the dev fallback string in production');
+  }
 
   // P0-7 / SEC-001: in production, if TELEBIRR_ENV is set to 'production' or
   // 'testbed' but the required Telebirr credentials are missing, fail loudly

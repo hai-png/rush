@@ -2,20 +2,20 @@ import { View, Text, TouchableOpacity, StyleSheet, Switch, Alert } from 'react-n
 import { useState, useEffect } from 'react';
 import { router } from 'expo-router';
 import { logout } from '../../src/lib/auth';
-import { getSettings, saveSettings, getBiometricsEnabled, setBiometricsEnabled } from '../../src/lib/settings-store';
+import { getSettings, saveSettings, getBiometricsEnabled, setBiometricsEnabled as persistBiometrics } from '../../src/lib/settings-store';
 import { registerForPushNotifications } from '../../src/lib/push';
 import { colors } from '../../src/theme/colors';
 
 export default function SettingsScreen() {
   const [notifEnabled, setNotifEnabled] = useState(true);
   const [emailEnabled, setEmailEnabled] = useState(true);
-  const [biometricsEnabled, setBiometricsEnabled] = useState(false);
+  const [biometricsEnabled, setBiometricsEnabledState] = useState(false);
 
   useEffect(() => {
     getSettings().then(s => {
       setNotifEnabled(s.notificationEnabled);
       setEmailEnabled(s.emailEnabled);
-      setBiometricsEnabled(s.biometricsEnabled);
+      setBiometricsEnabledState(s.biometricsEnabled);
     });
   }, []);
 
@@ -35,8 +35,8 @@ export default function SettingsScreen() {
         return;
       }
     }
-    await setBiometricsEnabled(value);
-    setBiometricsEnabled(value);
+    await persistBiometrics(value);
+    setBiometricsEnabledState(value);
   }
 
   async function toggleNotifications(value: boolean) {

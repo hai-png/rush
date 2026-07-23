@@ -47,8 +47,10 @@ export async function saveFile(
   if (!ALLOWED_EXTENSIONS.has(ext)) {
     throw new FileUploadError(`File extension "${ext}" not allowed. Allowed: ${[...ALLOWED_EXTENSIONS].join(', ')}`);
   }
-  if (file.type && !ALLOWED_MIME.has(file.type)) {
-    throw new FileUploadError(`MIME type "${file.type}" not allowed`);
+  // P2 FIX: require a MIME type — don't allow empty/undefined to bypass the check.
+  const mimeType = file.type || 'application/octet-stream';
+  if (!ALLOWED_MIME.has(mimeType)) {
+    throw new FileUploadError(`MIME type "${mimeType}" not allowed. Allowed: ${[...ALLOWED_MIME].join(', ')}`);
   }
 
   const bytes = new Uint8Array(await file.arrayBuffer());

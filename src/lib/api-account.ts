@@ -30,7 +30,8 @@ export async function GET_export({ session }: any) {
 }
 
 export async function POST_delete({ session, ipAddress, userAgent }: any) {
-  // Soft-delete only. Hard-delete is blocked because FKs would cascade unexpectedly.
+  // Soft-delete: nullify PII immediately. Hard-delete runs after 30-day grace
+  // period via the scheduler's hardDeleteStaleUsers job.
   await db.user.update({
     where: { id: session.id },
     data: {
@@ -40,8 +41,16 @@ export async function POST_delete({ session, ipAddress, userAgent }: any) {
       email: null,
       name: 'Deleted User',
       tokenVersion: { increment: 1 },
+      // P2 FIX: also scrub 2FA secret + disable 2FA + clear lockout state.
+      twoFactorSecret: null,
+      twoFactorEnabled: false,
+      phoneVerified: false,
+      failedLoginAttempts: 0,
+      lockedUntil: null,
     },
   });
+  // Also delete 2FA backup codes immediately.
+  await db.twoFactorBackupCode.deleteMany({ where: { userId: session.id } }).catch(() => {});
   await audit({
     actorId: session.id,
     action: 'user.deleted',

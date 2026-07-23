@@ -281,6 +281,7 @@ model Trip {
   @@index([assignmentId])
   @@index([driverId, departureAt])   // P1: contractor dashboard + recomputeContractorRating
   @@index([status, departureAt])     // P1: GET /trips catalog + expireStale
+  @@unique([routeId, departureAt, window])  // P0: prevent duplicate trips from scheduler re-runs
 }
 
 // ─── Route Assignments (monthly commitments) ────────────────────────────────
