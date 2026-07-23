@@ -22,6 +22,22 @@ export async function GET_rides({ session }: any) {
   return { data: rides };
 }
 
+// P1 / API-015: single-ride detail endpoint.
+export async function GET_ride({ session, params }: any) {
+  const ride = await db.ride.findUnique({
+    where: { id: params.id },
+    include: { trip: { include: { route: true, shuttle: true } } },
+  });
+  if (!ride) throw new NotFoundError('Ride not found');
+  // Owner check: rider themselves, platform_admin, or the trip's driver.
+  if (ride.userId !== session.id && session.role !== 'platform_admin') {
+    if (ride.trip?.driverId !== session.id) {
+      throw new NotFoundError('Ride not found');
+    }
+  }
+  return { data: ride };
+}
+
 const RideInput = z.object({
   tripId: z.string().min(1),
   subscriptionId: z.string().optional(),

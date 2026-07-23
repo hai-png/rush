@@ -47,3 +47,16 @@ export async function GET_route({ params }: any) {
   if (!route) throw new NotFoundError('Route not found');
   return { data: route };
 }
+
+// P1 / API-015: single-trip detail endpoint.
+export async function GET_trip({ params }: any) {
+  const trip = await db.trip.findUnique({
+    where: { id: params.id },
+    include: {
+      route: { include: { pickups: { where: { isActive: true }, orderBy: { sortOrder: 'asc' } } } },
+      shuttle: { include: { contractor: { select: { name: true, contractorProfile: { select: { rating: true, verificationStatus: true } } } } } },
+    },
+  });
+  if (!trip) throw new NotFoundError('Trip not found');
+  return { data: trip };
+}

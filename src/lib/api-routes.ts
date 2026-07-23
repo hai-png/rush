@@ -92,6 +92,7 @@ const ROUTES: RouteEntry[] = [
   r('DELETE', '/pickups/:id', { requireAuth: true, requireRole: ['platform_admin'] }, assignments.DELETE_pickup),
   r('GET', '/shuttles', {}, catalog.GET_shuttles),
   r('GET', '/trips', {}, catalog.GET_trips),
+  r('GET', '/trips/:id', {}, catalog.GET_trip),
   r('GET', '/faqs', {}, catalog.GET_faqs),
 
   r('GET', '/assignments', { requireAuth: true }, assignments.GET_assignments),
@@ -126,6 +127,7 @@ const ROUTES: RouteEntry[] = [
   r('POST', '/marketplace/seat-claims', { requireAuth: true }, marketplace.POST_claim_direct),
 
   r('GET', '/rides', { requireAuth: true }, operations.GET_rides),
+  r('GET', '/rides/:id', { requireAuth: true }, operations.GET_ride),
   r('POST', '/rides', { requireAuth: true }, operations.POST_ride),
   r('PATCH', '/rides/:id', { requireAuth: true }, operations.PATCH_ride),
   r('POST', '/rides/:id/cancel', { requireAuth: true }, operations.POST_ride_cancel),
@@ -211,6 +213,7 @@ const ROUTES: RouteEntry[] = [
   r('PUT', '/admin/settings', { requireAuth: true, requireRole: ['platform_admin'] }, adminAdvanced.PUT_settings),
   r('POST', '/admin/bulk/expire', { requireAuth: true, requireRole: ['platform_admin'] }, adminAdvanced.POST_bulk_expire),
   r('POST', '/admin/bulk/suspend', { requireAuth: true, requireRole: ['platform_admin'] }, adminAdvanced.POST_bulk_suspend),
+  r('POST', '/admin/bulk/refund', { requireAuth: true, requireRole: ['platform_admin'] }, adminAdvanced.POST_bulk_refund),
   r('PATCH', '/admin/routes/:id/price', { requireAuth: true, requireRole: ['platform_admin'] }, adminAdvanced.PATCH_route_price),
   r('POST', '/admin/faqs', { requireAuth: true, requireRole: ['platform_admin'] }, admin.POST_faq),
   r('DELETE', '/admin/faqs/:id', { requireAuth: true, requireRole: ['platform_admin'] }, admin.DELETE_faq),

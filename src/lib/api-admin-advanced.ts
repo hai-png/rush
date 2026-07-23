@@ -344,3 +344,38 @@ export async function PATCH_route_price({ session, params, body, ipAddress, user
   await audit({ actorId: session.id, action: 'route.price_updated', entityType: 'route', entityId: params.id, after: input, ipAddress, userAgent });
   return { data: updated };
 }
+
+// P2 / API-041: bulk refund for trip cancellations. Admin provides a list of
+// payment IDs + a reason; each refund is scheduled (async via RefundRetry).
+const BulkRefundInput = z.object({
+  paymentIds: z.array(z.string()).min(1).max(100),
+  reason: z.string().min(1).max(500),
+});
+
+export async function POST_bulk_refund({ session, body, ipAddress, userAgent }: any) {
+  const input = BulkRefundInput.parse(body);
+  const { scheduleRefund } = await import('@/lib/payment-service');
+  const { Money } = await import('@/lib/money');
+
+  const payments = await db.payment.findMany({
+    where: { id: { in: input.paymentIds }, status: 'completed' },
+    select: { id: true, amountCents: true, refundAmountCents: true, userId: true },
+  });
+
+  let scheduled = 0;
+  let skipped = 0;
+  for (const p of payments) {
+    const refundable = p.amountCents - p.refundAmountCents;
+    if (refundable <= 0) { skipped++; continue; }
+    // P0-18: skip self-refunds.
+    if (p.userId === session.id) { skipped++; continue; }
+    try {
+      await scheduleRefund(p.id, Money.fromCents(refundable), input.reason);
+      scheduled++;
+    } catch {
+      skipped++;
+    }
+  }
+  await audit({ actorId: session.id, action: 'admin.bulk_refund', entityType: 'payment', after: { scheduled, skipped, reason: input.reason }, ipAddress, userAgent });
+  return { data: { scheduled, skipped, total: payments.length } };
+}
