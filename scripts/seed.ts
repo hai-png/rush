@@ -205,6 +205,19 @@ async function main() {
   });
   console.log(`  assignment: ${assignment.id} (${assignment.status})`);
 
+  // P3 / DB-047: generate trips from the assignment's schedule pattern.
+  // Previously the seed only created one manual trip (trip-demo-001) and
+  // never called generateTripsFromAssignment, so the dev environment was
+  // sparse — only 1 trip instead of ~22 (Mon-Fri × morning+evening).
+  try {
+    const { generateTripsFromAssignment } = await import('../src/lib/api-assignments');
+    const generated = await generateTripsFromAssignment(assignment);
+    console.log(`  trips generated from assignment: ${generated}`);
+  } catch (err) {
+    console.log(`  (trip generation skipped: ${(err as Error).message})`);
+  }
+
+  // Also create the manual demo trip (for e2e tests that reference trip-demo-001).
   const trip = await prisma.trip.upsert({
     where: { id: 'trip-demo-001' },
     update: {},

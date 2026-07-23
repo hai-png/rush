@@ -77,10 +77,11 @@ export async function POST_onboard({ session, body, ipAddress, userAgent }: any)
 }
 
 async function generateUniqueCode(): Promise<string> {
+  const { randomInt } = await import('node:crypto');
   const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   for (let attempt = 0; attempt < 10; attempt++) {
     let code = '';
-    for (let i = 0; i < 8; i++) code += alphabet[Math.floor(Math.random() * alphabet.length)];
+    for (let i = 0; i < 8; i++) code += alphabet[randomInt(0, alphabet.length)];
     const existing = await db.corporate.findUnique({ where: { code }, select: { id: true } });
     if (!existing) return code;
   }
@@ -135,11 +136,12 @@ export async function POST_invite({ session, body, query, ipAddress, userAgent }
   if (!corp) throw new NotFoundError('No corporate found');
 
   // Retry on collision (matches generateUniqueCode pattern for corporate codes).
+  const { randomInt } = await import('node:crypto');
   const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let invite;
   for (let attempt = 0; attempt < 10; attempt++) {
     let code = '';
-    for (let i = 0; i < 12; i++) code += alphabet[Math.floor(Math.random() * alphabet.length)];
+    for (let i = 0; i < 12; i++) code += alphabet[randomInt(0, alphabet.length)];
     try {
       invite = await db.corporateInvite.create({
         data: {
