@@ -221,14 +221,22 @@ export async function GET_me({ session }: any) {
 }
 
 export async function POST_change_password({ session, body, ipAddress, userAgent }: any) {
-  const { oldPassword, newPassword } = z.object({
+  const { oldPassword, newPassword, code } = z.object({
     oldPassword: z.string(),
     newPassword: z.string().min(10),
+    code: z.string().length(6).optional(),
   }).parse(body);
   const user = await db.user.findUnique({ where: { id: session!.id } });
   if (!user) throw new UnauthorizedError();
   const ok = await verifyPassword(oldPassword, user.passwordHash);
   if (!ok) throw new UnauthorizedError('Current password incorrect');
+  if (user.twoFactorEnabled) {
+    if (!code) throw new BadRequestError('2FA code required to change password');
+    const secret = decryptField(user.twoFactorSecret);
+    if (!secret || !verifySync({ secret, token: code })) {
+      throw new BadRequestError('Invalid 2FA code');
+    }
+  }
   const passwordHash = await hashPassword(newPassword);
   await db.user.update({ where: { id: user.id }, data: { passwordHash, tokenVersion: { increment: 1 } } });
   await revokeAllSessionsForUser(user.id);
@@ -288,7 +296,11 @@ export async function POST_phone_change_confirm({ session, body, ipAddress, user
 }
 
 export async function GET_sessions({ session }: any) {
-  const rows = await db.session.findMany({ where: { userId: session!.id, revokedAt: null, expiresAt: { gt: new Date() } }, orderBy: { createdAt: 'desc' } });
+  const rows = await db.session.findMany({
+    where: { userId: session!.id, revokedAt: null, expiresAt: { gt: new Date() } },
+    orderBy: { createdAt: 'desc' },
+    select: { id: true, userAgent: true, ipAddress: true, createdAt: true, expiresAt: true },
+  });
   return { data: rows };
 }
 

@@ -68,7 +68,7 @@ async function handleRaw(
     // ── Rate limit (shared with api()) ──────────────────────────────────
     // from rate limiting — that let a malicious user bypass per-IP throttling
     // by hitting /contractor/documents instead of a non-raw equivalent.
-    rateLimitCheck(req.nextUrl.pathname, req.method, { session, body: null, ip });
+    await rateLimitCheck(req.nextUrl.pathname, req.method, { session, body: null, ip });
 
     // ── AuthZ ───────────────────────────────────────────────────────────
     if (found.entry.options.requireAuth && !session) {

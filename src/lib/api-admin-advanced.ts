@@ -206,11 +206,31 @@ const EXPORT_TABLES: Record<string, { model: string; label: string; select?: str
     label: 'Users',
     select: ['id', 'phone', 'email', 'name', 'role', 'phoneVerified', 'isActive', 'deletedAt', 'tokenVersion', 'twoFactorEnabled', 'tosVersion', 'createdAt', 'updatedAt'],
   },
-  payments: { model: 'payment', label: 'Payments' },
-  subscriptions: { model: 'subscription', label: 'Subscriptions' },
-  rides: { model: 'ride', label: 'Rides' },
-  tickets: { model: 'supportTicket', label: 'Tickets' },
-  audit_logs: { model: 'auditLog', label: 'Audit Logs' },
+  payments: {
+    model: 'payment',
+    label: 'Payments',
+    select: ['id', 'reference', 'userId', 'subscriptionId', 'seatClaimId', 'method', 'amountCents', 'status', 'refundAmountCents', 'refundedAt', 'createdAt', 'updatedAt'],
+  },
+  subscriptions: {
+    model: 'subscription',
+    label: 'Subscriptions',
+    select: ['id', 'userId', 'planId', 'corporateId', 'status', 'startDate', 'endDate', 'ridesUsed', 'cancelledAt', 'createdAt', 'updatedAt'],
+  },
+  rides: {
+    model: 'ride',
+    label: 'Rides',
+    select: ['id', 'tripId', 'userId', 'subscriptionId', 'seatClaimId', 'pickupLocationId', 'assignmentId', 'status', 'createdAt', 'updatedAt'],
+  },
+  tickets: {
+    model: 'supportTicket',
+    label: 'Tickets',
+    select: ['id', 'userId', 'subject', 'category', 'priority', 'status', 'subscriptionId', 'paymentId', 'createdAt', 'updatedAt'],
+  },
+  audit_logs: {
+    model: 'auditLog',
+    label: 'Audit Logs',
+    select: ['id', 'seq', 'actorId', 'action', 'entityType', 'entityId', 'ipAddress', 'userAgent', 'createdAt'],
+  },
 };
 
 export async function GET_export_csv({ session, params }: any) {

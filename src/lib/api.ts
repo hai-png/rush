@@ -71,11 +71,11 @@ const DEFAULT_ANON = { limit: 60, windowSec: 60 };
 
 export type RateLimitInfo = { limit: number; remaining: number; resetAt: number };
 
-export function rateLimitCheck(
+export async function rateLimitCheck(
   path: string,
   method: string,
   ctx: { session: Session | null; body: any; ip: string | undefined },
-): RateLimitInfo | null {
+): Promise<RateLimitInfo | null> {
   const matchingRules = RATE_RULES.filter(r => r.pattern.test(path));
   let maxRetry = 0;
   let info: RateLimitInfo | null = null;
@@ -84,7 +84,6 @@ export function rateLimitCheck(
     const keySuffix = rule.keyFn(ctx);
     if (!keySuffix) continue;
     if (keySuffix.startsWith('ip:undefined')) {
-      // Don't bucket on unknown IP — would let one attacker DoS all anon users.
       throw new RateLimitError(60);
     }
     const key = `rl:${path}:${rule.pattern.source}:${keySuffix}`;
@@ -329,7 +328,7 @@ export function api(options: ApiOptions, handler: Handler) {
         }
       }
 
-      const rateInfo = rateLimitCheck(req.nextUrl.pathname, req.method, { session, body, ip });
+      const rateInfo = await rateLimitCheck(req.nextUrl.pathname, req.method, { session, body, ip });
 
       if (options.requireAuth && !session) throw new UnauthorizedError();
       if (options.requireRole && session) {

@@ -57,11 +57,13 @@ export async function verifyOtp(rawPhone: string, purpose: OtpPurpose, code: str
 
   const ok = await verifyPassword(code, otp.codeHash);
   if (!ok) {
-    // Atomic increment to avoid a race where two concurrent verify calls
-    // both read attempts=N and both write attempts=N+1.
     await db.otpCode.update({ where: { id: otp.id }, data: { attempts: { increment: 1 } } });
     throw new BadRequestError('Invalid code');
   }
 
-  await db.otpCode.update({ where: { id: otp.id }, data: { verified: true } });
+  const result = await db.otpCode.updateMany({
+    where: { id: otp.id, verified: false },
+    data: { verified: true },
+  });
+  if (result.count === 0) throw new BadRequestError('Code already used');
 }

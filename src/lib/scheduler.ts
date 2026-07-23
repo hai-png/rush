@@ -12,6 +12,11 @@ export function ensureSchedulerStarted(): void {
   if (started) return;
   started = true;
 
+  if (process.env.SCHEDULER_DISABLED === '1') {
+    logger.info('[scheduler] disabled via SCHEDULER_DISABLED=1 — use external cron + POST /api/v1/cron/run');
+    return;
+  }
+
   const outboxTimer = setInterval(drainOutbox, 30_000);
   outboxTimer.unref?.();
   // Run once immediately so dev doesn't have to wait 30s.
@@ -116,8 +121,8 @@ async function drainOutbox(): Promise<void> {
         const payload = JSON.parse(evt.payload);
         switch (evt.channel) {
           case 'notification':
-            // No-op: enqueueNotification already wrote the Notification row.
-            // The outbox event exists only for retry observability.
+            // enqueueNotification already wrote the Notification DB row.
+            // Mark as delivered — this channel exists for retry observability only.
             break;
           case 'sms':
             const smsResult = await getSmsProvider().send(payload.phone, payload.body);
