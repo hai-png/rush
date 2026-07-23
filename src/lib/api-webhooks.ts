@@ -117,3 +117,40 @@ async function markRefundFailed(refundRequestNo: string, raw: unknown): Promise<
   for (const fx of sideEffects) { try { await fx(); } catch (e) { logger.error({ err: (e as Error).message }, '[refund-webhook] side effect failed'); } }
   logger.warn({ refundRequestNo }, '[telebirr-webhook] refund failed');
 }
+
+
+export async function handleTwilioStatus(req: any, session: any, params: any, ctx: any): Promise<any> {
+  const requestId = ctx.requestId ?? crypto.randomUUID();
+  try {
+    const env = (await import('@/lib/env')).loadEnv();
+    if (env.TWILIO_AUTH_TOKEN) {
+      const { verifyTwilioSignature } = await import('@/lib/webhook-verify');
+      const NextRequest = (await import('next/server')).NextRequest;
+      if (!verifyTwilioSignature(req as unknown as NextRequest, env.TWILIO_AUTH_TOKEN)) {
+        return { status: 401, data: { error: 'Invalid signature' } };
+      }
+    }
+    const body = await req.text();
+    const params = new URLSearchParams(body);
+    const messageSid = params.get('MessageSid');
+    const messageStatus = params.get('MessageStatus');
+    const logger = (await import('@/lib/logger')).logger;
+    logger.info({ messageSid, messageStatus }, '[webhook] Twilio SMS status');
+    return { status: 200, data: { ok: true } };
+  } catch (err) {
+    return { status: 500, data: { error: 'Webhook processing failed' } };
+  }
+}
+
+
+export async function handleResendStatus(req: any, session: any, params: any, ctx: any): Promise<any> {
+  const requestId = ctx.requestId ?? crypto.randomUUID();
+  try {
+    const body = await req.text();
+    const logger = (await import('@/lib/logger')).logger;
+    logger.info({ bodyLength: body.length }, '[webhook] Resend email status received');
+    return { status: 200, data: { ok: true } };
+  } catch {
+    return { status: 500, data: { error: 'Webhook processing failed' } };
+  }
+}

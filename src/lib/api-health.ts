@@ -102,3 +102,13 @@ export async function GET_ready(): Promise<{ status: number; data: any }> {
     },
   };
 }
+
+
+export async function GET_config() {
+  return { data: {
+    tosVersion: process.env.CURRENT_TOS_VERSION || '2026-01-01',
+    minAppVersion: process.env.MIN_APP_VERSION || '1.0.0',
+    maintenanceMode: process.env.MAINTENANCE_MODE === '1',
+    supportEmail: process.env.SUPPORT_EMAIL || 'support@addisride.et',
+  }};
+}

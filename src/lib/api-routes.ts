@@ -132,6 +132,7 @@ const ROUTES: RouteEntry[] = [
   r('POST', '/rides', { requireAuth: true }, operations.POST_ride),
   r('PATCH', '/rides/:id', { requireAuth: true }, operations.PATCH_ride),
   r('POST', '/rides/:id/cancel', { requireAuth: true }, operations.POST_ride_cancel),
+  r('POST', '/rides/:id/no-show', { requireAuth: true, requireRole: ['contractor', 'platform_admin'] }, operations.POST_ride_no_show),
   r('POST', '/trips', { requireAuth: true, requireRole: ['contractor', 'platform_admin'] }, operations.POST_trip),
   r('PATCH', '/trips/:id', { requireAuth: true, requireRole: ['contractor', 'platform_admin'] }, operations.PATCH_trip),
   r('POST', '/trips/:id/board', { requireAuth: true, requireRole: ['contractor', 'platform_admin'] }, operations.POST_board),
@@ -175,6 +176,7 @@ const ROUTES: RouteEntry[] = [
   r('POST', '/tos/accept', { requireAuth: true, exemptFromTosGate: true }, tos.POST_accept),
 
   r('GET', '/admin/users', { requireAuth: true, requireRole: ['platform_admin'] }, admin.GET_users),
+  r('GET', '/admin/users/:id', { requireAuth: true, requireRole: ['platform_admin'] }, admin.GET_user),
   r('GET', '/admin/payments', { requireAuth: true, requireRole: ['platform_admin'] }, admin.GET_payments),
   r('GET', '/admin/payments/:id', { requireAuth: true, requireRole: ['platform_admin'] }, admin.GET_payment),
   r('POST', '/admin/payments/:id/refund', { requireAuth: true, requireRole: ['platform_admin'] }, admin.POST_refund),
@@ -230,10 +232,13 @@ const ROUTES: RouteEntry[] = [
   r('GET', '/contractor/trips', { requireAuth: true, requireRole: ['contractor'] }, admin.GET_my_trips),
 
   r('POST', '/webhooks/telebirr/notify', { exemptFromTosGate: true }, webhooks.handleTelebirrNotify, true),
+  r('POST', '/webhooks/twilio/sms-status', { exemptFromTosGate: true }, webhooks.handleTwilioStatus, true),
+  r('POST', '/webhooks/resend/email-status', { exemptFromTosGate: true }, webhooks.handleResendStatus, true),
 
   r('GET', '/health', { exemptFromTosGate: true }, health.GET_health),
   r('GET', '/healthz', { exemptFromTosGate: true }, health.GET_healthz),
   r('GET', '/ready', { exemptFromTosGate: true }, health.GET_ready),
+  r('GET', '/config', { exemptFromTosGate: true }, health.GET_config),
 
   // Prometheus metrics endpoint (admin-only — exposes operational intel).
   r('GET', '/metrics', { requireAuth: true, requireRole: ['platform_admin'], exemptFromTosGate: true }, metrics.GET_metrics),

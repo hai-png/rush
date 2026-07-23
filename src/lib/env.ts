@@ -39,6 +39,8 @@ type Env = {
 let cachedEnv: Env | null = null;
 
 export function loadEnv(): Env {
+  // Cached on first call — env var changes after startup are ignored.
+  // This is intentional: runtime secret rotation requires a process restart.
   if (cachedEnv) return cachedEnv;
 
   const authSecret = process.env.AUTH_SECRET;

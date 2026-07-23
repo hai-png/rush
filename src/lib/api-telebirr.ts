@@ -207,7 +207,7 @@ export async function POST_mandate_cancel({ session, params, ipAddress, userAgen
 
 const DisburseInput = z.object({
   mctContractNo: z.string().length(32),
-  amountCents: z.number().int().positive(),
+  amountCents: z.number().int().positive().max(1_000_000_00),
   reason: z.string().min(1).max(200),
 });
 

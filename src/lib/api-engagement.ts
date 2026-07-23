@@ -1,6 +1,7 @@
 import { db } from '@/lib/db';
 import { logger } from '@/lib/logger';
 import { z } from 'zod';
+import { NotFoundError } from '@/lib/errors';
 
 export async function GET_notifications({ session, query }: any) {
   const { parsePagination, paginatedResponse } = await import('@/lib/pagination');
@@ -40,19 +41,22 @@ export async function GET_unread_count({ session }: any) {
   return { data: { count } };
 }
 
-export async function PATCH_notification({ session, params }: any) {
+export async function PATCH_notification({ session, params, body }: any) {
+  const input = z.object({ readAt: z.union([z.string().datetime(), z.null()]).optional() }).parse(body ?? {});
+  const readAt = input.readAt === null ? null : input.readAt ? new Date(input.readAt) : new Date();
   await db.notification.updateMany({
     where: { id: params.id, userId: session.id },
-    data: { readAt: new Date() },
+    data: { readAt },
   });
   return { data: { ok: true } };
 }
 
 export async function DELETE_notification({ session, params }: any) {
-  await db.notification.deleteMany({
+  const result = await db.notification.deleteMany({
     where: { id: params.id, userId: session.id },
   });
-  return { data: { ok: true } };
+  if (result.count === 0) throw new NotFoundError('Notification not found');
+  return { status: 204 };
 }
 
 // ─── Notification preferences ─────────────────────────────────────────────

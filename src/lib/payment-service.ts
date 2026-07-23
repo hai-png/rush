@@ -380,6 +380,10 @@ export async function processRefundRetries(limit = 10): Promise<{ processed: num
         sideEffects.push(async () => {
           await enqueueNotification({ userId, type: 'refund_completed', title: 'Refund completed', body: `Your refund of ${Money.fromCents(refundAmount).toString()} has been processed.` });
         });
+        sideEffects.push(async () => {
+          const { audit } = await import('@/lib/audit');
+          await audit({ action: 'refund.completed', entityType: 'payment', entityId: payment.id, after: { refundRequestNo: retry.refundRequestNo, amountCents: retry.amountCents } });
+        });
       } else {
         const attempts = retry.attempts + 1;
         if (result.status === 'failed' && result.permanent) {

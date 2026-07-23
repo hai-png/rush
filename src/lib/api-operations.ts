@@ -593,7 +593,7 @@ export async function POST_shuttle_position({ session, body }: any) {
   return { data: { ok: true } };
 }
 
-export async function GET_shuttle_positions({ session }: any) {
+export async function GET_shuttle_positions({ session, query }: any) {
   // Try Redis first; fall back to in-memory.
   try {
     const { redisGetAllPositions } = await import('@/lib/redis');
@@ -620,4 +620,24 @@ export async function handleShuttlePositionStream(req: NextRequest, session: any
     if (Date.now() - pos.updatedAt < 5 * 60_000) result.push(pos);
   }
   return NextResponse.json({ data: result });
+}
+
+
+export async function POST_ride_no_show({ session, params, ipAddress, userAgent }: any) {
+  const ride = await db.ride.findUnique({ where: { id: params.id } });
+  if (!ride) throw new NotFoundError('Ride not found');
+  const trip = await db.trip.findUnique({ where: { id: ride.tripId } });
+  if (!trip) throw new NotFoundError('Trip not found');
+  if (session.role !== 'platform_admin' && trip.driverId !== session.id) {
+    throw new ForbiddenError('Only the driver or admin can mark no-show');
+  }
+  if (ride.status !== 'booked') throw new BadRequestError('Only booked rides can be marked no-show');
+  const before = ride;
+  await db.$transaction(async (tx) => {
+    const cas = await tx.ride.updateMany({ where: { id: params.id, status: 'booked' }, data: { status: 'no_show' } });
+    if (cas.count === 0) throw new ConflictError('Ride is no longer booked');
+    await tx.trip.updateMany({ where: { id: ride.tripId, seatsBooked: { gt: 0 } }, data: { seatsBooked: { decrement: 1 } } });
+  }, { timeout: 15000, maxWait: 20000 });
+  await audit({ actorId: session.id, action: 'ride.no_show', entityType: 'ride', entityId: params.id, before, after: { status: 'no_show' }, ipAddress, userAgent });
+  return { data: { id: params.id, status: 'no_show' } };
 }

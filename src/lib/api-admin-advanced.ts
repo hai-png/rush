@@ -117,7 +117,7 @@ export async function POST_impersonate({ session, params, body, ipAddress, userA
     },
   });
   await audit({ actorId: session.id, action: 'user.impersonated', entityType: 'user', entityId: params.id, after: { jti, ttl: '1h' }, ipAddress, userAgent });
-  return { data: { accessToken: token, impersonated: true, expiresAt: new Date(Date.now() + 60 * 60_000).toISOString(), targetUser: { id: target.id, phone: target.phone, role: target.role } } };
+  return { status: 201, data: { accessToken: token, impersonated: true, expiresAt: new Date(Date.now() + 60 * 60_000).toISOString(), targetUser: { id: target.id, phone: target.phone, role: target.role } } };
 }
 
 export async function GET_pending_contractors() {

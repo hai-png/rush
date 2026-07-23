@@ -418,6 +418,7 @@ export function api(options: ApiOptions, handler: Handler) {
       }
       return res;
     } catch (err) {
+      logger.error({ err: err instanceof Error ? { message: err.message, stack: err.stack } : err, requestId }, '[api] unhandled error');
       const { status, body } = toErrorEnvelope(err, requestId);
       // If we reserved an idempotency-record lock and the handler threw,
       // release it so the client can retry with the same key. ConflictError

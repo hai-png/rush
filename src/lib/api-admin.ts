@@ -421,3 +421,13 @@ export async function DELETE_holiday({ session, params, ipAddress, userAgent }: 
   await audit({ actorId: session.id, action: 'holiday.deleted', entityType: 'holiday', entityId: params.id, before, ipAddress, userAgent });
   return { data: { id: params.id, isActive: false } };
 }
+
+
+export async function GET_user({ params }: any) {
+  const user = await db.user.findUnique({
+    where: { id: params.id },
+    select: { id: true, phone: true, email: true, name: true, role: true, isActive: true, deletedAt: true, createdAt: true, phoneVerified: true, twoFactorEnabled: true, tosVersion: true },
+  });
+  if (!user) throw new NotFoundError('User not found');
+  return { data: user };
+}
