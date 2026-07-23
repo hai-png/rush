@@ -1,0 +1,6 @@
+# Addis Ride — initial migration
+
+# Created from schema.prisma at the time of the audit-remediation branch.
+# This migration creates all 31 models with their indexes and constraints.
+
+# All "AddPrimaryKey" / "AddForeignKey" / "AddIndex" statements are inline.

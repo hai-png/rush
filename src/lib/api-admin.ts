@@ -5,32 +5,68 @@ import { NotFoundError, BadRequestError, ForbiddenError } from '@/lib/errors';
 import { audit, verifyAuditChain } from '@/lib/audit';
 import { scheduleRefund } from '@/lib/payment-service';
 import { enqueueNotification } from '@/lib/outbox';
+import { parsePagination, paginatedResponse } from '@/lib/pagination';
 
-export async function GET_users({ session }: any) {
-  const users = await db.user.findMany({
-    select: { id: true, phone: true, email: true, name: true, role: true, isActive: true, deletedAt: true, createdAt: true, phoneVerified: true, twoFactorEnabled: true },
-    orderBy: { createdAt: 'desc' },
-    take: 100,
-  });
-  return { data: users };
+export async function GET_users({ session, query }: any) {
+  // P1-56: cursor-based pagination.
+  const page = parsePagination(query);
+  const where: any = {};
+  if (query?.role) where.role = query.role;
+  if (query?.isActive !== undefined) where.isActive = query.isActive === 'true';
+  if (query?.q) {
+    where.OR = [
+      { phone: { contains: query.q } },
+      { name: { contains: query.q } },
+      { email: { contains: query.q } },
+    ];
+  }
+  const [users, total] = await Promise.all([
+    db.user.findMany({
+      where,
+      select: { id: true, phone: true, email: true, name: true, role: true, isActive: true, deletedAt: true, createdAt: true, phoneVerified: true, twoFactorEnabled: true },
+      orderBy: { createdAt: 'desc' },
+      ...page.findManyArgs,
+    }),
+    db.user.count({ where }),
+  ]);
+  return paginatedResponse(users, total, page);
 }
 
-export async function GET_payments() {
-  const payments = await db.payment.findMany({
-    include: { user: { select: { name: true, phone: true } }, subscription: { include: { plan: true } } },
-    orderBy: { createdAt: 'desc' },
-    take: 100,
-  });
-  return { data: payments };
+export async function GET_payments({ query }: any) {
+  const page = parsePagination(query);
+  const where: any = {};
+  if (query?.status) where.status = query.status;
+  if (query?.method) where.method = query.method;
+  if (query?.userId) where.userId = query.userId;
+  const [payments, total] = await Promise.all([
+    db.payment.findMany({
+      where,
+      include: { user: { select: { name: true, phone: true } }, subscription: { include: { plan: true } } },
+      orderBy: { createdAt: 'desc' },
+      ...page.findManyArgs,
+    }),
+    db.payment.count({ where }),
+  ]);
+  return paginatedResponse(payments, total, page);
 }
 
-export async function GET_audit_logs() {
-  const logs = await db.auditLog.findMany({
-    include: { actor: { select: { name: true, phone: true } } },
-    orderBy: { createdAt: 'desc' },
-    take: 200,
-  });
-  return { data: logs };
+export async function GET_audit_logs({ query }: any) {
+  const page = parsePagination(query);
+  const where: any = {};
+  if (query?.actorId) where.actorId = query.actorId;
+  if (query?.action) where.action = { contains: query.action };
+  if (query?.entityType) where.entityType = query.entityType;
+  if (query?.entityId) where.entityId = query.entityId;
+  const [logs, total] = await Promise.all([
+    db.auditLog.findMany({
+      where,
+      include: { actor: { select: { name: true, phone: true } } },
+      orderBy: { createdAt: 'desc' },
+      ...page.findManyArgs,
+    }),
+    db.auditLog.count({ where }),
+  ]);
+  return paginatedResponse(logs, total, page);
 }
 
 export async function GET_plans() {
