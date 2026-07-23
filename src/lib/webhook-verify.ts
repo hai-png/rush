@@ -1,3 +1,14 @@
+// P2 / API-036, API-037 / Sprint 2 #36, #37: webhook signature verification
+// helpers for Twilio and Resend.
+//
+// These verify that incoming webhooks are genuinely from Twilio/Resend and
+// not forged. Without verification, an attacker could POST fake SMS delivery
+// receipts or email bounce events.
+//
+// Usage:
+//   if (!verifyTwilioSignature(req, TWILIO_AUTH_TOKEN)) throw new ForbiddenError();
+//   if (!verifyResendSignature(req, RESEND_WEBHOOK_SECRET)) throw new ForbiddenError();
+
 import { createHmac, timingSafeEqual } from 'node:crypto';
 import type { NextRequest } from 'next/server';
 
@@ -7,6 +18,7 @@ export function verifyTwilioSignature(req: NextRequest, authToken: string): bool
   const signature = req.headers.get('x-twilio-signature');
   if (!signature || !authToken) return false;
 
+  // Build the validation string: URL + sorted POST params.
   const url = req.nextUrl.toString();
   const params: Record<string, string> = {};
   req.nextUrl.searchParams.forEach((v, k) => { params[k] = v; });
@@ -44,6 +56,7 @@ export function verifyResendSignature(
   const svixSignature = req.headers.get('svix-signature');
   if (!svixId || !svixTimestamp || !svixSignature || !webhookSecret) return false;
 
+  // Check timestamp freshness (5-min window).
   const now = Math.floor(Date.now() / 1000);
   const ts = parseInt(svixTimestamp, 10);
   if (isNaN(ts) || Math.abs(now - ts) > 300) return false;

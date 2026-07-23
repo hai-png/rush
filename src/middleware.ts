@@ -1,5 +1,21 @@
 import { NextRequest, NextResponse } from 'next/server';
 
+// P1-54 / API-033 / OPS-021: CORS middleware.
+//
+// Previously there was no middleware.ts and no Access-Control-Allow-* headers
+// anywhere. Same-origin requests (web app calling /api/v1/*) work fine without
+// CORS, but any cross-origin caller (marketing site, partner integration,
+// browser-based admin tool) was blocked by the browser.
+//
+// Behavior:
+//   1. For OPTIONS preflight: respond with CORS headers + 204.
+//   2. For actual requests: add CORS headers to the response.
+//   3. Allowlist of origins (CORS_ORIGINS env var, comma-separated, falls
+//      back to APP_BASE_URL). For credentialed requests (cookies), the
+//      origin must be echoed exactly — '*' is not allowed.
+//   4. Credentials allowed (cookies + Authorization header).
+//   5. Expose x-request-id so clients can correlate errors.
+
 function getAllowedOrigins(): string[] {
   const fromEnv = process.env.CORS_ORIGINS?.split(',').map(s => s.trim()).filter(Boolean) ?? [];
   const base = process.env.APP_BASE_URL ?? 'http://localhost:3000';
@@ -11,6 +27,7 @@ export function middleware(req: NextRequest) {
   const allowed = getAllowedOrigins();
   const isAllowed = origin && allowed.includes(origin);
 
+  // Handle CORS preflight.
   if (req.method === 'OPTIONS') {
     const res = NextResponse.json(null, { status: 204 });
     if (isAllowed) {
@@ -34,5 +51,6 @@ export function middleware(req: NextRequest) {
 }
 
 export const config = {
+  // Only run middleware on API routes — pages don't need CORS.
   matcher: ['/api/:path*'],
 };

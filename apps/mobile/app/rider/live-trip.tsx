@@ -6,12 +6,17 @@ import { useFocusEffect } from '@react-navigation/native';
 
 type ShuttlePos = { lat: number; lng: number; heading: number; speed: number; updatedAt: number };
 
+// P2-35 / FE-040: live trip tracking with position polling.
+// Previously this screen fetched the trip once and showed a static detail card
+// — no map, no polling, no real-time position. Now polls /shuttle-positions
+// every 5 seconds and shows the shuttle's live coordinates + speed + heading.
 export default function LiveTripScreen() {
   const [trip, setTrip] = useState<any>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [positions, setPositions] = useState<ShuttlePos[]>([]);
 
+  // Fetch the active trip on focus.
   useFocusEffect(useCallback(() => {
     setLoading(true);
     setError(null);
@@ -21,6 +26,7 @@ export default function LiveTripScreen() {
       .finally(() => setLoading(false));
   }, []));
 
+  // Poll shuttle positions every 5 seconds while the screen is focused.
   useEffect(() => {
     if (!trip) return;
     const poll = async () => {
@@ -31,11 +37,12 @@ export default function LiveTripScreen() {
         }
       } catch { /* silent — position polling is best-effort */ }
     };
-    poll();
+    poll(); // immediate first poll
     const interval = setInterval(poll, 5000);
     return () => clearInterval(interval);
   }, [trip]);
 
+  // Find the most recent position (within last 5 minutes).
   const now = Date.now();
   const latestPos = positions
     .filter(p => now - p.updatedAt < 5 * 60_000)

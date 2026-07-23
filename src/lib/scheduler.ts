@@ -14,6 +14,7 @@ export function ensureSchedulerStarted(): void {
 
   const outboxTimer = setInterval(drainOutbox, 30_000);
   outboxTimer.unref?.();
+  // Run once immediately so dev doesn't have to wait 30s.
   drainOutbox().catch(err => logger.error({ err: (err as Error).message }, '[scheduler] outbox drain failed'));
 
   const refundTimer = setInterval(() => {
@@ -32,6 +33,12 @@ export function ensureSchedulerStarted(): void {
   logger.info('[scheduler] started: outbox(30s), refunds(60s), expire(5m), hourly(1h)');
 }
 
+// C3 FIX: export a single entry point that runs ALL jobs, so the external
+// cron endpoint (api-cron.ts POST_run) can call the same logic as the
+// in-process setInterval timers. Previously, POST_run had a partial inline
+// reimplementation that dropped 4 pieces of business logic (seat restoration
+// on expired releases, subscription-expiry notifications, monthly corporate
+// counter reset, outbox drain).
 export async function runAllJobs(): Promise<{
   refunds: number;
   expiredSubs: number;
@@ -39,10 +46,22 @@ export async function runAllJobs(): Promise<{
   outboxPending: number;
   outboxProcessing: number;
 }> {
+  // 1. Drain the outbox (SMS/email/notification delivery).
   await drainOutbox();
+
+  // 2. Process refund retries.
   const refundResult = await processRefundRetries(50);
+
+  // 3. Expire stale subscriptions + seat releases (with full cascade:
+  //    seat restoration, notifications, etc.).
   await expireStale();
+
+  // 4. Run hourly jobs (corporate monthly reset, subscription-expiry
+  //    warnings, retention cleanup, stale seat-claim timeout, trip
+  //    generation recovery, hard-delete stale users).
   await hourlyJobs();
+
+  // Report status.
   const pendingOutbox = await db.outboxEvent.count({ where: { status: 'pending' } });
   const processingOutbox = await db.outboxEvent.count({ where: { status: 'processing' } });
 
@@ -56,6 +75,8 @@ export async function runAllJobs(): Promise<{
 }
 
 async function drainOutbox(): Promise<void> {
+  // P0-9: reaper — reset events that have been stuck in 'processing' for >15min.
+  // Without this, a process crash mid-drain leaves events stranded forever.
   try {
     const reaped = await db.outboxEvent.updateMany({
       where: {
@@ -72,6 +93,7 @@ async function drainOutbox(): Promise<void> {
   }
 
   let processed = 0;
+  // Loop until the queue is empty (or we hit a safety cap).
   for (let i = 0; i < 5; i++) {
     const claimed = await db.$transaction(async (tx) => {
       const rows = await tx.outboxEvent.findMany({
@@ -80,6 +102,8 @@ async function drainOutbox(): Promise<void> {
         take: 20,
       });
       if (rows.length === 0) return [];
+      // P2-73: re-check status:'pending' in the updateMany where-clause so concurrent
+      // drainers (multi-instance) can't both claim the same rows.
       await tx.outboxEvent.updateMany({
         where: { id: { in: rows.map(r => r.id) }, status: 'pending' },
         data: { status: 'processing', lockedAt: new Date() },
@@ -94,6 +118,8 @@ async function drainOutbox(): Promise<void> {
         const payload = JSON.parse(evt.payload);
         switch (evt.channel) {
           case 'notification':
+            // No-op: enqueueNotification already wrote the Notification row.
+            // The outbox event exists only for retry observability.
             break;
           case 'sms':
             const smsResult = await getSmsProvider().send(payload.phone, payload.body);
@@ -104,6 +130,8 @@ async function drainOutbox(): Promise<void> {
             if (!emailResult.ok) throw new Error(emailResult.error || 'Email send failed');
             break;
           case 'push':
+            // H2 FIX: deliver push notification via Expo Push API.
+            // Read the user's registered device tokens from the Setting table.
             const deviceRows = await db.setting.findMany({
               where: { key: { startsWith: `device:${payload.userId}:` } },
               select: { value: true },
@@ -113,6 +141,7 @@ async function drainOutbox(): Promise<void> {
               try { return JSON.parse(r.value).pushToken; } catch { return null; }
             }).filter(Boolean);
             if (tokens.length === 0) break;
+            // Send to Expo Push API.
             const pushResponse = await fetch('https://exp.host/--/api/v2/push/send', {
               method: 'POST',
               headers: { 'content-type': 'application/json' },
@@ -126,6 +155,7 @@ async function drainOutbox(): Promise<void> {
             if (!pushResponse.ok) throw new Error(`Expo Push API returned ${pushResponse.status}`);
             break;
           default:
+            // Unknown channel — log + mark delivered so we don't retry forever.
             logger.warn({ channel: evt.channel, id: evt.id }, '[outbox] unknown channel');
             break;
         }
@@ -164,6 +194,7 @@ async function drainOutbox(): Promise<void> {
 
 async function expireStale(): Promise<void> {
   const now = new Date();
+  // Capture the IDs of subs that are about to expire so we can cascade-cancel their future rides.
   const expiringSubs = await db.subscription.findMany({
     where: { status: 'active', endDate: { lt: now } },
     select: { id: true, userId: true },
@@ -174,6 +205,9 @@ async function expireStale(): Promise<void> {
     data: { status: 'expired' },
   });
 
+  // P0-4 / BIZ-006: cascade-cancel future booked rides on expired subscriptions,
+  // and free up the seats so other riders can book them. Rides on already-departed
+  // or in-transit trips are left alone (the rider may already be on the shuttle).
   if (expiringSubs.length > 0) {
     for (const s of expiringSubs) {
       await db.$transaction(async (tx) => {
@@ -201,6 +235,9 @@ async function expireStale(): Promise<void> {
     }
   }
 
+  // Before marking releases as expired, collect them so we can restore
+  // each seller's ride + trip capacity. A release that expired without a
+  // buyer means the seller gets their seat back.
   const expiringReleases = await db.seatRelease.findMany({
     where: { status: 'open', expiresAt: { lt: now } },
     select: { id: true, tripId: true, userId: true },
@@ -212,6 +249,7 @@ async function expireStale(): Promise<void> {
   if (expiringReleases.length > 0) {
     for (const r of expiringReleases) {
       await db.$transaction(async (tx) => {
+        // CAS-guarded restoration so concurrent paths can't double-increment seatsBooked (P1-22).
         const sellerRide = await tx.ride.findFirst({
           where: { tripId: r.tripId, userId: r.userId, status: 'released' },
           select: { id: true },
@@ -226,6 +264,7 @@ async function expireStale(): Promise<void> {
           }
         }
       }).catch((err) => logger.error({ err: (err as Error).message }, '[scheduler] restore expired release failed'));
+      // Notify the seller their release expired and seat was restored.
       await enqueueNotification({
         userId: r.userId,
         type: 'seat_release_expired',
@@ -264,6 +303,11 @@ async function hourlyJobs(): Promise<void> {
   ]);
 }
 
+// P1-14 / SEC-017 / Sprint 2 #42: hard-delete soft-deleted users after a
+// 30-day grace period. Nullifies PII (passwordHash, twoFactorSecret, name,
+// phone) and deletes associated data (sessions, notifications, OTP codes,
+// backup codes, idempotency records). Preserves financial records (Payment,
+// Subscription, Ride) with the userId FK — they're needed for audit + tax.
 async function hardDeleteStaleUsers(): Promise<void> {
   const cutoff = new Date(Date.now() - 30 * 24 * 3600_000);
   const staleUsers = await db.user.findMany({
@@ -276,6 +320,7 @@ async function hardDeleteStaleUsers(): Promise<void> {
   for (const user of staleUsers) {
     try {
       await db.$transaction(async (tx) => {
+        // Nullify PII on the user row.
         await tx.user.update({
           where: { id: user.id },
           data: {
@@ -287,6 +332,7 @@ async function hardDeleteStaleUsers(): Promise<void> {
             phoneVerified: false,
           },
         });
+        // Delete associated PII data (non-financial).
         await tx.session.deleteMany({ where: { userId: user.id } });
         await tx.notification.deleteMany({ where: { userId: user.id } });
         await tx.otpCode.deleteMany({ where: { userId: user.id } });
@@ -308,6 +354,11 @@ async function hardDeleteStaleUsers(): Promise<void> {
   }
 }
 
+// P1-26 / BIZ-021: expire pending seat claims that never got paid.
+// If a buyer claims a release but never completes checkout, the claim stays
+// 'pending' and the release stays 'claimed' forever — blocking the seller's
+// seat from being re-listed. This job finds claims older than 15 minutes,
+// marks them as failed, reopens the release, and restores the seller's ride.
 async function expireStaleSeatClaims(): Promise<void> {
   const now = new Date();
   const cutoff = new Date(now.getTime() - 15 * 60_000);
@@ -320,17 +371,20 @@ async function expireStaleSeatClaims(): Promise<void> {
 
   for (const claim of staleClaims) {
     await db.$transaction(async (tx) => {
+      // Mark the claim as 'refunded' (terminal state for failed claims).
       const claimCas = await tx.seatClaim.updateMany({
         where: { id: claim.id, status: 'pending' },
         data: { status: 'refunded' },
       });
-      if (claimCas.count === 0) return;
+      if (claimCas.count === 0) return; // already processed by another path
 
+      // Reopen the release.
       await tx.seatRelease.updateMany({
         where: { id: claim.seatReleaseId, status: 'claimed' },
         data: { status: 'open' },
       });
 
+      // Mark the payment as failed.
       if (claim.paymentId) {
         await tx.payment.updateMany({
           where: { id: claim.paymentId, status: 'pending' },
@@ -344,6 +398,12 @@ async function expireStaleSeatClaims(): Promise<void> {
   }
 }
 
+// P1-47 / DB-047: ensure trips exist for all active assignments.
+// If trip generation failed at assignment creation/acceptance time, this job
+// catches up by generating any missing trips for the current month. Also
+// handles cross-month rollover: if an assignment's monthEnd has passed,
+// there's nothing to do (next month's assignment must be created manually
+// or via a future recurring-assignment feature).
 async function ensureTripsForActiveAssignments(): Promise<void> {
   const now = new Date();
   const activeAssignments = await db.routeAssignment.findMany({
@@ -359,6 +419,9 @@ async function ensureTripsForActiveAssignments(): Promise<void> {
   for (const assignment of activeAssignments) {
     try {
       const { generateTripsFromAssignment } = await import('@/lib/api-assignments');
+      // generateTripsFromAssignment is idempotent — it catches P2002 (duplicate)
+      // and skips existing trips. So calling it again is safe.
+      // Note: the function needs the full assignment object.
       await generateTripsFromAssignment(assignment);
       generated++;
     } catch (err) {
@@ -370,6 +433,12 @@ async function ensureTripsForActiveAssignments(): Promise<void> {
   }
 }
 
+// P1 / DB-033..039: retention jobs. Without these, the Session, Notification,
+// OutboxEvent, IdempotencyRecord, OtpCode, TelebirrNotifyEvent, and RefundRetry
+// tables grow unbounded — after a year of operation they have millions of rows
+// and queries slow down. We delete rows older than the retention window.
+// AuditLog is NOT cleaned up here — financial/compliance retention requires 7+
+// years and is a separate concern.
 async function retentionJobs(): Promise<void> {
   const now = new Date();
   const THIRTY_DAYS = new Date(now.getTime() - 30 * 24 * 3600_000);
@@ -377,12 +446,19 @@ async function retentionJobs(): Promise<void> {
   const SEVEN_DAYS = new Date(now.getTime() - 7 * 24 * 3600_000);
 
   const jobs = [
+    // Expired or revoked sessions older than 30 days.
     { name: 'sessions', fn: () => db.session.deleteMany({ where: { OR: [{ revokedAt: { lt: THIRTY_DAYS } }, { expiresAt: { lt: now } }] } }) },
+    // Read notifications older than 90 days (unread ones preserved — user might still want them).
     { name: 'notifications', fn: () => db.notification.deleteMany({ where: { readAt: { lt: NINETY_DAYS } } }) },
+    // Outbox events delivered or dead older than 30 days.
     { name: 'outbox', fn: () => db.outboxEvent.deleteMany({ where: { status: { in: ['delivered', 'dead'] }, updatedAt: { lt: THIRTY_DAYS } } }) },
+    // Idempotency records older than their expiry (24h TTL).
     { name: 'idempotency', fn: () => db.idempotencyRecord.deleteMany({ where: { expiresAt: { lt: now } } }) },
+    // OTP codes older than 7 days.
     { name: 'otp_codes', fn: () => db.otpCode.deleteMany({ where: { expiresAt: { lt: SEVEN_DAYS } } }) },
+    // Telebirr notify events older than 90 days (after dispute window).
     { name: 'telebirr_notify', fn: () => db.telebirrNotifyEvent.deleteMany({ where: { receivedAt: { lt: NINETY_DAYS } } }) },
+    // Refund retries in terminal state older than 90 days.
     { name: 'refund_retries', fn: () => db.refundRetry.deleteMany({ where: { status: { in: ['succeeded', 'permanent_failure'] }, updatedAt: { lt: NINETY_DAYS } } }) },
   ];
 

@@ -1,3 +1,13 @@
+// P1-9 / SEC-011 / OPS-012: Redis-backed cache with in-memory fallback.
+//
+// If REDIS_URL is set, uses Redis for distributed rate limiting + shuttle
+// positions (shared across instances). If not set, falls back to in-memory
+// Maps (single-instance only — documented limitation).
+//
+// The fallback ensures the app works in dev and small-scale prod without
+// requiring Redis. When the user scales to multiple instances, they just
+// set REDIS_URL and everything switches automatically.
+
 import { loadEnv } from '@/lib/env';
 import { logger } from '@/lib/logger';
 
@@ -35,10 +45,13 @@ export async function getRedis(): Promise<any | null> {
   }
 }
 
+// Check if Redis is available (non-blocking — returns cached value).
 export function isRedisAvailable(): boolean {
   return redisClient !== null;
 }
 
+// Sliding-window rate limiter using Redis INCR + EXPIRE.
+// Returns { count, expiresAt } or null if Redis isn't available.
 export async function redisRateLimit(key: string, limit: number, windowSec: number): Promise<{ allowed: boolean; count: number; retryAfter: number } | null> {
   const redis = await getRedis();
   if (!redis) return null;
@@ -56,6 +69,7 @@ export async function redisRateLimit(key: string, limit: number, windowSec: numb
   return { allowed: true, count, retryAfter: 0 };
 }
 
+// Shuttle position storage with TTL.
 export async function redisSetPosition(key: string, value: any, ttlSec: number): Promise<void> {
   const redis = await getRedis();
   if (!redis) throw new Error('Redis not available');

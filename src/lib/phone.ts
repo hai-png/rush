@@ -6,6 +6,7 @@ export const EthiopianPhone = {
   },
   normalize(input: string): string {
     let s = input.trim();
+    // Strip spaces, dashes, parens.
     s = s.replace(/[\s\-()]/g, '');
     // 09XXXXXXXX -> +2519XXXXXXXX
     if (/^0?(9|7)\d{8}$/.test(s)) {

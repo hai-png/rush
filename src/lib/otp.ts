@@ -10,6 +10,7 @@ export type OtpPurpose = 'signup_verification' | 'password_reset' | 'phone_chang
 
 export async function sendOtp(rawPhone: string, purpose: OtpPurpose): Promise<{ devCode?: string }> {
   const phone = EthiopianPhone.normalize(rawPhone);
+  // Invalidate previous unverified codes for this phone+purpose.
   await db.otpCode.updateMany({
     where: { phone, purpose, verified: false },
     data: { expiresAt: new Date(0) },

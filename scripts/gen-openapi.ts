@@ -1,4 +1,7 @@
 #!/usr/bin/env bun
+// Generate an OpenAPI 3.1 spec from the route table.
+// Output: openapi.json (in repo root)
+
 import { writeFileSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 

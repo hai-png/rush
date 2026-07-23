@@ -1,3 +1,16 @@
+// P1-56 / API-031: cursor-based pagination helper.
+//
+// Usage in a handler:
+//   const page = parsePagination(query);
+//   const [items, total] = await Promise.all([
+//     db.ride.findMany({ where, ...page.findManyArgs, orderBy: { createdAt: 'desc' } }),
+//     db.ride.count({ where }),
+//   ]);
+//   return { data: items, pagination: paginateMeta(items, total, page) };
+//
+// Returns:
+//   { items: [...], pagination: { total, limit, cursor, nextCursor, hasMore } }
+
 export type PaginationParams = {
   limit: number;
   cursor: string | undefined;
@@ -52,6 +65,7 @@ export function paginateMeta<T extends { id: string }>(
   };
 }
 
+// Helper for handlers that want to return the standard paginated shape.
 export function paginatedResponse<T extends { id: string }>(
   items: T[],
   total: number,

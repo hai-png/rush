@@ -19,6 +19,7 @@ export function DocumentUpload({ type, hasExisting }: { type: string; hasExistin
       formData.append('type', type);
       formData.append('file', file);
 
+      // Get CSRF token from cookie
       const csrf = (document.cookie.match(/addis-csrf=([^;]+)/) || [])[1] || '';
       const res = await fetch('/api/v1/contractor/documents', {
         method: 'POST',

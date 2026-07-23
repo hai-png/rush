@@ -3,6 +3,15 @@ import { useState, useEffect } from 'react';
 import { router } from 'expo-router';
 import { login } from '../../src/lib/auth';
 
+// P1-47 / FE-024: mobile login now supports 2FA.
+//
+// Original: login() only sent phone + password. Users with 2FA enabled saw
+// 'alert('2FA code required')' with no way to enter the code — locked out
+// of the mobile app entirely.
+//
+// New: after the first login attempt fails with TWO_FACTOR_REQUIRED, show
+// a 2FA code input. The user enters the 6-digit code and submits again —
+// login() then sends phone + password + code together.
 export default function LoginScreen() {
   const [phone, setPhone] = useState('');
   const [password, setPassword] = useState('');
@@ -15,6 +24,7 @@ export default function LoginScreen() {
     setLoading(true);
     setError('');
     try {
+      // Pass code only if the 2FA input is shown.
       const result = await login(phone, password, needs2FA ? code : undefined);
       if (result.user.role === 'rider') router.replace('/rider/dashboard');
       else if (result.user.role === 'contractor') router.replace('/contractor/dashboard');
@@ -23,6 +33,7 @@ export default function LoginScreen() {
       else router.replace('/rider/dashboard');
     } catch (e: any) {
       const msg = e instanceof Error ? e.message : 'Login failed';
+      // Detect 2FA-required and reveal the code input.
       if (msg.includes('2FA') || msg.includes('Two-factor') || msg.includes('TWO_FACTOR')) {
         setNeeds2FA(true);
         setError('Enter your 6-digit 2FA code below and sign in again');

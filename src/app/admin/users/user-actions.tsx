@@ -33,6 +33,7 @@ export function UserActions({ userId, currentRole, isActive }: { userId: string;
     } finally { setLoading(null); }
   }
 
+  // H5 FIX: impersonation with a UI button + confirmation dialog + 2FA code field.
   async function impersonate() {
     setLoading('impersonate');
     try {
@@ -40,10 +41,12 @@ export function UserActions({ userId, currentRole, isActive }: { userId: string;
         `/api/v1/admin/users/${userId}/impersonate`,
         { code: twoFactorCode },
       );
+      // Store the impersonation token and redirect to the target user's dashboard.
       document.cookie = `addis-session=${res.accessToken}; path=/; max-age=3600; samesite=lax`;
       toast.success(`Impersonating ${res.targetUser.phone} (expires in 1 hour)`);
       setImpersonateOpen(false);
       setTwoFactorCode('');
+      // Redirect based on target user's role.
       const dash = res.targetUser.role === 'rider' ? '/dashboard/rider'
         : res.targetUser.role === 'contractor' ? '/dashboard/contractor'
         : res.targetUser.role === 'corporate_admin' ? '/dashboard/corporate'
@@ -79,6 +82,7 @@ export function UserActions({ userId, currentRole, isActive }: { userId: string;
           {loading === 'reactivate' ? '…' : 'Reactivate'}
         </Button>
       )}
+      {/* H5 FIX: impersonation button with confirmation dialog + 2FA code field */}
       <Dialog open={impersonateOpen} onOpenChange={setImpersonateOpen}>
         <DialogTrigger asChild>
           <Button size="sm" variant="ghost" className="h-8 text-xs" disabled={loading !== null || currentRole === 'platform_admin'}>

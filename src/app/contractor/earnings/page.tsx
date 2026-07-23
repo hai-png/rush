@@ -13,6 +13,7 @@ export default async function ContractorEarningsPage() {
     db.trip.count({ where: { driverId: session.id, status: 'completed' } }),
     db.ride.count({ where: { trip: { driverId: session.id }, status: 'completed' } }),
     db.routeAssignment.count({ where: { contractorId: session.id, status: 'active' } }),
+    // Fetch all completed rides (with their route fare) for the earnings sum.
     // This is fine for contractors — they have a bounded number of rides.
     db.ride.findMany({
       where: { trip: { driverId: session.id }, status: 'completed' },
