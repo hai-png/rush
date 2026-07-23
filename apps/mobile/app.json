@@ -4,7 +4,7 @@
     "slug": "addis-ride",
     "version": "1.0.0",
     "orientation": "portrait",
-    "userInterfaceStyle": "light",
+    "userInterfaceStyle": "automatic",
     "splash": { "backgroundColor": "#2563eb" },
     "ios": { "supportsTablet": true, "bundleIdentifier": "et.addisride.mobile" },
     "android": { "package": "et.addisride.mobile" },
