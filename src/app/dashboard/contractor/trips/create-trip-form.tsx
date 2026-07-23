@@ -30,7 +30,7 @@ export function CreateTripForm({ shuttles, routes }: { shuttles: any[]; routes: 
     try {
       // Convert local datetime to ISO
       const iso = new Date(departureAt).toISOString();
-      await api.post('/api/v1/admin/trips', { shuttleId, routeId, departureAt: iso, window: tripWindow });
+      await api.post('/api/v1/trips', { shuttleId, routeId, departureAt: iso, window: tripWindow });
       toast.success('Trip scheduled');
       router.refresh();
     } catch (err) {

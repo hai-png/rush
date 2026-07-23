@@ -33,6 +33,47 @@ export function ensureSchedulerStarted(): void {
   logger.info('[scheduler] started: outbox(30s), refunds(60s), expire(5m), hourly(1h)');
 }
 
+// C3 FIX: export a single entry point that runs ALL jobs, so the external
+// cron endpoint (api-cron.ts POST_run) can call the same logic as the
+// in-process setInterval timers. Previously, POST_run had a partial inline
+// reimplementation that dropped 4 pieces of business logic (seat restoration
+// on expired releases, subscription-expiry notifications, monthly corporate
+// counter reset, outbox drain).
+export async function runAllJobs(): Promise<{
+  refunds: number;
+  expiredSubs: number;
+  expiredReleases: number;
+  outboxPending: number;
+  outboxProcessing: number;
+}> {
+  // 1. Drain the outbox (SMS/email/notification delivery).
+  await drainOutbox();
+
+  // 2. Process refund retries.
+  const refundResult = await processRefundRetries(50);
+
+  // 3. Expire stale subscriptions + seat releases (with full cascade:
+  //    seat restoration, notifications, etc.).
+  await expireStale();
+
+  // 4. Run hourly jobs (corporate monthly reset, subscription-expiry
+  //    warnings, retention cleanup, stale seat-claim timeout, trip
+  //    generation recovery, hard-delete stale users).
+  await hourlyJobs();
+
+  // Report status.
+  const pendingOutbox = await db.outboxEvent.count({ where: { status: 'pending' } });
+  const processingOutbox = await db.outboxEvent.count({ where: { status: 'processing' } });
+
+  return {
+    refunds: refundResult.processed,
+    expiredSubs: -1, // expireStale handles this internally; count not returned
+    expiredReleases: -1,
+    outboxPending: pendingOutbox,
+    outboxProcessing: processingOutbox,
+  };
+}
+
 async function drainOutbox(): Promise<void> {
   // P0-9: reaper — reset events that have been stuck in 'processing' for >15min.
   // Without this, a process crash mid-drain leaves events stranded forever.
@@ -87,6 +128,31 @@ async function drainOutbox(): Promise<void> {
           case 'email':
             const emailResult = await getEmailProvider().send(payload.email, payload.subject, payload.html || payload.body);
             if (!emailResult.ok) throw new Error(emailResult.error || 'Email send failed');
+            break;
+          case 'push':
+            // H2 FIX: deliver push notification via Expo Push API.
+            // Read the user's registered device tokens from the Setting table.
+            const deviceRows = await db.setting.findMany({
+              where: { key: { startsWith: `device:${payload.userId}:` } },
+              select: { value: true },
+            });
+            if (deviceRows.length === 0) break; // no registered devices — silent skip
+            const tokens = deviceRows.map(r => {
+              try { return JSON.parse(r.value).pushToken; } catch { return null; }
+            }).filter(Boolean);
+            if (tokens.length === 0) break;
+            // Send to Expo Push API.
+            const pushResponse = await fetch('https://exp.host/--/api/v2/push/send', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify(tokens.map((token: string) => ({
+                to: token,
+                title: payload.title,
+                body: payload.body,
+                data: { link: payload.link, type: payload.type },
+              }))),
+            });
+            if (!pushResponse.ok) throw new Error(`Expo Push API returned ${pushResponse.status}`);
             break;
           default:
             // Unknown channel — log + mark delivered so we don't retry forever.

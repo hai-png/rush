@@ -237,7 +237,8 @@ const ROUTES: RouteEntry[] = [
   r('GET', '/metrics', { requireAuth: true, requireRole: ['platform_admin'], exemptFromTosGate: true }, metrics.GET_metrics),
 
   r('POST', '/cron/run', { exemptFromTosGate: true }, cron.POST_run),
-  r('GET', '/cron', { exemptFromTosGate: true }, cron.GET_cron_jobs),
+  // S2 FIX: GET /cron requires admin auth (was public — exposed job routes + intervals).
+  r('GET', '/cron', { requireAuth: true, requireRole: ['platform_admin'], exemptFromTosGate: true }, cron.GET_cron_jobs),
 
   r('POST', '/payments/telebirr/inapp-checkout', { requireAuth: true }, telebirr.POST_inapp_checkout),
   r('POST', '/payments/telebirr/mandate/sign-url', { requireAuth: true }, telebirr.POST_mandate_sign_url),

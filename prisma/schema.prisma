@@ -593,7 +593,7 @@ model AuditLog {
 
 model OutboxEvent {
   id            String   @id @default(cuid())
-  channel       String   // notification | sms | email
+  channel       String   // notification | sms | email | push
   payload       String   // JSON
   status        String   @default("pending") // pending | processing | delivered | failed | dead
   attempts      Int      @default(0)

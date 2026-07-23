@@ -4,6 +4,7 @@ import { router } from 'expo-router';
 import { logout } from '../../src/lib/auth';
 import { getSettings, saveSettings, getBiometricsEnabled, setBiometricsEnabled as persistBiometrics } from '../../src/lib/settings-store';
 import { registerForPushNotifications } from '../../src/lib/push';
+import { api } from '../../src/lib/api';
 import { colors } from '../../src/theme/colors';
 
 export default function SettingsScreen() {
@@ -41,15 +42,18 @@ export default function SettingsScreen() {
 
   async function toggleNotifications(value: boolean) {
     setNotifEnabled(value);
+    // H4 FIX: persist to the backend API (was only saving to local AsyncStorage).
+    try { await api.patch('/notifications/preferences', { notificationEnabled: value }); } catch {}
     await saveSettings({ notificationEnabled: value });
     if (value) {
-      // Re-register for push notifications.
       registerForPushNotifications().catch(() => {});
     }
   }
 
   async function toggleEmail(value: boolean) {
     setEmailEnabled(value);
+    // H4 FIX: persist to the backend API.
+    try { await api.patch('/notifications/preferences', { emailEnabled: value }); } catch {}
     await saveSettings({ emailEnabled: value });
   }
 

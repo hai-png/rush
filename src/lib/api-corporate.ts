@@ -88,29 +88,29 @@ async function generateUniqueCode(): Promise<string> {
   throw new Error('Failed to generate unique corporate code');
 }
 
-// P1-34 / API-003: resolveCorporate now accepts an optional corporateId
-// (from query params) so platform_admin can target a specific corporate.
-// Previously it returned findFirst({}) — an arbitrary corporate — so admin
-// actions on /corporate/members/:id etc. would 404 for any corp other than
-// the first.
+// C2 FIX: platform_admin MUST supply a corporateId — no more silent
+// findFirst({}) fallback that operates on an arbitrary corporate.
+// This prevents cross-tenant data bugs when multiple corporates exist.
 async function resolveCorporate(session: any, corporateId?: string) {
   if (session.role === 'platform_admin') {
-    if (corporateId) {
-      return db.corporate.findUnique({ where: { id: corporateId } });
+    if (!corporateId) {
+      throw new BadRequestError('platform_admin must supply ?corporateId= query parameter to target a specific corporate');
     }
-    // No corporateId specified — fall back to the first corporate (legacy behavior).
-    return db.corporate.findFirst({});
+    return db.corporate.findUnique({ where: { id: corporateId } });
   }
   // corporate_admin → their own corporate (ignore any corporateId param).
   return db.corporate.findUnique({ where: { adminUserId: session.id } });
 }
 
-export async function GET_current({ session }: any) {
+export async function GET_current({ session, query }: any) {
   if (session.role !== 'corporate_admin' && session.role !== 'platform_admin') {
     throw new ForbiddenError('Corporate admin only');
   }
-  const corp = await db.corporate.findFirst({
-    where: session.role === 'platform_admin' ? {} : { adminUserId: session.id },
+  // C2 FIX: use resolveCorporate so platform_admin must supply ?corporateId=
+  const baseCorp = await resolveCorporate(session, query?.corporateId);
+  if (!baseCorp) throw new NotFoundError('No corporate found');
+  const corp = await db.corporate.findUnique({
+    where: { id: baseCorp.id },
     include: {
       members: { include: { user: { select: { id: true, name: true, phone: true, email: true } } }, orderBy: { createdAt: 'desc' } },
       invites: { orderBy: { createdAt: 'desc' }, take: 20 },

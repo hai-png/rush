@@ -1,9 +1,7 @@
 import { db } from '@/lib/db';
 
-// P2 cleanup: removed dead channel types 'refund' | 'audit' | 'webhook'.
-// Only 'notification' (no-op for retry observability), 'sms', and 'email'
-// are actually produced + consumed by the scheduler's drainOutbox switch.
-export type Channel = 'notification' | 'sms' | 'email';
+// H2 FIX: added 'push' channel for Expo push notification delivery.
+export type Channel = 'notification' | 'sms' | 'email' | 'push';
 
 export async function enqueue(channel: Channel, payload: unknown): Promise<void> {
   await db.outboxEvent.create({
@@ -20,4 +18,7 @@ export async function enqueueNotification(notif: {
   // For notifications, write the notification row directly AND enqueue an
   await db.notification.create({ data: notif });
   await enqueue('notification', notif);
+  // H2 FIX: also enqueue a push notification delivery event so the outbox
+  // can send it to the user's registered device(s) via Expo Push API.
+  await enqueue('push', notif);
 }

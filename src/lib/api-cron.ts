@@ -1,8 +1,6 @@
 import { NextResponse } from 'next/server';
-import { processRefundRetries } from '@/lib/payment-service';
-import { db } from '@/lib/db';
 import { toErrorEnvelope } from '@/lib/errors';
-import { ensureSchedulerStarted } from '@/lib/scheduler';
+import { ensureSchedulerStarted, runAllJobs } from '@/lib/scheduler';
 import { loadEnv } from '@/lib/env';
 import { logger } from '@/lib/logger';
 import { timingSafeEqual } from 'node:crypto';
@@ -19,31 +17,22 @@ export async function POST_run(ctx: any) {
     }
     ensureSchedulerStarted();
 
-    const refundResult = await processRefundRetries(20);
-
-    const expiredSubs = await db.subscription.updateMany({
-      where: { status: 'active', endDate: { lt: new Date() } },
-      data: { status: 'expired' },
-    });
-
-    const expiredReleases = await db.seatRelease.updateMany({
-      where: { status: 'open', expiresAt: { lt: new Date() } },
-      data: { status: 'expired' },
-    });
-
-    const pendingOutbox = await db.outboxEvent.count({ where: { status: 'pending' } });
-    const processingOutbox = await db.outboxEvent.count({ where: { status: 'processing' } });
+    // C3 FIX: call the SAME functions the scheduler uses, not a partial
+    // inline reimplementation. Previously this endpoint dropped 4 pieces of
+    // business logic: seat restoration on expired releases, subscription-expiry
+    // notifications, monthly corporate counter reset, and outbox drain.
+    const result = await runAllJobs();
 
     return NextResponse.json({
       data: {
-        refunds: refundResult,
-        expiredSubs: expiredSubs.count,
-        expiredReleases: expiredReleases.count,
-        outbox: { pending: pendingOutbox, processing: processingOutbox },
+        refunds: result.refunds,
+        outbox: { pending: result.outboxPending, processing: result.outboxProcessing },
         scheduler: 'running',
+        message: 'All jobs executed (expire + cascade + outbox + hourly)',
       },
     });
   } catch (err) {
+    logger.error({ err: (err as Error).message }, '[cron] runAllJobs failed');
     const { status, body } = toErrorEnvelope(err, requestId);
     return NextResponse.json(body, { status });
   }
