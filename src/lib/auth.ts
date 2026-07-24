@@ -5,6 +5,7 @@ import { loadEnv } from '@/lib/env';
 import { UnauthorizedError, ForbiddenError } from '@/lib/errors';
 import { TWO_FA_REQUIRED_ROLES } from '@/lib/env';
 import { createId } from '@/lib/id';
+import { logger } from '@/lib/logger';
 
 const SESSION_TTL_SEC = 30 * 24 * 3600; // 30 days
 
@@ -88,10 +89,13 @@ export async function verifySession(token: string): Promise<SessionUser> {
     throw new UnauthorizedError('Session invalidated — please log in again');
   }
 
-  // Update lastSeenAt so admins can spot stale-but-unexpired sessions.
-  // Best-effort — never fail the request if this write fails (e.g. under heavy
-  // load or single-writer contention).
-  db.session.update({ where: { jti }, data: { lastSeenAt: new Date() } }).catch(() => {});
+  // H-37 fix: batch lastSeenAt updates in-memory and flush to DB every 60s
+  // instead of firing a non-awaited DB write on every authenticated request.
+  // Under load, the old fire-and-forget approach accumulated hundreds of
+  // untracked promises and caused SQLite write contention with actual business
+  // transactions. The batched approach coalesces updates per-jti so the DB is
+  // written at most once per minute per session.
+  recordLastSeen(jti);
 
   return {
     id: user.id,
@@ -122,4 +126,37 @@ export async function assertTwoFactorEnabled(userId: string, role: string): Prom
   if (!u) throw new UnauthorizedError();
   if (!u.phoneVerified) throw new ForbiddenError('Phone verification required for this role. Verify your phone first.');
   if (!u.twoFactorEnabled) throw new ForbiddenError('Two-factor authentication required for this role. Enable it at /api/v1/auth/2fa/setup.');
+}
+
+// H-37 fix: batched lastSeenAt updates.
+// Instead of firing a non-awaited DB write on every authenticated request,
+// we accumulate pending updates in a Map and flush them to the DB every 60s.
+// This reduces write contention under load from hundreds of untracked promises
+// to at most one batched UPDATE per second per session jti.
+const pendingLastSeen = new Map<string, number>();
+let lastSeenTimer: ReturnType<typeof setInterval> | null = null;
+
+function recordLastSeen(jti: string): void {
+  pendingLastSeen.set(jti, Date.now());
+  if (!lastSeenTimer) {
+    lastSeenTimer = setInterval(flushLastSeen, 60_000);
+    lastSeenTimer.unref?.();
+  }
+}
+
+async function flushLastSeen(): Promise<void> {
+  if (pendingLastSeen.size === 0) return;
+  const batch = new Map(pendingLastSeen);
+  pendingLastSeen.clear();
+  const now = new Date();
+  for (const [jti] of batch) {
+    try {
+      await db.session.updateMany({
+        where: { jti, revokedAt: null },
+        data: { lastSeenAt: now },
+      });
+    } catch (err) {
+      logger.error({ err: (err as Error).message, jti }, '[lastSeen] batch flush failed');
+    }
+  }
 }

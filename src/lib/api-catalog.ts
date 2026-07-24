@@ -1,3 +1,8 @@
+// H-40 fix: add cursor-based pagination to public catalog endpoints.
+// Previously, GET_routes had no limit and GET_trips only had a bare `take: 50`
+// without cursor/offset, causing unbounded response payloads and full table scans
+// under scale. Now both endpoints support ?cursor= and ?limit= query params.
+
 import { db } from '@/lib/db';
 
 export async function GET_plans() {
@@ -8,9 +13,18 @@ export async function GET_plans() {
   return { data: plans };
 }
 
-export async function GET_routes() {
-  const routes = await db.route.findMany({ where: { isActive: true }, orderBy: { origin: 'asc' } });
-  return { data: routes };
+export async function GET_routes({ query }: any) {
+  const { parsePagination, paginatedResponse } = await import('@/lib/pagination');
+  const page = parsePagination(query);
+  const [routes, total] = await Promise.all([
+    db.route.findMany({
+      where: { isActive: true },
+      orderBy: { origin: 'asc' },
+      ...page.findManyArgs,
+    }),
+    db.route.count({ where: { isActive: true } }),
+  ]);
+  return paginatedResponse(routes, total, page);
 }
 
 export async function GET_shuttles() {
@@ -22,17 +36,23 @@ export async function GET_shuttles() {
   return { data: shuttles };
 }
 
-export async function GET_trips() {
-  const trips = await db.trip.findMany({
-    where: { status: 'scheduled', departureAt: { gt: new Date() } },
-    include: {
-      route: true,
-      shuttle: { include: { contractor: { select: { name: true } } } },
-    },
-    orderBy: { departureAt: 'asc' },
-    take: 50,
-  });
-  return { data: trips };
+export async function GET_trips({ query }: any) {
+  const { parsePagination, paginatedResponse } = await import('@/lib/pagination');
+  const page = parsePagination(query);
+  const where = { status: 'scheduled', departureAt: { gt: new Date() } };
+  const [trips, total] = await Promise.all([
+    db.trip.findMany({
+      where,
+      include: {
+        route: true,
+        shuttle: { include: { contractor: { select: { name: true } } } },
+      },
+      orderBy: { departureAt: 'asc' },
+      ...page.findManyArgs,
+    }),
+    db.trip.count({ where }),
+  ]);
+  return paginatedResponse(trips, total, page);
 }
 
 export async function GET_faqs() {

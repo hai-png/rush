@@ -3,10 +3,25 @@ import { NextRequest, NextResponse } from 'next/server';
 import { findRoute } from '@/lib/api-routes';
 import { api, csrfCheck, rateLimitCheck, tosGate, readCookie, clientIp, SESSION_COOKIE } from '@/lib/api';
 import { verifySession } from '@/lib/auth';
-import { NotFoundError, toErrorEnvelope } from '@/lib/errors';
+import { NotFoundError, BadRequestError, toErrorEnvelope } from '@/lib/errors';
 import { ensureSchedulerStarted } from '@/lib/scheduler';
 
 type Ctx = { params: Promise<{ route?: string[] }> };
+
+// H-38 fix: validate path params before they reach handlers.
+// Path parameters come from URL segments and are not validated by Zod
+// (which only handles request bodies). Malformed params (extremely long,
+// unexpected characters) are rejected here with a 400 JSON envelope.
+const MAX_PATH_PARAM_LENGTH = 200;
+const PATH_PARAM_PATTERN = /^[a-zA-Z0-9_\-:.+=@%]+$/;
+function validatePathParam(value: string, name: string): void {
+  if (value.length > MAX_PATH_PARAM_LENGTH) {
+    throw new BadRequestError(`Path parameter ${name} exceeds maximum length of ${MAX_PATH_PARAM_LENGTH}`);
+  }
+  if (!PATH_PARAM_PATTERN.test(value)) {
+    throw new BadRequestError(`Path parameter ${name} contains invalid characters`);
+  }
+}
 
 function handle(method: string) {
   return async (req: NextRequest, ctx: Ctx): Promise<NextResponse> => {
@@ -25,10 +40,16 @@ function handle(method: string) {
       return handleRaw(req, ctx, found);
     }
 
+    // H-38 fix: validate path params before passing to handlers.
+    const mergedParams = { ...p, ...found.params };
+    for (const [key, val] of Object.entries(mergedParams)) {
+      if (typeof val === 'string') validatePathParam(val, key);
+    }
+
     const wrapped = api(found.entry.options, async (innerCtx) => {
       return found.entry.handler({
         ...innerCtx,
-        params: { ...p, ...found.params },
+        params: mergedParams,
       });
     });
 
@@ -83,7 +104,13 @@ async function handleRaw(
     // ── TOS gate (shared with api()) ────────────────────────────────────
     if (!found.entry.options.exemptFromTosGate) tosGate(req.nextUrl.pathname, session);
 
-    const result = await found.entry.handler(req, session, { ...p, ...found.params }, { requestId, ipAddress: ip, userAgent: ua });
+    // H-38 fix: validate path params for raw handlers too.
+    const mergedParams = { ...p, ...found.params };
+    for (const [key, val] of Object.entries(mergedParams)) {
+      if (typeof val === 'string') validatePathParam(val, key);
+    }
+
+    const result = await found.entry.handler(req, session, mergedParams, { requestId, ipAddress: ip, userAgent: ua });
     if (result instanceof NextResponse) {
       result.headers.set('x-request-id', requestId);
       return result;

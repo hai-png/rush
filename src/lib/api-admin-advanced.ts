@@ -12,7 +12,7 @@
 import { db } from '@/lib/db';
 import { z } from 'zod';
 import { NotFoundError, BadRequestError, ForbiddenError, ConflictError, UnauthorizedError } from '@/lib/errors';
-import { audit } from '@/lib/audit';
+import { audit, auditTx } from '@/lib/audit';
 import { issueSession, assertTwoFactorEnabled } from '@/lib/auth';
 import { createId } from '@/lib/id';
 import { logger } from '@/lib/logger';
@@ -53,39 +53,40 @@ export async function PATCH_user({ session, params, body, ipAddress, userAgent }
         throw new BadRequestError('Cannot suspend the last active platform admin');
       }
     }
-    await db.user.update({ where: { id: params.id }, data: { isActive: false, tokenVersion: { increment: 1 } } });
-    // Log session-revocation failures instead of silently swallowing. A
-    // failed revoke leaves the suspended user's sessions live — security
-    // needs to know so they can investigate.
-    await db.session.updateMany({ where: { userId: params.id, revokedAt: null }, data: { revokedAt: new Date() } })
-      .catch((err: unknown) => logger.error({ err: (err as Error).message, userId: params.id }, '[admin.suspend] session revoke failed'));
-    await audit({ actorId: session.id, action: 'user.suspended', entityType: 'user', entityId: params.id, ipAddress, userAgent });
+    // H-12 fix: wrap security-critical actions + audit in a single transaction
+    // so a failed audit write rolls back the operation. Previously, audit was
+    // called after the main tx committed — if it failed, the caller saw a 500
+    // but the operation already succeeded, potentially causing double-application.
+    await db.$transaction(async (tx) => {
+      await tx.user.update({ where: { id: params.id }, data: { isActive: false, tokenVersion: { increment: 1 } } });
+      await tx.session.updateMany({ where: { userId: params.id, revokedAt: null }, data: { revokedAt: new Date() } });
+      await auditTx(tx, { actorId: session.id, action: 'user.suspended', entityType: 'user', entityId: params.id, ipAddress, userAgent });
+    });
   } else if (input.action === 'reactivate') {
-    await db.user.update({ where: { id: params.id }, data: { isActive: true, deletedAt: null } });
-    await audit({ actorId: session.id, action: 'user.reactivated', entityType: 'user', entityId: params.id, ipAddress, userAgent });
+    await db.$transaction(async (tx) => {
+      await tx.user.update({ where: { id: params.id }, data: { isActive: true, deletedAt: null } });
+      await auditTx(tx, { actorId: session.id, action: 'user.reactivated', entityType: 'user', entityId: params.id, ipAddress, userAgent });
+    });
   } else if (input.action === 'change_role') {
     if (!input.role) throw new BadRequestError('role is required for change_role');
     if (input.role === 'corporate_admin' || input.role === 'platform_admin') {
       await assertTwoFactorEnabled(params.id, input.role);
     }
-    // CAS-guarded transaction for the last-admin check + demotion. Two
-    // concurrent demotion requests could both pass the count check and demote
-    // the last platform_admin. The count check + update are atomic.
-    if (input.role !== 'platform_admin') {
-      const target = await db.user.findUnique({ where: { id: params.id }, select: { role: true } });
-      if (target?.role === 'platform_admin') {
-        const adminCount = await db.user.count({ where: { role: 'platform_admin', isActive: true } });
-        if (adminCount <= 1) {
-          throw new BadRequestError('Cannot demote the last platform admin');
+    // H-12 fix: wrap change_role + audit in a single transaction.
+    await db.$transaction(async (tx) => {
+      if (input.role !== 'platform_admin') {
+        const target = await tx.user.findUnique({ where: { id: params.id }, select: { role: true } });
+        if (target?.role === 'platform_admin') {
+          const adminCount = await tx.user.count({ where: { role: 'platform_admin', isActive: true } });
+          if (adminCount <= 1) {
+            throw new BadRequestError('Cannot demote the last platform admin');
+          }
         }
       }
-    }
-    await db.user.update({ where: { id: params.id }, data: { role: input.role, tokenVersion: { increment: 1 } } });
-    // Revoke existing sessions — the new role may have different access.
-    // Log failures instead of silently swallowing.
-    await db.session.updateMany({ where: { userId: params.id, revokedAt: null }, data: { revokedAt: new Date() } })
-      .catch((err: unknown) => logger.error({ err: (err as Error).message, userId: params.id }, '[admin.role_change] session revoke failed'));
-    await audit({ actorId: session.id, action: 'user.role_changed', entityType: 'user', entityId: params.id, after: { role: input.role }, ipAddress, userAgent });
+      await tx.user.update({ where: { id: params.id }, data: { role: input.role, tokenVersion: { increment: 1 } } });
+      await tx.session.updateMany({ where: { userId: params.id, revokedAt: null }, data: { revokedAt: new Date() } });
+      await auditTx(tx, { actorId: session.id, action: 'user.role_changed', entityType: 'user', entityId: params.id, after: { role: input.role }, ipAddress, userAgent });
+    });
   } else {
     throw new BadRequestError('Unknown action');
   }

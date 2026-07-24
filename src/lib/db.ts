@@ -12,6 +12,29 @@ export const db =
     log: process.env.NODE_ENV === 'development' ? ['warn', 'error'] : ['error'],
   })
 
+// C-14 fix: warn when running SQLite in production. The deployment target is
+// Postgres — SQLite is only suitable for local dev. In production, use
+// DATABASE_PROVIDER=postgres and schema.postgres.prisma (selected via
+// scripts/select-schema.sh). Connection pooling (PgBouncer) is required for
+// multi-instance deployments.
+async function checkProductionDb(): Promise<void> {
+  if (process.env.NODE_ENV !== 'production') return;
+  const url = process.env.DATABASE_URL ?? '';
+  if (url.startsWith('file:')) {
+    logger.warn('[db] Running SQLite in production! Use Postgres + DATABASE_PROVIDER=postgres for production. ' +
+      'Set DATABASE_URL to a postgresql:// connection string and re-run scripts/select-schema.sh.');
+  } else if (!url.startsWith('postgresql://') && !url.startsWith('postgres://')) {
+    logger.warn(`[db] Unrecognized DATABASE_URL scheme: ${url.split(':')[0]}:// — expected postgresql://`);
+  }
+  // Remind about connection pooling for Postgres.
+  if (url.startsWith('postgresql://') || url.startsWith('postgres://')) {
+    if (!process.env.DATABASE_POOL_URL) {
+      logger.info('[db] Postgres detected. For multi-instance deployments, set DATABASE_POOL_URL (PgBouncer) ' +
+        'and configure the pooler connection string for Prisma.');
+    }
+  }
+}
+
 // Apply SQLite performance/safety PRAGMAs once per process.
 // WAL mode allows concurrent readers during writes (critical for any real load).
 // busy_timeout makes writers wait up to 5s instead of failing immediately with SQLITE_BUSY.
@@ -41,5 +64,6 @@ async function applySqlitePragmas(): Promise<void> {
 
 // Fire-and-forget; the first query will block on the pragma if needed.
 applySqlitePragmas().catch(() => {})
+checkProductionDb().catch(() => {})
 
 if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = db

@@ -162,18 +162,11 @@ export async function rateLimitCheck(
     const normPath = normalizePathForRateLimit(path);
     const key = `rl:${normPath}:${rule.pattern.source}:${keySuffix}`;
     const now = Date.now();
-    const bucket = rateBuckets.get(key);
-    if (!bucket || bucket.expiresAt < now) {
-      rateBuckets.set(key, { count: 1, expiresAt: now + rule.windowSec * 1000 });
-      info = { limit: rule.limit, remaining: rule.limit - 1, resetAt: Math.ceil((now + rule.windowSec * 1000) / 1000) };
-    } else {
-      bucket.count++;
-      const remaining = Math.max(0, rule.limit - bucket.count);
-      info = { limit: rule.limit, remaining, resetAt: Math.ceil(bucket.expiresAt / 1000) };
-      if (bucket.count > rule.limit) {
-        const ttl = Math.ceil((bucket.expiresAt - now) / 1000);
-        if (ttl > maxRetry) maxRetry = ttl;
-      }
+    // H-22 fix: try Redis-backed rate limit when available (distributed).
+    info = await rateLimitBucket(key, rule.limit, rule.windowSec, now);
+    if (info && info.remaining < 0) {
+      const ttl = info.resetAt - Math.ceil(now / 1000);
+      if (ttl > maxRetry) maxRetry = ttl;
     }
   }
   if (maxRetry > 0) throw new RateLimitError(maxRetry);
@@ -191,20 +184,43 @@ export async function rateLimitCheck(
     const normPath = normalizePathForRateLimit(path);
     const key = `rl:${normPath}:${keySuffix}`;
     const now = Date.now();
-    const bucket = rateBuckets.get(key);
-    if (!bucket || bucket.expiresAt < now) {
-      rateBuckets.set(key, { count: 1, expiresAt: now + windowSec * 1000 });
-      info = { limit, remaining: limit - 1, resetAt: Math.ceil((now + windowSec * 1000) / 1000) };
-    } else {
-      bucket.count++;
-      const remaining = Math.max(0, limit - bucket.count);
-      info = { limit, remaining, resetAt: Math.ceil(bucket.expiresAt / 1000) };
-      if (bucket.count > limit) {
-        throw new RateLimitError(Math.ceil((bucket.expiresAt - now) / 1000));
-      }
+    info = await rateLimitBucket(key, limit, windowSec, now);
+    if (info && info.remaining < 0) {
+      throw new RateLimitError(info.resetAt - Math.ceil(now / 1000));
     }
   }
   return info;
+}
+
+// Shared rate-limit bucket: tries Redis first (distributed), falls back to
+// in-memory (single-instance). This ensures multi-instance deployments with
+// REDIS_URL set get correct cross-instance throttling.
+async function rateLimitBucket(
+  key: string,
+  limit: number,
+  windowSec: number,
+  now: number,
+): Promise<RateLimitInfo | null> {
+  const { redisRateLimit } = await import('@/lib/redis');
+  const redisResult = await redisRateLimit(key, limit, windowSec);
+  if (redisResult) {
+    const resetAt = redisResult.allowed
+      ? Math.ceil((now + windowSec * 1000) / 1000)
+      : Math.ceil((now + redisResult.retryAfter * 1000) / 1000);
+    return {
+      limit,
+      remaining: redisResult.allowed ? Math.max(0, limit - redisResult.count) : -1,
+      resetAt,
+    };
+  }
+  const bucket = rateBuckets.get(key);
+  if (!bucket || bucket.expiresAt < now) {
+    rateBuckets.set(key, { count: 1, expiresAt: now + windowSec * 1000 });
+    return { limit, remaining: limit - 1, resetAt: Math.ceil((now + windowSec * 1000) / 1000) };
+  }
+  bucket.count++;
+  const remaining = Math.max(0, limit - bucket.count);
+  return { limit, remaining, resetAt: Math.ceil(bucket.expiresAt / 1000) };
 }
 
 setInterval(() => {
