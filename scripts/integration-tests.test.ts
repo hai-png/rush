@@ -15,7 +15,7 @@ const db = new PrismaClient();
 const TIMEOUT = 30000;
 
 beforeAll(async () => {
-  spawnSync('bunx', ['prisma', 'db', 'push', '--skip-generate', '--schema', 'prisma/schema.prisma'], {
+  spawnSync('bunx', ['prisma', 'db', 'push', '--skip-generate', '--schema', 'prisma/schema.sqlite.prisma'], {
     env: { ...process.env, DATABASE_URL: `file:${TEST_DB}` },
     stdio: 'pipe',
   }, TIMEOUT);
