@@ -403,7 +403,7 @@ export async function POST_change_payment_method({ session, params, body, ipAddr
     if (pendingPayments.length > 0) {
       await tx.payment.updateMany({
         where: { id: { in: pendingPayments.map(p => p.id) }, status: 'pending' },
-        data: { status: 'cancelled' },
+        data: { status: 'cancelled' as const },
       });
     }
     await tx.payment.create({

@@ -3,14 +3,13 @@ import { db } from '@/lib/db';
 import { Money } from '@/lib/money';
 import { BadRequestError, NotFoundError } from '@/lib/errors';
 import { getPaymentProvider } from '@/lib/payments';
-import { enqueueNotification } from '@/lib/outbox';
+import { enqueueNotificationTx } from '@/lib/outbox';
 import { audit } from '@/lib/audit';
 import { createId } from '@/lib/id';
 import { Prisma } from '@prisma/client';
 import { logger } from '@/lib/logger';
 
 export async function settlePayment(reference: string, reportedAmount: Money | undefined, outRequestNo: string, tradeStatus: string, rawPayload: unknown): Promise<boolean> {
-  // the tx commits — calling them inside would deadlock SQLite's single writer.
   const sideEffects: Array<() => Promise<void>> = [];
 
   const result = await db.$transaction(async (tx) => {
@@ -73,17 +72,14 @@ export async function settlePayment(reference: string, reportedAmount: Money | u
           where: { id: sub.id },
           data: { status: 'active' },
         });
-        sideEffects.push(async () => {
-          await enqueueNotification({
-            userId: sub.userId,
-            type: 'subscription_activated',
-            title: 'Subscription activated',
-            body: `Your subscription is now active until ${new Date(sub.endDate).toLocaleDateString()}.`,
-            link: '/dashboard/rider',
-          });
+        await enqueueNotificationTx(tx, {
+          userId: sub.userId,
+          type: 'subscription_activated',
+          title: 'Subscription activated',
+          body: `Your subscription is now active until ${new Date(sub.endDate).toLocaleDateString()}.`,
+          link: '/dashboard/rider',
         });
       }
-      // CRITICAL FIX (C-1): Apply pending renewal extension atomically when
       if (sub && sub.status === 'active' && (sub.pendingEndDate || sub.pendingRidesReset)) {
         const updateData: any = { pendingEndDate: null, pendingRidesReset: false };
         if (sub.pendingEndDate) updateData.endDate = sub.pendingEndDate;
@@ -92,16 +88,14 @@ export async function settlePayment(reference: string, reportedAmount: Money | u
           where: { id: sub.id },
           data: updateData,
         });
-        sideEffects.push(async () => {
-          await enqueueNotification({
-            userId: sub.userId,
-            type: 'subscription_activated',
-            title: 'Subscription renewed',
-            body: sub.pendingEndDate
-              ? `Your subscription has been renewed until ${new Date(sub.pendingEndDate).toLocaleDateString()}.`
-              : 'Your subscription has been renewed.',
-            link: '/dashboard/rider',
-          });
+        await enqueueNotificationTx(tx, {
+          userId: sub.userId,
+          type: 'subscription_activated',
+          title: 'Subscription renewed',
+          body: sub.pendingEndDate
+            ? `Your subscription has been renewed until ${new Date(sub.pendingEndDate).toLocaleDateString()}.`
+            : 'Your subscription has been renewed.',
+          link: '/dashboard/rider',
         });
       }
     }
@@ -112,14 +106,14 @@ export async function settlePayment(reference: string, reportedAmount: Money | u
     const userId = p.userId;
     const amountCents = p.amountCents;
     const paymentId = p.id;
+    await enqueueNotificationTx(tx, {
+      userId,
+      type: 'payment_received',
+      title: 'Payment received',
+      body: `Your payment of ${Money.fromCents(amountCents).toString()} was received.`,
+      link: '/dashboard/rider',
+    });
     sideEffects.push(async () => {
-      await enqueueNotification({
-        userId,
-        type: 'payment_received',
-        title: 'Payment received',
-        body: `Your payment of ${Money.fromCents(amountCents).toString()} was received.`,
-        link: '/dashboard/rider',
-      });
       await audit({
         actorId: userId,
         action: 'payment.settled',
@@ -138,8 +132,6 @@ export async function settlePayment(reference: string, reportedAmount: Money | u
 }
 
 export async function failPayment(reference: string, reasonRaw: unknown, outRequestNo: string, tradeStatus: string, rawPayload: unknown): Promise<boolean> {
-  const sideEffects: Array<() => Promise<void>> = [];
-
   const result = await db.$transaction(async (tx) => {
     try {
       await tx.telebirrNotifyEvent.create({
@@ -164,26 +156,19 @@ export async function failPayment(reference: string, reasonRaw: unknown, outRequ
       if (claim) {
         const release = await tx.seatRelease.findUnique({ where: { id: claim.seatReleaseId } });
         await tx.seatClaim.update({ where: { id: p.seatClaimId }, data: { status: 'refunded' } });
-        // CAS on status:'claimed' so concurrent paths can't double-open.
         await tx.seatRelease.updateMany({
           where: { id: claim.seatReleaseId, status: 'claimed' },
           data: { status: 'open' },
         });
-        // CRITICAL FIX (H-2/H-3): Do NOT restore the seller's ride here.
       }
     }
 
     const userId = p.userId;
     const amountCents = p.amountCents;
-    sideEffects.push(async () => {
-      await enqueueNotification({ userId, type: 'payment_failed', title: 'Payment failed', body: `Your payment of ${Money.fromCents(amountCents).toString()} failed.` });
-    });
+    await enqueueNotificationTx(tx, { userId, type: 'payment_failed', title: 'Payment failed', body: `Your payment of ${Money.fromCents(amountCents).toString()} failed.` });
     return true;
   });
 
-  for (const fx of sideEffects) {
-    fx().catch(e => logger.error({ err: (e as Error).message }, '[failPayment] side effect failed'));
-  }
   return result;
 }
 
@@ -361,9 +346,7 @@ export async function processRefundRetries(limit = 10): Promise<{ processed: num
         });
         const userId = fresh.userId;
         const refundAmount = retry.amountCents;
-        sideEffects.push(async () => {
-          await enqueueNotification({ userId, type: 'refund_completed', title: 'Refund completed', body: `Your refund of ${Money.fromCents(refundAmount).toString()} has been processed.` });
-        });
+        await enqueueNotificationTx(tx, { userId, type: 'refund_completed', title: 'Refund completed', body: `Your refund of ${Money.fromCents(refundAmount).toString()} has been processed.` });
         sideEffects.push(async () => {
           const { audit } = await import('@/lib/audit');
           await audit({ action: 'refund.completed', entityType: 'payment', entityId: payment.id, after: { refundRequestNo: retry.refundRequestNo, amountCents: retry.amountCents } });
@@ -372,10 +355,10 @@ export async function processRefundRetries(limit = 10): Promise<{ processed: num
         const attempts = retry.attempts + 1;
         if (result.status === 'failed' && result.permanent) {
           await tx.refundRetry.update({ where: { id: retry.id }, data: { status: 'permanent_failure', attempts, lastError: result.error } });
-          sideEffects.push(async () => { await enqueueNotification({ userId: payment.userId, type: 'refund_failed', title: 'Refund failed', body: 'Your refund could not be processed.' }); });
+          await enqueueNotificationTx(tx, { userId: payment.userId, type: 'refund_failed', title: 'Refund failed', body: 'Your refund could not be processed.' });
         } else if (attempts >= retry.maxAttempts) {
           await tx.refundRetry.update({ where: { id: retry.id }, data: { status: 'permanent_failure', attempts } });
-          sideEffects.push(async () => { await enqueueNotification({ userId: payment.userId, type: 'refund_failed', title: 'Refund failed', body: 'Your refund could not be processed after multiple attempts.' }); });
+          await enqueueNotificationTx(tx, { userId: payment.userId, type: 'refund_failed', title: 'Refund failed', body: 'Your refund could not be processed after multiple attempts.' });
         } else {
           const backoffMin = BACKOFF_MIN[Math.min(attempts - 1, BACKOFF_MIN.length - 1)];
           await tx.refundRetry.update({

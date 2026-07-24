@@ -1,5 +1,5 @@
 // Addis Ride — clean reimplementation. Single source of truth.
-// SQLite backend; all invariants enforced in app code (no DB triggers).
+// PostgreSQL backend with native enums for status fields.
 // Money is integer cents (1 ETB = 100 cents) to avoid Decimal/float issues.
 
 generator client {
@@ -11,13 +11,191 @@ datasource db {
   url      = env("DATABASE_URL")
 }
 
+enum UserRole {
+  rider
+  contractor
+  corporate_admin
+  platform_admin
+}
+
+enum VerificationStatus {
+  unverified
+  pending
+  verified
+  rejected
+}
+
+enum ApprovalStatus {
+  pending
+  approved
+  rejected
+}
+
+enum OtpPurpose {
+  signup_verification
+  password_reset
+  phone_change
+  phone_change_current
+}
+
+enum TripStatus {
+  scheduled
+  in_transit
+  completed
+  cancelled
+}
+
+enum TripWindow {
+  morning
+  evening
+}
+
+enum VehicleType {
+  coaster
+  minibus
+  van
+  sedan
+}
+
+enum AssignmentStatus {
+  assigned
+  accepted
+  active
+  completed
+  cancelled
+}
+
+enum SubscriptionStatus {
+  pending_payment
+  active
+  expired
+  cancelled
+}
+
+enum PaymentMethod {
+  telebirr
+  cbe
+  cash
+}
+
+enum PaymentStatus {
+  pending
+  completed
+  failed
+  refunded
+  partially_refunded
+  cancelled
+}
+
+enum RefundRetryStatus {
+  pending
+  processing
+  succeeded
+  failed
+  permanent_failure
+}
+
+enum SeatReleaseStatus {
+  open
+  claimed
+  expired
+  cancelled
+}
+
+enum SeatClaimStatus {
+  pending
+  confirmed
+  used
+  no_show
+  refunded
+}
+
+enum RideStatus {
+  booked
+  boarded
+  completed
+  no_show
+  cancelled
+  released
+}
+
+enum TicketCategory {
+  general
+  billing
+  route
+  shuttle
+  account
+  corporate
+  other
+}
+
+enum TicketPriority {
+  low
+  normal
+  high
+  urgent
+}
+
+enum TicketStatus {
+  open
+  in_progress
+  resolved
+  closed
+}
+
+enum OutboxChannel {
+  notification
+  sms
+  email
+  push
+}
+
+enum OutboxStatus {
+  pending
+  processing
+  delivered
+  failed
+  dead
+}
+
+enum MandateStatus {
+  pending
+  signed
+  cancelled
+  expired
+}
+
+enum InvoiceStatus {
+  draft
+  issued
+  paid
+  void
+}
+
+enum ScanStatus {
+  pending
+  clean
+  infected
+  error
+}
+
+enum DocType {
+  registration
+  insurance
+  inspection
+}
+
+enum Currency {
+  ETB
+}
+
 model User {
   id                  String    @id @default(cuid())
   phone               String    @unique
   email               String?
   passwordHash        String
   name                String
-  role                String    @default("rider") // rider | contractor | corporate_admin | platform_admin
+  role                UserRole    @default(rider)
   phoneVerified       Boolean   @default(false)
   isActive            Boolean   @default(true)
   deletedAt           DateTime?
@@ -81,7 +259,7 @@ model ContractorProfile {
   licenseNumber      String    @unique
   experienceYears    Int       @default(0)
   rating             Float     @default(5.0)
-  verificationStatus String    @default("unverified") // unverified | pending | verified | rejected
+  verificationStatus VerificationStatus @default(unverified)
   verificationReason String?
   verifiedById       String?
   verifiedBy         User?     @relation("VerifiedBy", fields: [verifiedById], references: [id], onDelete: SetNull)
@@ -122,7 +300,7 @@ model CorporateMember {
   userId             String
   user               User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   employeeId         String
-  approvalStatus     String    @default("pending") // pending | approved | rejected
+  approvalStatus     ApprovalStatus @default(pending)
   ridesUsedThisMonth Int       @default(0)
   lastResetAt        DateTime  @default(now())
   isActive           Boolean   @default(true)
@@ -157,7 +335,7 @@ model Session {
 model OtpCode {
   id          String   @id @default(cuid())
   phone       String
-  purpose     String // signup_verification | password_reset | phone_change
+  purpose     OtpPurpose
   codeHash    String
   userId      String?
   user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
@@ -188,7 +366,7 @@ model SubscriptionPlan {
   name          String
   description   String
   priceCents    Int
-  currency      String   @default("ETB")
+  currency      Currency   @default(ETB)
   ridesIncluded Int // -1 = unlimited
   durationDays  Int
   isTrial       Boolean  @default(false)
@@ -242,7 +420,7 @@ model Shuttle {
   contractor   User     @relation(fields: [contractorId], references: [id], onDelete: Cascade)
   plate        String   @unique
   model        String
-  vehicleType  String // coaster | minibus | van | sedan
+  vehicleType  VehicleType
   capacity     Int
   year         Int
   isActive     Boolean  @default(true)
@@ -266,8 +444,8 @@ model Trip {
   driver       User?            @relation("TripDriver", fields: [driverId], references: [id], onDelete: SetNull)
   departureAt  DateTime
   seatsBooked  Int              @default(0)
-  status       String           @default("scheduled") // scheduled | in_transit | completed | cancelled
-  window       String // morning | evening
+  status       TripStatus       @default(scheduled)
+  window       TripWindow
   // Link to the monthly assignment this trip was generated from.
   assignmentId String?
   assignment   RouteAssignment? @relation(fields: [assignmentId], references: [id], onDelete: SetNull)
@@ -311,7 +489,7 @@ model RouteAssignment {
   schedulePattern String // JSON
 
   // Status: admin assigns → contractor accepts → active → completed
-  status String @default("assigned") // assigned | accepted | active | completed | cancelled
+  status AssignmentStatus @default(assigned)
 
   maxSeats    Int @default(0)
 
@@ -339,7 +517,7 @@ model Subscription {
   plan        SubscriptionPlan @relation(fields: [planId], references: [id], onDelete: Restrict)
   corporateId String?
   corporate   Corporate?       @relation(fields: [corporateId], references: [id], onDelete: SetNull)
-  status      String           @default("pending_payment") // pending_payment | active | expired | cancelled
+  status      SubscriptionStatus @default(pending_payment)
   startDate   DateTime
   endDate     DateTime
   ridesUsed   Int              @default(0)
@@ -366,13 +544,10 @@ model Payment {
   subscriptionId    String?
   subscription      Subscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
   seatClaimId       String?
-  method            String // telebirr | cbe
+  method            PaymentMethod
   amountCents       Int
-  // Corporate-subsidy portion of the plan price captured at payment creation.
-  // 0 for non-corporate payments. Used by the monthly corporate billing job to
-  // sum subsidies consumed per corporate.
   subsidyCents      Int           @default(0)
-  status            String        @default("pending") // pending | completed | failed | refunded | partially_refunded
+  status            PaymentStatus @default(pending)
   refundAmountCents Int           @default(0)
   refundedAt        DateTime?
   createdAt         DateTime      @default(now())
@@ -396,7 +571,7 @@ model RefundRetry {
   refundRequestNo String   @unique
   amountCents     Int
   reason          String
-  status          String   @default("pending") // pending | processing | succeeded | failed | permanent_failure
+  status          RefundRetryStatus @default(pending)
   attempts        Int      @default(0)
   maxAttempts     Int      @default(5)
   nextAttemptAt   DateTime @default(now())
@@ -428,8 +603,8 @@ model SeatRelease {
   user       User     @relation("SeatReleaseSeller", fields: [userId], references: [id], onDelete: Cascade)
   tripId     String
   trip       Trip     @relation(fields: [tripId], references: [id], onDelete: Cascade)
-  window     String // morning | evening
-  status     String   @default("open") // open | claimed | expired | cancelled
+  window     TripWindow
+  status     SeatReleaseStatus @default(open)
   expiresAt  DateTime
   // Optional override for the route fare. When null (default), the buyer pays
   // the route's canonical fareCents. When set, the buyer pays this amount
@@ -452,7 +627,7 @@ model SeatClaim {
   claimant       User        @relation("SeatClaimBuyer", fields: [claimantUserId], references: [id], onDelete: Cascade)
   paymentId      String      @unique
   payment        Payment     @relation("SeatClaimPayment", fields: [paymentId], references: [id], onDelete: Restrict)
-  status         String      @default("confirmed") // confirmed | used | no_show | refunded
+  status         SeatClaimStatus @default(confirmed)
   createdAt      DateTime    @default(now())
   updatedAt      DateTime    @updatedAt
 
@@ -482,7 +657,7 @@ model Ride {
   // records aren't skewed by later route price changes — needed for invoicing,
   // dispute resolution, and audit. Populated in POST_ride.
   farePaidCents    Int?
-  status           String           @default("booked") // booked | boarded | completed | no_show | cancelled | released
+  status           RideStatus @default(booked)
   createdAt        DateTime         @default(now())
   updatedAt        DateTime         @updatedAt
 
@@ -523,9 +698,9 @@ model SupportTicket {
   userId         String
   user           User          @relation(fields: [userId], references: [id], onDelete: Cascade)
   subject        String
-  category       String        @default("general") // general | billing | route | shuttle | account | corporate | other
-  priority       String        @default("normal") // low | normal | high | urgent
-  status         String        @default("open") // open | in_progress | resolved | closed
+  category       TicketCategory @default(general)
+  priority       TicketPriority @default(normal)
+  status         TicketStatus   @default(open)
   subscriptionId String?
   subscription   Subscription? @relation(fields: [subscriptionId], references: [id], onDelete: SetNull)
   paymentId      String?
@@ -617,9 +792,9 @@ model AuditLog {
 
 model OutboxEvent {
   id            String    @id @default(cuid())
-  channel       String // notification | sms | email | push
+  channel       OutboxChannel
   payload       String // JSON
-  status        String    @default("pending") // pending | processing | delivered | failed | dead
+  status        OutboxStatus @default(pending)
   attempts      Int       @default(0)
   maxAttempts   Int       @default(5)
   nextAttemptAt DateTime  @default(now())
@@ -674,7 +849,7 @@ model UploadedFile {
   checksumSha256   String
   // Document scan status — for contractor docs, a real AV scan would set this.
   // 'pending' on upload, 'clean' after scan, 'infected' if a threat is found.
-  scanStatus       String   @default("pending") // pending | clean | infected | error
+  scanStatus       ScanStatus   @default(pending)
   createdAt        DateTime @default(now())
 
   contractorDocuments ContractorDocument[]
@@ -691,7 +866,7 @@ model ContractorDocument {
   id           String            @id @default(cuid())
   contractorId String // references ContractorProfile.id
   contractor   ContractorProfile @relation(fields: [contractorId], references: [id], onDelete: Cascade)
-  type         String // registration | insurance | inspection
+  type         DocType
   fileId       String
   file         UploadedFile      @relation(fields: [fileId], references: [id], onDelete: Restrict)
   uploadedAt   DateTime          @default(now())
@@ -734,7 +909,7 @@ model CorporateInvoice {
   subtotalCents Int // sum of subsidies consumed (pre-tax)
   taxCents      Int       @default(0) // VAT/sales tax, if applicable
   totalCents    Int // subtotalCents + taxCents
-  status        String    @default("draft") // draft | issued | paid | void
+  status        InvoiceStatus @default(draft)
   issuedAt      DateTime?
   dueAt         DateTime? // typically periodEnd + 30 days
   paidAt        DateTime?
@@ -755,7 +930,7 @@ model Mandate {
   subscriptionId    String?
   mctContractNo     String    @unique // 32-digit numeric, generated via crypto.randomInt
   mandateTemplateId String?
-  status            String    @default("pending") // pending | signed | cancelled | expired
+  status            MandateStatus @default(pending)
   signedAt          DateTime?
   cancelledAt       DateTime?
   createdAt         DateTime  @default(now())

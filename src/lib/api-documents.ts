@@ -33,7 +33,7 @@ export async function handleDocumentUpload(req: NextRequest, session: any, param
     }
 
     const existing = await db.contractorDocument.findUnique({
-      where: { contractorId_type: { contractorId: profile.id, type } },
+      where: { contractorId_type: { contractorId: profile.id, type: type as any } },
     });
 
     const meta = await saveFile(file, `contractor-docs/${profile.id}`);
@@ -87,7 +87,7 @@ export async function handleDocumentUpload(req: NextRequest, session: any, param
       return tx.contractorDocument.create({
         data: {
           contractorId: profile.id,
-          type,
+          type: type as any,
           fileId: uploaded.id,
         },
         include: { file: true },

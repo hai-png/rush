@@ -31,7 +31,7 @@ export default async function AdminUsersPage({ searchParams }: { searchParams: P
           { email: { contains: q, mode: 'insensitive' as const } },
         ],
       } : {},
-      role ? { role } : {},
+      role ? { role: role as any } : {},
     ],
   };
 

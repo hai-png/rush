@@ -5,6 +5,7 @@ import { audit, auditTx } from '@/lib/audit';
 import { issueSession, assertTwoFactorEnabled } from '@/lib/auth';
 import { createId } from '@/lib/id';
 import { logger } from '@/lib/logger';
+import { enqueueNotificationTx } from '@/lib/outbox';
 
 export async function GET_dashboard() {
   const [users, payments, subs, tickets, auditLogs, contractors, corporates, rides] = await Promise.all([
@@ -310,48 +311,49 @@ const BulkExpireInput = z.object({ subscriptionIds: z.array(z.string()).min(1).m
 export async function POST_bulk_expire({ session, body, ipAddress, userAgent }: any) {
   const input = BulkExpireInput.parse(body);
   const sideEffects: Array<() => Promise<void>> = [];
-  const result = await db.subscription.updateMany({
-    where: { id: { in: input.subscriptionIds }, status: 'active' },
-    data: { status: 'expired' },
-  });
-  if (result.count > 0) {
-    const expired = await db.subscription.findMany({
-      where: { id: { in: input.subscriptionIds }, status: 'expired' },
-      select: { id: true, userId: true },
+  const result = await db.$transaction(async (tx) => {
+    const updates = await tx.subscription.updateMany({
+      where: { id: { in: input.subscriptionIds }, status: 'active' },
+      data: { status: 'expired' },
     });
-    for (const s of expired) {
-      sideEffects.push(async () => {
-        const { enqueueNotification } = await import('@/lib/outbox');
-        await enqueueNotification({
+    if (updates.count > 0) {
+      const expired = await tx.subscription.findMany({
+        where: { id: { in: input.subscriptionIds }, status: 'expired' },
+        select: { id: true, userId: true },
+      });
+      for (const s of expired) {
+        await enqueueNotificationTx(tx, {
           userId: s.userId,
           type: 'subscription_expired',
           title: 'Subscription expired',
           body: 'Your subscription has been expired by an admin. Renew to keep riding.',
           link: '/plans',
-        }).catch(() => {});
+        });
+      }
+      const ridesToCancel = await tx.ride.findMany({
+        where: { subscriptionId: { in: input.subscriptionIds }, status: 'booked' },
+        select: { id: true, tripId: true },
       });
-    }
-    const ridesToCancel = await db.ride.findMany({
-      where: { subscriptionId: { in: input.subscriptionIds }, status: 'booked' },
-      select: { id: true, tripId: true },
-    });
-    if (ridesToCancel.length > 0) {
-      await db.ride.updateMany({
-        where: { id: { in: ridesToCancel.map(r => r.id) } },
-        data: { status: 'cancelled' },
-      });
-      // Decrement seatsBooked for each affected trip (CAS guarded).
-      const tripIds = [...new Set(ridesToCancel.map(r => r.tripId))];
-      for (const tripId of tripIds) {
-        await db.trip.updateMany({
-          where: { id: tripId, seatsBooked: { gt: 0 } },
-          data: { seatsBooked: { decrement: 1 } },
-        }).catch(() => {});
+      if (ridesToCancel.length > 0) {
+        await tx.ride.updateMany({
+          where: { id: { in: ridesToCancel.map(r => r.id) } },
+          data: { status: 'cancelled' },
+        });
+        const tripIds = [...new Set(ridesToCancel.map(r => r.tripId))];
+        for (const tripId of tripIds) {
+          await tx.trip.updateMany({
+            where: { id: tripId, seatsBooked: { gt: 0 } },
+            data: { seatsBooked: { decrement: 1 } },
+          }).catch(() => {});
+        }
       }
     }
-  }
+    sideEffects.push(async () => {
+      await audit({ actorId: session.id, action: 'admin.bulk_expire', entityType: 'subscription', after: { count: updates.count }, ipAddress, userAgent });
+    });
+    return updates;
+  });
   for (const fx of sideEffects) { fx().catch(() => {}); }
-  await audit({ actorId: session.id, action: 'admin.bulk_expire', entityType: 'subscription', after: { count: result.count }, ipAddress, userAgent });
   return { data: { expired: result.count } };
 }
 

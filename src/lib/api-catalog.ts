@@ -36,7 +36,7 @@ export async function GET_shuttles() {
 export async function GET_trips({ query }: any) {
   const { parsePagination, paginatedResponse } = await import('@/lib/pagination');
   const page = parsePagination(query);
-  const where = { status: 'scheduled', departureAt: { gt: new Date() } };
+  const where = { status: 'scheduled' as const, departureAt: { gt: new Date() } };
   const [trips, total] = await Promise.all([
     db.trip.findMany({
       where,

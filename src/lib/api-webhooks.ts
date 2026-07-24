@@ -6,6 +6,7 @@ import { toErrorEnvelope } from '@/lib/errors';
 import { logger } from '@/lib/logger';
 import { formatETB } from '@/lib/format';
 import { Prisma } from '@prisma/client';
+import { enqueueNotificationTx } from '@/lib/outbox';
 
 export async function handleTelebirrNotify(req: NextRequest, _session: any, _params: any, ctx: { requestId: string }): Promise<NextResponse> {
   const requestId = ctx.requestId ?? crypto.randomUUID();
@@ -44,7 +45,6 @@ export async function handleTelebirrNotify(req: NextRequest, _session: any, _par
 }
 
 async function markRefundSucceeded(refundRequestNo: string, raw: unknown): Promise<void> {
-  const sideEffects: Array<() => Promise<void>> = [];
   await db.$transaction(async (tx) => {
     const updated = await tx.refundRetry.updateMany({
       where: { refundRequestNo, status: { in: ['pending', 'processing'] } },
@@ -55,7 +55,6 @@ async function markRefundSucceeded(refundRequestNo: string, raw: unknown): Promi
     if (!retry) return;
     const fresh = await tx.payment.findUnique({ where: { id: retry.paymentId } });
     if (!fresh) return;
-    // Do NOT add retry.amountCents again — that would double-count.
     const allRefunded = fresh.refundAmountCents >= fresh.amountCents;
     await tx.payment.update({
       where: { id: fresh.id },
@@ -66,22 +65,17 @@ async function markRefundSucceeded(refundRequestNo: string, raw: unknown): Promi
     });
     const userId = fresh.userId;
     const refundAmount = retry.amountCents;
-    sideEffects.push(async () => {
-      const { enqueueNotification } = await import('@/lib/outbox');
-      await enqueueNotification({
-        userId,
-        type: 'refund_completed',
-        title: 'Refund completed',
-        body: `Your refund of ${formatETB(refundAmount)} has been processed.`,
-      });
+    await enqueueNotificationTx(tx, {
+      userId,
+      type: 'refund_completed',
+      title: 'Refund completed',
+      body: `Your refund of ${formatETB(refundAmount)} has been processed.`,
     });
   });
-  for (const fx of sideEffects) { fx().catch(e => logger.error({ err: (e as Error).message }, '[refund-webhook] side effect failed')); }
   logger.info({ refundRequestNo }, '[telebirr-webhook] refund succeeded');
 }
 
 async function markRefundFailed(refundRequestNo: string, raw: unknown): Promise<void> {
-  const sideEffects: Array<() => Promise<void>> = [];
   await db.$transaction(async (tx) => {
     await tx.refundRetry.updateMany({
       where: { refundRequestNo, status: { in: ['pending', 'processing'] } },
@@ -92,17 +86,13 @@ async function markRefundFailed(refundRequestNo: string, raw: unknown): Promise<
     const fresh = await tx.payment.findUnique({ where: { id: retry.paymentId } });
     if (!fresh) return;
     const userId = fresh.userId;
-    sideEffects.push(async () => {
-      const { enqueueNotification } = await import('@/lib/outbox');
-      await enqueueNotification({
-        userId,
-        type: 'refund_failed',
-        title: 'Refund failed',
-        body: 'Your refund could not be processed by Telebirr.',
-      });
+    await enqueueNotificationTx(tx, {
+      userId,
+      type: 'refund_failed',
+      title: 'Refund failed',
+      body: 'Your refund could not be processed by Telebirr.',
     });
   });
-  for (const fx of sideEffects) { fx().catch(e => logger.error({ err: (e as Error).message }, '[refund-webhook] side effect failed')); }
   logger.warn({ refundRequestNo }, '[telebirr-webhook] refund failed');
 }
 
