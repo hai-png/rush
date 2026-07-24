@@ -1,3 +1,4 @@
+import { redisLock } from '@/lib/redis';
 import { db } from '@/lib/db';
 import { processRefundRetries } from '@/lib/payment-service';
 import { enqueueNotification } from '@/lib/outbox';
@@ -8,9 +9,6 @@ import { logger } from '@/lib/logger';
 export { processRefundRetries };
 
 let started = false;
-
-// Single-instance limitation: the scheduler runs in-process with no distributed
-// a distributed lock is added, deployments MUST run with SCHEDULER_DISABLED=1
 
 export function ensureSchedulerStarted(): void {
   if (started) return;
@@ -66,20 +64,23 @@ export async function runAllJobs(): Promise<{
 }
 
 export async function drainOutbox(): Promise<void> {
+  const lock = await redisLock('scheduler:drain-outbox', 30, 200, 5);
+  if (!lock) return;
   try {
-    const reaped = await db.outboxEvent.updateMany({
-      where: {
-        status: 'processing',
-        lockedAt: { lt: new Date(Date.now() - 15 * 60_000) },
-      },
-      data: { status: 'pending', lockedAt: null, lockedBy: null },
-    });
-    if (reaped.count > 0) {
-      logger.warn({ reaped: reaped.count }, '[outbox] reset stuck processing events');
+    try {
+      const reaped = await db.outboxEvent.updateMany({
+        where: {
+          status: 'processing',
+          lockedAt: { lt: new Date(Date.now() - 15 * 60_000) },
+        },
+        data: { status: 'pending', lockedAt: null, lockedBy: null },
+      });
+      if (reaped.count > 0) {
+        logger.warn({ reaped: reaped.count }, '[outbox] reset stuck processing events');
+      }
+    } catch (err) {
+      logger.error({ err: (err as Error).message }, '[outbox] reaper failed');
     }
-  } catch (err) {
-    logger.error({ err: (err as Error).message }, '[outbox] reaper failed');
-  }
 
   let processed = 0;
   for (let i = 0; i < 10; i++) {
@@ -171,9 +172,13 @@ export async function drainOutbox(): Promise<void> {
   if (processed > 0) {
     logger.info({ processed }, '[scheduler] drained outbox events');
   }
+  } finally { await lock.release(); }
 }
 
 export async function expireStale(): Promise<void> {
+  const lock = await redisLock('scheduler:expire-stale', 30, 200, 5);
+  if (!lock) return;
+  try {
   const now = new Date();
   const expiringSubs = await db.subscription.findMany({
     where: { status: 'active', endDate: { lt: now } },
@@ -266,6 +271,7 @@ export async function expireStale(): Promise<void> {
   if (expiredSubs.count > 0 || expiredReleases.count > 0) {
     logger.info({ expiredSubs: expiredSubs.count, expiredReleases: expiredReleases.count }, '[scheduler] expired stale data');
   }
+  } finally { await lock.release(); }
 }
 
 export async function hourlyJobs(): Promise<void> {

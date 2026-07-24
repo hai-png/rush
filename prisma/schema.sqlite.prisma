@@ -344,6 +344,8 @@ model Subscription {
   endDate     DateTime
   ridesUsed   Int              @default(0)
   cancelledAt DateTime?
+  pendingEndDate    DateTime?
+  pendingRidesReset Boolean   @default(false)
   createdAt   DateTime         @default(now())
   updatedAt   DateTime         @updatedAt
 

@@ -77,3 +77,36 @@ export async function redisGetAllPositions(pattern: string): Promise<any[]> {
   return values.filter(Boolean).map((v: string) => JSON.parse(v));
 }
 
+const LOCK_SCRIPT = `
+  if redis.call("SET", KEYS[1], ARGV[1], "NX", "EX", ARGV[2]) then
+    return 1
+  end
+  return 0
+`;
+
+const UNLOCK_SCRIPT = `
+  if redis.call("GET", KEYS[1]) == ARGV[1] then
+    return redis.call("DEL", KEYS[1])
+  end
+  return 0
+`;
+
+export async function redisLock(key: string, ttlSec = 30, retryMs = 200, maxRetries = 15): Promise<{ release: () => Promise<void> } | null> {
+  const redis = await getRedis();
+  if (!redis) return null;
+
+  const token = `${process.pid}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+  for (let attempt = 0; attempt < maxRetries; attempt++) {
+    const ok = await redis.eval(LOCK_SCRIPT, 1, `lock:${key}`, token, ttlSec);
+    if (ok) {
+      return {
+        release: async () => {
+          try { await redis.eval(UNLOCK_SCRIPT, 1, `lock:${key}`, token); } catch { /* ignore */ }
+        },
+      };
+    }
+    await new Promise(r => setTimeout(r, retryMs));
+  }
+  return null;
+}
+

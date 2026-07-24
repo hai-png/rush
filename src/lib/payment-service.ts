@@ -1,3 +1,4 @@
+import { redisLock } from '@/lib/redis';
 import { db } from '@/lib/db';
 import { Money } from '@/lib/money';
 import { BadRequestError, NotFoundError } from '@/lib/errors';
@@ -296,6 +297,9 @@ export async function cancelRefund(paymentId: string, refundRetryId: string, act
 const BACKOFF_MIN = [1, 5, 15, 60, 240]; // shorter for dev
 
 export async function processRefundRetries(limit = 10): Promise<{ processed: number }> {
+  const lock = await redisLock('scheduler:refund-retries', 30, 200, 5);
+  if (!lock) return { processed: 0 };
+  try {
   await db.refundRetry.updateMany({
     where: { status: 'processing', updatedAt: { lt: new Date(Date.now() - 15 * 60_000) } },
     data: { status: 'pending' },
@@ -391,5 +395,6 @@ export async function processRefundRetries(limit = 10): Promise<{ processed: num
     processed++;
   }
   return { processed };
+  } finally { await lock.release(); }
 }
 
