@@ -124,8 +124,9 @@ export async function POST_message({ session, params, body }: any) {
   return { status: 201, data: msg };
 }
 
-export async function handleTicketMessageWithAttachment(req: NextRequest, session: any, params: any): Promise<NextResponse> {
-  const requestId = crypto.randomUUID();
+// H-20 fix: use ctx.requestId from the dispatcher.
+export async function handleTicketMessageWithAttachment(req: NextRequest, session: any, params: any, ctx?: { requestId?: string }): Promise<NextResponse> {
+  const requestId = ctx?.requestId ?? crypto.randomUUID();
   try {
     if (!session) {
       return NextResponse.json({ error: { code: 'UNAUTHORIZED', message: 'Sign in required', requestId } }, { status: 401 });

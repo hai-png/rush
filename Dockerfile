@@ -46,7 +46,7 @@ COPY --from=builder --chown=nextjs:nodejs /app/.next/standalone ./
 COPY --from=builder --chown=nextjs:nodejs /app/.next/static ./.next/static
 COPY --from=builder --chown=nextjs:nodejs /app/public ./public
 
-# Copy prisma schema + migrations dir (for `prisma migrate deploy` at startup).
+# Copy prisma schema + migrations dir (for `DATABASE_PROVIDER="${DATABASE_PROVIDER:-postgres}" ./scripts/select-schema.sh && prisma migrate deploy` at startup).
 COPY --from=builder --chown=nextjs:nodejs /app/prisma ./prisma
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder --chown=nextjs:nodejs /app/node_modules/@prisma ./node_modules/@prisma
@@ -65,5 +65,5 @@ EXPOSE 3000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
   CMD bun -e "fetch('http://localhost:3000/api/v1/healthz').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
 
-# P2 #32: run prisma migrate deploy before starting the server.
-CMD ["sh", "-c", "bunx prisma migrate deploy --schema prisma/schema.prisma && bun server.js"]
+# P2 #32: run DATABASE_PROVIDER="${DATABASE_PROVIDER:-postgres}" ./scripts/select-schema.sh && prisma migrate deploy before starting the server.
+CMD ["sh", "-c", "bunx DATABASE_PROVIDER="${DATABASE_PROVIDER:-postgres}" ./scripts/select-schema.sh && prisma migrate deploy --schema prisma/schema.prisma && bun server.js"]

@@ -50,7 +50,11 @@ export async function POST_inapp_checkout({ session, body }: any) {
     });
     if (!claim) throw new NotFoundError('Seat claim not found');
     if (claim.claimantUserId !== session.id) throw new ForbiddenError('Not your seat claim');
-    amountCents = claim.seatRelease.trip.route.fareCents;
+    // H-7 fix: honor the marketplace priceCents override if the seller set one.
+    // Previously, the InApp path always used the route fare, ignoring any
+    // discount the seller offered. The web checkout path (POST_claim) was
+    // already correct.
+    amountCents = claim.seatRelease.priceCents ?? claim.seatRelease.trip.route.fareCents;
     description = input.description ?? `Seat claim for ${claim.seatRelease.trip.route.origin} → ${claim.seatRelease.trip.route.destination}`;
     seatClaimId = claim.id;
   }
@@ -72,8 +76,12 @@ export async function POST_inapp_checkout({ session, body }: any) {
     redirectUrl: env.TELEBIRR_REDIRECT_URL || `${env.APP_BASE_URL}/checkout/complete`,
   };
 
-  const result = await provider.createInAppOrder(intent);
-
+  // H-6 fix: create the Payment row BEFORE calling Telebirr. Previously, the
+  // order was: (1) call createInAppOrder, (2) create Payment. If step 2 failed
+  // (DB error, unique constraint), the Telebirr prepay_id existed with no local
+  // Payment — the user paid via the SDK, the webhook arrived, settlePayment
+  // found no Payment row, and the money was stuck. Now we create Payment first;
+  // if createInAppOrder fails, we mark the Payment as failed.
   await db.payment.create({
     data: {
       reference,
@@ -85,6 +93,17 @@ export async function POST_inapp_checkout({ session, body }: any) {
       status: 'pending',
     },
   });
+
+  let result;
+  try {
+    result = await provider.createInAppOrder(intent);
+  } catch (err) {
+    await db.payment.updateMany({
+      where: { reference, status: 'pending' },
+      data: { status: 'failed' },
+    }).catch(() => {});
+    throw err;
+  }
 
   return {
     status: 201,
@@ -116,8 +135,8 @@ export async function POST_mandate_sign_url({ session, body }: any) {
   let mctContractNo = '';
   for (let i = 0; i < 32; i++) mctContractNo += randomInt(0, 10).toString();
 
-  // persist the mandate so we have a per-user ownership record.
-  // be admin-gated (no way to verify a user owned a given mandate).
+  // Persist the mandate so we have a per-user ownership record.
+  // Ownership is enforced via mandate.userId check in GET_mandate.
   const mandate = await db.mandate.create({
     data: {
       userId: session.id,
@@ -224,11 +243,44 @@ export async function POST_disburse({ session, body, ipAddress, userAgent }: any
   }
 
   const merchOrderId = `DIS${createId()}`;
-  const result = await provider.disburse({
-    mctContractNo: input.mctContractNo,
-    merchOrderId,
-    amount: Money.fromCents(input.amountCents),
-    reason: input.reason,
+
+  // H-5 fix: create a Payment record BEFORE calling Telebirr so we have a
+  // local record for reconciliation + idempotency. Previously, no Payment row
+  // was created — a network failure after Telebirr accepted the disburse but
+  // before the response was received would cause a retry to generate a new
+  // merchOrderId and disburse twice. Now the Payment row's reference is the
+  // merchOrderId, so a retry hitting the same reference is deduped.
+  await db.payment.create({
+    data: {
+      reference: merchOrderId,
+      userId: session.id,
+      method: 'telebirr',
+      amountCents: input.amountCents,
+      status: 'pending',
+    },
+  });
+
+  let result;
+  try {
+    result = await provider.disburse({
+      mctContractNo: input.mctContractNo,
+      merchOrderId,
+      amount: Money.fromCents(input.amountCents),
+      reason: input.reason,
+    });
+  } catch (err) {
+    // Telebirr call failed — mark the Payment as failed so it's not left pending.
+    await db.payment.updateMany({
+      where: { reference: merchOrderId, status: 'pending' },
+      data: { status: 'failed' },
+    }).catch(() => {});
+    throw err;
+  }
+
+  // Mark the Payment as completed — the disbursement was accepted by Telebirr.
+  await db.payment.updateMany({
+    where: { reference: merchOrderId, status: 'pending' },
+    data: { status: 'completed' },
   });
 
   await audit({

@@ -83,9 +83,13 @@ export async function POST_create_rating({ session, params, body, ipAddress, use
 
   // Recompute the contractor's aggregate rating so the new score is reflected.
   try {
+    // H-1 fix: recomputeContractorRating expects a User.id (it queries
+    // trip.driverId which is User.id), but we were passing profile.id
+    // (ContractorProfile.id). The count always returned 0 and the rating
+    // was never updated. Pass profile.userId instead.
     const { recomputeContractorRating } = await import('@/lib/api-admin');
     const profile = await db.contractorProfile.findUnique({ where: { userId: contractorId } });
-    if (profile) await recomputeContractorRating(profile.id);
+    if (profile) await recomputeContractorRating(profile.userId);
   } catch (err) {
     // Non-fatal — the rating row is already committed. The next recompute
     // (e.g. after the next trip completion) will pick up this rating.

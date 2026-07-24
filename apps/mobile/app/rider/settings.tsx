@@ -46,7 +46,10 @@ export default function SettingsScreen() {
 
   async function toggleNotifications(value: boolean) {
     setNotifEnabled(value);
-    try { await api.patch('/notifications/preferences', { notificationEnabled: value }); } catch {}
+    // H-21 fix: the server schema accepts pushEnabled (not notificationEnabled).
+    // Previously, Zod stripped the unknown key and the preference was never
+    // persisted — the toggle was a silent no-op.
+    try { await api.patch('/notifications/preferences', { pushEnabled: value }); } catch {}
     await saveSettings({ notificationEnabled: value });
     if (value) {
       registerForPushNotifications().catch(() => {});

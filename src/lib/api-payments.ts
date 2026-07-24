@@ -43,14 +43,40 @@ export async function POST_checkout({ session, body }: any) {
   if (payment.userId !== session.id) throw new NotFoundError('Payment not found');
   if (payment.status !== 'pending') throw new BadRequestError('Payment is not pending');
 
-  // Idempotency check — reject if a checkout was created for this payment
-  // within the last IDEMPOTENCY_WINDOW_MS.
+  // CRITICAL FIX (C-5): Acquire the lock BEFORE calling Telebirr.
+  // Previously, the check-then-create-then-record sequence was a TOCTOU race
+  // — two concurrent checkouts for the same payment both passed the findUnique
+  // check, both called provider.createCheckout() with the same merchOrderId,
+  // and both succeeded. The user paid both, but only the first webhook settled
+  // (the second payment was captured at Telebirr but unrecorded locally).
+  //
+  // Now we INSERT the lock row first (relying on PK uniqueness). If a concurrent
+  // checkout already holds the lock, the insert throws P2002 and we return 409.
+  // Only after the insert commits do we call provider.createCheckout(). If
+  // createCheckout throws, the lock remains for the idempotency window — an
+  // acceptable trade-off (user can retry after 5 min).
   const lockKey = `checkout-lock:${paymentId}`;
-  const existing = await db.setting.findUnique({ where: { key: lockKey } });
-  if (existing) {
-    const lastCheckoutAt = parseInt(existing.value, 10);
-    if (Number.isFinite(lastCheckoutAt) && Date.now() - lastCheckoutAt < IDEMPOTENCY_WINDOW_MS) {
-      throw new ConflictError('A checkout was recently created for this payment. Use the existing checkout URL or wait a few minutes before retrying.');
+  const now = Date.now();
+  try {
+    await db.setting.create({
+      data: { key: lockKey, value: String(now) },
+    });
+  } catch (e: any) {
+    if (e?.code === 'P2002') {
+      // Lock already held — check if it's stale (> IDEMPOTENCY_WINDOW_MS old).
+      const existing = await db.setting.findUnique({ where: { key: lockKey } });
+      if (existing) {
+        const lastCheckoutAt = parseInt(existing.value, 10);
+        if (Number.isFinite(lastCheckoutAt) && now - lastCheckoutAt < IDEMPOTENCY_WINDOW_MS) {
+          throw new ConflictError('A checkout was recently created for this payment. Use the existing checkout URL or wait a few minutes before retrying.');
+        }
+        // Stale lock — overwrite with our timestamp and proceed.
+        await db.setting.update({ where: { key: lockKey }, data: { value: String(now) } });
+      } else {
+        throw new ConflictError('A checkout is in progress for this payment.');
+      }
+    } else {
+      throw e;
     }
   }
 
@@ -58,20 +84,27 @@ export async function POST_checkout({ session, body }: any) {
   const { loadEnv } = await import('@/lib/env');
   const provider = getPaymentProvider(payment.method as 'telebirr' | 'cbe');
   const env = loadEnv();
-  const checkout = await provider.createCheckout({
-    merchOrderId: payment.reference,
-    amount: Money.fromCents(payment.amountCents),
-    description: payment.subscription?.plan.name ?? 'Subscription',
-    notifyUrl: env.TELEBIRR_NOTIFY_URL || `${env.APP_BASE_URL}/api/v1/webhooks/telebirr/notify`,
-    redirectUrl: env.TELEBIRR_REDIRECT_URL || `${env.APP_BASE_URL}/checkout/complete`,
-  });
+  let checkout;
+  try {
+    checkout = await provider.createCheckout({
+      merchOrderId: payment.reference,
+      amount: Money.fromCents(payment.amountCents),
+      description: payment.subscription?.plan.name ?? 'Subscription',
+      notifyUrl: env.TELEBIRR_NOTIFY_URL || `${env.APP_BASE_URL}/api/v1/webhooks/telebirr/notify`,
+      redirectUrl: env.TELEBIRR_REDIRECT_URL || `${env.APP_BASE_URL}/checkout/complete`,
+    });
+  } catch (err) {
+    // createCheckout failed — release the lock so the user can retry immediately.
+    // (The Telebirr order was never created, so there's nothing to dedup against.)
+    await db.setting.delete({ where: { key: lockKey } }).catch(() => {});
+    throw err;
+  }
 
-  // Record the checkout timestamp so concurrent/repeated calls are rejected
-  // within the idempotency window.
-  await db.setting.upsert({
+  // Lock is already held (we acquired it before calling Telebirr). Update the
+  // timestamp to reflect the successful checkout.
+  await db.setting.update({
     where: { key: lockKey },
-    update: { value: String(Date.now()) },
-    create: { key: lockKey, value: String(Date.now()) },
+    data: { value: String(Date.now()) },
   });
 
   return { data: { paymentReference: payment.reference, checkout } };

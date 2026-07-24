@@ -4,6 +4,7 @@ import { useAuthStore } from '../../src/lib/auth-store';
 import { router } from 'expo-router';
 import { getBiometricsEnabled, setBiometricsEnabled } from '../../src/lib/settings-store';
 import { colors, spacing, radius, fontSize, fontWeight } from '../../src/lib/theme';
+import { routeByRole } from '../../src/lib/route-by-role';
 
 // Biometric gate: restores the session, then prompts for biometric auth
 // (FaceID/TouchID/fingerprint) before routing to the dashboard when
@@ -27,20 +28,20 @@ export default function BiometricGate() {
       const biometricsEnabled = await getBiometricsEnabled();
       if (!active) return;
       if (!biometricsEnabled) {
-        router.replace('/rider/dashboard');
+        router.replace(routeByRole(user?.role));
         return;
       }
       const result = await promptBiometric();
       if (!active) return;
       if (result === 'success') {
-        router.replace('/rider/dashboard');
+        router.replace(routeByRole(user?.role));
       } else if (result === 'unavailable') {
         // Biometrics not available on this device — fall through to dashboard
         // but warn the user once.
         Alert.alert(
           'Biometrics unavailable',
           'Biometric authentication is not available on this device. Sign in with your password next time for security.',
-          [{ text: 'Continue', onPress: () => router.replace('/rider/dashboard') }]
+          [{ text: 'Continue', onPress: () => router.replace(routeByRole(user?.role)) }]
         );
         await setBiometricsEnabled(false);
       } else {
@@ -73,9 +74,9 @@ export default function BiometricGate() {
     setStatus('loading');
     const result = await promptBiometric();
     if (result === 'success') {
-      router.replace('/rider/dashboard');
+      router.replace(routeByRole(user?.role));
     } else if (result === 'unavailable') {
-      router.replace('/rider/dashboard');
+      router.replace(routeByRole(user?.role));
     } else {
       setStatus('failed');
     }

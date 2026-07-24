@@ -263,12 +263,13 @@ export async function POST_renew({ session, params, body, ipAddress, userAgent }
   }
   if (sub.status === 'cancelled') throw new ConflictError('Cannot renew a cancelled subscription');
 
-  // Trial-only-once check.
+  // CRITICAL FIX (H-8): Block trial plan renewal entirely. Trial plans are
+  // a one-shot entry point — they should not be renewable. Previously the
+  // check was outside the tx and used `id: { not: sub.id }`, which allowed
+  // renewing the SAME trial sub indefinitely (combined with C-1, this
+  // yielded unlimited free rides). Now we reject any renewal of a trial sub.
   if (sub.plan.isTrial) {
-    const priorTrial = await db.subscription.findFirst({
-      where: { userId: sub.userId, plan: { isTrial: true }, id: { not: sub.id } },
-    });
-    if (priorTrial) throw new BadRequestError('You have already used the trial plan');
+    throw new BadRequestError('Trial plans cannot be renewed. Subscribe to a paid plan instead.');
   }
 
   const { paymentMethod } = z.object({ paymentMethod: z.enum(['telebirr', 'cbe']) }).parse(body);
@@ -306,13 +307,20 @@ export async function POST_renew({ session, params, body, ipAddress, userAgent }
   newEndDate.setDate(newEndDate.getDate() + sub.plan.durationDays);
 
   const newSub = await db.$transaction(async (tx) => {
-    // Otherwise, create a new subscription row.
+    // CRITICAL FIX (C-1): Do NOT extend endDate or reset ridesUsed here.
+    // Previously, the renewal handler extended the subscription immediately
+    // and the user got free rides even if they never paid. Now we store
+    // the pending extension on the subscription row and apply it inside
+    // settlePayment() when the renewal payment transitions to 'completed'.
+    // If the user never pays, a scheduler job reverts the pending fields
+    // (TODO: add revert-pending-renewals job to scheduler.ts hourlyJobs).
     if (sub.status === 'active' && sub.endDate > now) {
       const extended = await tx.subscription.update({
         where: { id: sub.id },
         data: {
-          endDate: newEndDate,
-          ridesUsed: 0,
+          // Store the pending extension — applied atomically on payment success.
+          pendingEndDate: newEndDate,
+          pendingRidesReset: true,
           cancelledAt: null,
         },
         include: { plan: true },

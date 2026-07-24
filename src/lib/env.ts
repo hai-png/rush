@@ -25,6 +25,10 @@ type Env = {
   TWILIO_FROM: string;
   RESEND_API_KEY: string;
   RESEND_FROM: string;
+  RESEND_WEBHOOK_SECRET: string;
+  // CRITICAL FIX (H-14): Resend webhook signature verification secret.
+  // Without this, the Resend webhook endpoint accepts arbitrary POSTs.
+  TELEBIRR_WEBHOOK_IPS: string;
   SENTRY_DSN: string;
   REDIS_URL: string;
   // Dedicated field-level encryption key (used by crypto-field.ts). Falls
@@ -77,9 +81,31 @@ export function loadEnv(): Env {
   if (process.env.NODE_ENV === 'production' && telebirrEnv !== 'mock' && !hasRealTelebirr) {
     throw new Error(
       `TELEBIRR_ENV=${telebirrEnv} but required Telebirr credentials are missing. ` +
-      `Either set all TELEBIRR_* credentials (FABRIC_APP_ID, APP_SECRET, MERCHANT_APP_ID, ` +
-      `MERCHANT_CODE, PRIVATE_KEY, PUBLIC_KEY) or explicitly set TELEBIRR_ENV=mock for a ` +
-      `non-payment-receiving deployment. Refusing to start with mock provider in production.`
+      `Set all TELEBIRR_* credentials (FABRIC_APP_ID, APP_SECRET, MERCHANT_APP_ID, ` +
+      `MERCHANT_CODE, PRIVATE_KEY, PUBLIC_KEY) to use real Telebirr, or set ` +
+      `TELEBIRR_ENV=mock AND ALLOW_MOCK_PAYMENTS_IN_PRODUCTION=I_UNDERSTAND_THE_RISK ` +
+      `to explicitly accept that any attacker can forge payment webhooks. ` +
+      `Refusing to start without explicit acknowledgment.`
+    );
+  }
+  // CRITICAL FIX (C-4): refuse to run mock Telebirr in production unless the
+  // operator has explicitly set ALLOW_MOCK_PAYMENTS_IN_PRODUCTION. The mock
+  // provider accepts `sign: 'mock-signature'` as a valid signature, which
+  // means any attacker can settle any pending payment for free if mock is
+  // active in prod. The flag is intentionally long and alarming so it can't
+  // be set by accident.
+  if (
+    process.env.NODE_ENV === 'production' &&
+    effectiveTelebirr === 'mock' &&
+    process.env.ALLOW_MOCK_PAYMENTS_IN_PRODUCTION !== 'I_UNDERSTAND_THE_RISK'
+  ) {
+    throw new Error(
+      `TELEBIRR_ENV=mock (or unset with no real creds) in production. ` +
+      `The mock provider accepts 'sign: mock-signature' as a valid webhook ` +
+      `signature, so any attacker can forge payment settlements for free. ` +
+      `To run with mock in production (NOT RECOMMENDED — only for staging ` +
+      `without real money), set ALLOW_MOCK_PAYMENTS_IN_PRODUCTION=I_UNDERSTAND_THE_RISK. ` +
+      `For production, set TELEBIRR_ENV=production + all TELEBIRR_* creds.`
     );
   }
 
@@ -125,6 +151,8 @@ export function loadEnv(): Env {
     TWILIO_FROM: process.env.TWILIO_FROM || '',
     RESEND_API_KEY: process.env.RESEND_API_KEY || '',
     RESEND_FROM: process.env.RESEND_FROM || '',
+    RESEND_WEBHOOK_SECRET: process.env.RESEND_WEBHOOK_SECRET || '',
+    TELEBIRR_WEBHOOK_IPS: process.env.TELEBIRR_WEBHOOK_IPS || '',
     // Reserved for production hardening — currently read but not wired up.
     // See DEPLOYMENT.md "Production hardening status" table.
     SENTRY_DSN: process.env.SENTRY_DSN || '',
@@ -135,5 +163,13 @@ export function loadEnv(): Env {
   return cachedEnv;
 }
 
-export const CURRENT_TOS_VERSION = loadEnv().CURRENT_TOS_VERSION;
+// CI fix: do NOT call loadEnv() at module load time. Previously this was
+// `export const CURRENT_TOS_VERSION = loadEnv().CURRENT_TOS_VERSION;` which
+// triggered the full env validation (including the C-4 Telebirr mock-in-prod
+// check) whenever any module transitively imported env.ts. This broke
+// `openapi:gen` and `next build` in CI where NODE_ENV=production but no
+// real Telebirr creds are set. Now we read the env var directly — the full
+// loadEnv() validation only fires when a handler explicitly calls loadEnv()
+// at request time.
+export const CURRENT_TOS_VERSION = process.env.CURRENT_TOS_VERSION || '2026-01-01';
 export const TWO_FA_REQUIRED_ROLES = ['corporate_admin', 'platform_admin'] as const;

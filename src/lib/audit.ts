@@ -80,34 +80,89 @@ export function audit(input: AuditInput): Promise<void> {
   return auditQueue;
 }
 
-async function auditInternal(input: AuditInput): Promise<void> {
-  // Use a transaction so the seq-assignment + row-insert are atomic.
-  // Inside the tx: read the latest seq, increment, and insert with that seq.
-  // On SQLite's single-writer this is safe; on Postgres the unique constraint
-  // on seq + retry would handle concurrent inserts.
-  await db.$transaction(async (tx) => {
-    const latest = await tx.auditLog.findFirst({
-      orderBy: { seq: 'desc' },
-      select: { hash: true, seq: true },
-    });
-    const prevHash = latest?.hash ?? null;
-    const nextSeq = (latest?.seq ?? 0) + 1;
+// H-11 fix: on Postgres, two concurrent txns can both read the same latest.seq
+// and both try to insert with the same nextSeq. The @@unique on seq causes one
+// to fail with P2002. We retry up to MAX_AUDIT_RETRIES times with a fresh read.
+const MAX_AUDIT_RETRIES = 5;
 
-    await tx.auditLog.create({
-      data: {
-        seq: nextSeq,
-        actorId: input.actorId,
-        action: input.action,
-        entityType: input.entityType,
-        entityId: input.entityId,
-        before: input.before !== undefined ? JSON.stringify(input.before) : null,
-        after: input.after !== undefined ? JSON.stringify(input.after) : null,
-        ipAddress: input.ipAddress,
-        userAgent: input.userAgent,
-        prevHash,
-        hash: computeHash(input, prevHash),
-      },
-    });
+async function auditInternal(input: AuditInput): Promise<void> {
+  let attempt = 0;
+  while (true) {
+    attempt++;
+    try {
+      await db.$transaction(async (tx) => {
+        const latest = await tx.auditLog.findFirst({
+          orderBy: { seq: 'desc' },
+          select: { hash: true, seq: true },
+        });
+        const prevHash = latest?.hash ?? null;
+        const nextSeq = (latest?.seq ?? 0) + 1;
+
+        await tx.auditLog.create({
+          data: {
+            seq: nextSeq,
+            actorId: input.actorId,
+            action: input.action,
+            entityType: input.entityType,
+            entityId: input.entityId,
+            before: input.before !== undefined ? JSON.stringify(input.before) : null,
+            after: input.after !== undefined ? JSON.stringify(input.after) : null,
+            ipAddress: input.ipAddress,
+            userAgent: input.userAgent,
+            prevHash,
+            hash: computeHash(input, prevHash),
+          },
+        });
+      });
+      return;
+    } catch (err: any) {
+      // P2002 = unique constraint violation on seq. Retry with a fresh read.
+      if (err?.code === 'P2002' && attempt < MAX_AUDIT_RETRIES) {
+        // Brief backoff: 1ms, 2ms, 4ms, 8ms, 16ms
+        await new Promise(r => setTimeout(r, 2 ** (attempt - 1)));
+        continue;
+      }
+      throw err;
+    }
+  }
+}
+
+
+// H-12 fix: for security-critical actions, write the audit row INSIDE the
+// main business transaction so a failed audit rolls back the action. This
+// prevents the "audit failed but action committed" race where an attacker
+// could trigger a transient DB error to suppress the audit trail.
+//
+// Usage:
+//   await db.$transaction(async (tx) => {
+//     await tx.user.update({ where: { id }, data: { role: 'platform_admin' } });
+//     await auditTx(tx, { actorId: session.id, action: 'user.role_changed', ... });
+//   });
+//
+// Note: this bypasses the auditQueue serialisation because it's already inside
+// the caller's transaction. The seq assignment + hash chain are still correct
+// because they're computed from the latest row in the same tx.
+export async function auditTx(tx: any, input: AuditInput): Promise<void> {
+  const latest = await tx.auditLog.findFirst({
+    orderBy: { seq: 'desc' },
+    select: { hash: true, seq: true },
+  });
+  const prevHash = latest?.hash ?? null;
+  const nextSeq = (latest?.seq ?? 0) + 1;
+  await tx.auditLog.create({
+    data: {
+      seq: nextSeq,
+      actorId: input.actorId,
+      action: input.action,
+      entityType: input.entityType,
+      entityId: input.entityId,
+      before: input.before !== undefined ? JSON.stringify(input.before) : null,
+      after: input.after !== undefined ? JSON.stringify(input.after) : null,
+      ipAddress: input.ipAddress,
+      userAgent: input.userAgent,
+      prevHash,
+      hash: computeHash(input, prevHash),
+    },
   });
 }
 

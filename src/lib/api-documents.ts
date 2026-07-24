@@ -8,8 +8,11 @@ import { logger } from '@/lib/logger';
 
 const DOC_TYPES = new Set(['registration', 'insurance', 'inspection']);
 
-export async function handleDocumentUpload(req: NextRequest, session: any): Promise<NextResponse> {
-  const requestId = crypto.randomUUID();
+// H-20 fix: accept ctx param (4th arg from dispatcher) and use ctx.requestId
+// instead of generating a new UUID. This keeps log correlation intact across
+// the x-request-id header, Sentry captures, and JSON error bodies.
+export async function handleDocumentUpload(req: NextRequest, session: any, params: any, ctx: { requestId?: string }): Promise<NextResponse> {
+  const requestId = ctx?.requestId ?? crypto.randomUUID();
   try {
     if (!session) {
       return NextResponse.json({ error: { code: 'UNAUTHORIZED', message: 'Sign in required', requestId } }, { status: 401 });
@@ -52,7 +55,7 @@ export async function handleDocumentUpload(req: NextRequest, session: any): Prom
       });
 
       if (existing) {
-        // to 'pending' so an admin re-reviews the new file.
+        // Reset verification status to 'pending' so an admin re-reviews the new file.
         const updated = await tx.contractorDocument.update({
           where: { id: existing.id },
           data: { fileId: uploaded.id, uploadedAt: new Date() },
@@ -69,9 +72,9 @@ export async function handleDocumentUpload(req: NextRequest, session: any): Prom
             },
           });
         }
-        // lose it if the tx rolls back). The UploadedFile row is deleted too;
-        // the FK on ContractorDocument.fileId is Restrict so we null it first
-        // by pointing the doc at the new file (done above).
+        // The old UploadedFile row is deleted after the tx commits (queueMicrotask
+        // below). The FK on ContractorDocument.fileId is Restrict, so we point the
+        // doc at the new file above before the old file can be removed.
         const oldFileId = existing.fileId;
         const oldStorageKey = await tx.uploadedFile
           .findUnique({ where: { id: oldFileId }, select: { storageKey: true } })
@@ -116,12 +119,9 @@ export async function handleDocumentUpload(req: NextRequest, session: any): Prom
 
     return NextResponse.json({ data: doc }, { status: 201 });
   } catch (err) {
+    // L fix: collapsed 3 branches to 2 — the 2nd and 3rd had identical bodies.
     if (err instanceof FileUploadError) {
       return NextResponse.json({ error: { code: 'BAD_REQUEST', message: err.message, requestId } }, { status: 400 });
-    }
-    if (err instanceof BadRequestError || err instanceof NotFoundError || err instanceof ForbiddenError || err instanceof ConflictError) {
-      const { status, body } = toErrorEnvelope(err, requestId);
-      return NextResponse.json(body, { status });
     }
     const { status, body } = toErrorEnvelope(err, requestId);
     return NextResponse.json(body, { status });

@@ -146,7 +146,10 @@ export async function POST_reject_contractor({ session, params, body, ipAddress,
 }
 
 export async function GET_pending_corporates() {
-  const corporates = await db.corporate.findMany({ where: { isActive: true, deletedAt: null }, include: { _count: { select: { members: true, subscriptions: true } } }, orderBy: { createdAt: 'desc' } });
+  // H-27 fix: filter by isActive: false — these are the corporates pending
+  // admin activation. Previously this returned isActive: true (already-active
+  // corporates), which was misleading for the admin "pending corporates" view.
+  const corporates = await db.corporate.findMany({ where: { isActive: false, deletedAt: null }, include: { _count: { select: { members: true, subscriptions: true } } }, orderBy: { createdAt: 'desc' } });
   return { data: corporates };
 }
 

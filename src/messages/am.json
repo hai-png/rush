@@ -1,0 +1,71 @@
+{
+  "auth.login": {
+    "title": "ይግቡ",
+    "description": "ከመነሻ ገጽ የሙከራ መለያ ይጠቀሙ ወይም የራስዎን።",
+    "phone": "ስልክ ቁጥር",
+    "password": "የይለፍ ቃል",
+    "code": "2FA ኮድ (አማራጭ)",
+    "codePlaceholder": "2FA ከነቃ ብቻ",
+    "submit": "ይግቡ",
+    "submitting": "በመግባት ላይ…",
+    "noAccount": "መለያ የለዎትም?",
+    "signUpRider": "እንደ ሸማች ይመዝገቡ",
+    "forgotPassword": "የይለፍ ቃል ዘንቀላ።",
+    "backToHome": "ወደ መነሻ ተመለስ",
+    "twoFactorRequired": "2FA ኮድ ያስፈልጋል — ከዚህ በታች ያስገቡ እና እንደገና ይግቡ",
+    "signInFailed": "መግባት አልተሳካም",
+    "signedIn": "ገብተዋል"
+  },
+  "checkout": {
+    "corporateCode": "የኩባንያ ኮድ (አማራጭ)",
+    "corporateCodePlaceholder": "ለድጋፍ ኮድ ያስገቡ",
+    "paymentMethod": "የክፍያ ዘዴ",
+    "telebirr": "ቴሌብር",
+    "cbe": "CBE ብር (እጅ በእጅ)",
+    "subscribe": "ይመዝገቡ",
+    "starting": "በመጀመር ላይ…",
+    "cbeInstructions": "የCBE ዝውውር መመሪያ",
+    "unknownResponse": "ያልታወቀ የክፍያ ምላሽ",
+    "failed": "አልተሳካም"
+  },
+  "dashboard": {
+    "rider": {
+      "title": "የሸማች ዳሽቦርድ",
+      "activeSubscriptions": "ንቁ ደንበኝነቶች",
+      "recentRides": "የቅርብ ጊዜ ጉዞዎች",
+      "recentPayments": "የቅርብ ጊዜ ክፍያዎች",
+      "openTickets": "ክፍት ቲኬቶች",
+      "unreadNotifications": "ያልተነበቡ ማሳወቂያዎች"
+    },
+    "contractor": {
+      "title": "የተቋማት ዳሽቦርድ",
+      "upcomingTrips": "ቀጣዩ ጉዞዎች",
+      "shuttles": "የእኔ አውቶቡሶች",
+      "earnings": "ገቢ"
+    },
+    "admin": {
+      "title": "የአስተዳዳሪ ዳሽቦርድ",
+      "totalUsers": "ጠቅላላ ተጠቃሚዎች",
+      "activeSubscriptions": "ንቁ ደንበኝነቶች",
+      "revenue": "ገቢ (30 ቀናት)",
+      "pendingVerifications": "በመጠባበቅ ላይ ያሉ ማረጋገጫዎች"
+    }
+  },
+  "common": {
+    "loading": "በመጫን ላይ…",
+    "error": "የሆነ ችግር ተፈጥሯል",
+    "retry": "እንደገና ይሞክሩ",
+    "cancel": "ይቅር",
+    "save": "አስቀምጥ",
+    "delete": "ሰርዝ",
+    "edit": "አርትዕ",
+    "search": "ፈልግ",
+    "filter": "ፊልተር",
+    "clear": "አጽዳ",
+    "prev": "ቀዳሚ",
+    "next": "ቀጣይ",
+    "page": "ገጽ",
+    "of": "ከ",
+    "total": "ጠቅላላ"
+  }
+}

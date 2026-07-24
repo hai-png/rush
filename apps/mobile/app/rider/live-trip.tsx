@@ -50,7 +50,13 @@ export default function LiveTripScreen() {
     let active = true;
     const poll = async () => {
       try {
-        const data = await api.get<ShuttlePos[]>('/shuttle-positions');
+        // H-34 fix: filter by tripId so we only get positions for the rider's
+        // booked trip's shuttle. Previously, the endpoint returned ALL shuttle
+        // positions and the screen picked positions.sort(...)[0] — the most
+        // recently updated shuttle globally, not the rider's.
+        const tripId = trip?.trip?.id;
+        const url = tripId ? `/shuttle-positions?tripId=${encodeURIComponent(tripId)}` : '/shuttle-positions';
+        const data = await api.get<ShuttlePos[]>(url);
         if (active && data && data.length > 0) {
           setPositions(data);
         }

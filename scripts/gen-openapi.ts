@@ -1,17 +1,14 @@
 #!/usr/bin/env bun
 // Generate an OpenAPI 3.1 spec from the route table.
 // Output: openapi.json (in repo root)
+//
+// Phase 3 fix: import ROUTES directly from api-routes.ts instead of regex-
+// parsing the source. This is more robust and picks up route options
+// (requireAuth, requireRole) for richer OpenAPI metadata.
 
-import { writeFileSync, readFileSync } from 'node:fs';
+import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-
-const source = readFileSync(join(process.cwd(), 'src/lib/api-routes.ts'), 'utf-8');
-const routeRegex = /r\('(GET|POST|PUT|PATCH|DELETE)',\s*'([^']+)'/g;
-const routes: Array<{ method: string; path: string }> = [];
-let match;
-while ((match = routeRegex.exec(source)) !== null) {
-  routes.push({ method: match[1]!, path: match[2]! });
-}
+import { ROUTES } from '../src/lib/api-routes';
 
 const spec: any = {
   openapi: '3.1.0',
@@ -32,14 +29,29 @@ const spec: any = {
   paths: {},
 };
 
-for (const entry of routes) {
-  const path = entry.path.replace(/:([a-zA-Z_]+)/g, '{$1}');
-  if (!spec.paths[path]) spec.paths[path] = {};
+for (const entry of ROUTES) {
+  const path = entry.pattern.source
+    .replace(/^\^/, '')
+    .replace(/\$$/, '')
+    .replace(/\(\[\^\/\]\+\)/g, (m, _, offset, str) => {
+      // Replace capture groups with {paramName} — need to track param names
+      return `{${entry.paramNames.shift()}}`;
+    });
+  // Rebuild path with param names (the above shift approach is fragile; do it properly)
+  let pathStr = entry.pattern.source.replace(/^\^/, '').replace(/\$$/, '');
+  const paramNames = [...entry.paramNames];
+  pathStr = pathStr.replace(/\(\[\^\/\]\+\)/g, () => `{${paramNames.shift()}}`);
+
+  if (!spec.paths[pathStr]) spec.paths[pathStr] = {};
   const method = entry.method.toLowerCase();
-  spec.paths[path][method] = {
-    summary: `${entry.method} ${entry.path}`,
-    security: [{ bearerAuth: [] }, { cookieAuth: [] }],
-    tags: [path.split('/')[1] || 'root'],
+  const security: any[] = [];
+  if (entry.options.requireAuth) {
+    security.push({ bearerAuth: [] }, { cookieAuth: [] });
+  }
+  spec.paths[pathStr][method] = {
+    summary: `${entry.method} ${pathStr}`,
+    security: security.length > 0 ? security : undefined,
+    tags: [pathStr.split('/')[1] || 'root'],
     responses: {
       '200': { description: 'Success' },
       '401': { description: 'Unauthorized' },
@@ -51,4 +63,4 @@ for (const entry of routes) {
 const outputPath = join(process.cwd(), 'openapi.json');
 writeFileSync(outputPath, JSON.stringify(spec, null, 2));
 console.log(`OpenAPI spec written to ${outputPath}`);
-console.log(`  ${Object.keys(spec.paths).length} paths, ${routes.length} operations`);
+console.log(`  ${Object.keys(spec.paths).length} paths, ${ROUTES.length} operations`);

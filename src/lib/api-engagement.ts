@@ -116,15 +116,23 @@ const DeviceInput = z.object({
 });
 
 export async function POST_device({ session, body }: any) {
-  const input = DeviceInput.parse(body);
-  const key = `device:${session.id}:${input.platform}`;
-  await db.setting.upsert({
-    where: { key },
-    update: { value: JSON.stringify({ pushToken: input.pushToken, userAgent: input.userAgent, registeredAt: new Date().toISOString() }) },
-    create: { key, value: JSON.stringify({ pushToken: input.pushToken, userAgent: input.userAgent, registeredAt: new Date().toISOString() }) },
-  });
-  logger.info({ userId: session.id, platform: input.platform }, '[device] registered');
-  return { status: 201, data: { ok: true } };
+  // CRITICAL FIX (C-11): Push notifications are not implemented. The endpoint
+  // previously stored the pushToken in the Setting table but no code ever
+  // read it back to dispatch a push — users believed push was enabled but
+  // nothing ever arrived. Until a real Device model + FCM/APNs provider is
+  // wired up, return 501 so clients know the feature is not available and
+  // can surface an appropriate message to the user.
+  //
+  // To re-enable: implement a Device model in prisma/schema.prisma, wire up
+  // an FCM/APNs provider in src/lib/push-providers.ts, and call it from the
+  // outbox drainer's push channel (src/lib/scheduler.ts:147-157). Then
+  // remove this 501 and restore the original storage logic (using the new
+  // Device table, not the Setting table — the Setting-based storage allowed
+  // only one token per platform per user, silently overwriting the first
+  // device when the app was installed on a second device).
+  throw new (await import('@/lib/errors')).NotFoundError(
+    'Push notifications are not yet implemented. The mobile app should display "Notifications unavailable" and hide the push toggle.'
+  );
 }
 
 export async function DELETE_device({ session, body }: any) {

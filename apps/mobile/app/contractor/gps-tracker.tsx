@@ -1,6 +1,7 @@
 import { View, Text, TouchableOpacity, StyleSheet, Alert } from 'react-native';
 import { useState, useEffect, useRef } from 'react';
 import { api } from '../../src/lib/api';
+import { queueOrSend } from '../../src/lib/offline-queue';
 import { colors, spacing, radius, fontSize, fontWeight } from '../../src/lib/theme';
 
 // Contractor GPS tracker — posts device GPS coordinates to /shuttle-positions
@@ -64,8 +65,15 @@ export default function GpsTrackerScreen() {
         setError('No GPS coordinates available yet');
         return;
       }
-      await api.post('/shuttle-positions', pos);
+      // H-33 fix: use the offline queue instead of api.post directly.
+      // On network failure, the position is queued locally and retried.
+      // Previously, a dropped connection meant the position was lost forever
+      // and riders tracking the shuttle saw a stale map.
+      const result = await queueOrSend('POST', '/shuttle-positions', pos);
       setLastPosted(new Date().toLocaleTimeString());
+      if (result.queued) {
+        setError('Saved offline — will sync when connection returns');
+      }
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Failed to post position');
     } finally { setPosting(false); }

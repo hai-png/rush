@@ -1,3 +1,5 @@
+import { ensureCsrf } from '@/components/csrf-initializer';
+
 // Browser-side API client. Handles JSON encoding, CSRF header injection,
 // error unwrapping, and 401 redirect to /login.
 
@@ -38,8 +40,12 @@ export async function apiFetch<T = any>(path: string, opts: RequestInit = {}): P
     headers.set('content-type', 'application/json');
   }
 
-  // CSRF: for non-safe methods, attach the CSRF token from the cookie.
+  // CSRF: for non-safe methods, ensure the CSRF cookie exists (await the
+  // initializer's promise) before attaching the token. H-32 fix: previously
+  // a fast-typing user could POST before the cookie was set, causing spurious
+  // "CSRF token missing" errors on login.
   if (opts.method && !['GET', 'HEAD', 'OPTIONS'].includes(opts.method)) {
+    await ensureCsrf();
     const csrfToken = getCookie(CSRF_COOKIE);
     if (csrfToken) headers.set(CSRF_HEADER, csrfToken);
   }

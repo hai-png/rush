@@ -59,7 +59,7 @@ jobs:
           bun-version: 1.3.14
       - run: bun install --frozen-lockfile
       - run: bunx prisma generate --schema prisma/schema.prisma
-      - run: bun test scripts/race-condition-tests.test.ts
+      - run: bun run test:race
 
   e2e-tests:
     name: End-to-end tests
@@ -69,6 +69,14 @@ jobs:
       CRON_SECRET: e2e-test-cron-secret-32-chars-minimum
       DATABASE_URL: file:./db/custom.db
       NODE_ENV: development
+      # CI fix: the e2e script requires OTP_DEBUG=1 to return dev codes in
+      # API responses (so the test can verify OTP/password-reset flows without
+      # receiving real SMS). RATE_LIMIT_DISABLED=1 prevents rate-limit failures
+      # during rapid test runs.
+      OTP_DEBUG: "1"
+      RATE_LIMIT_DISABLED: "1"
+      # CI fix: use mock Telebirr for e2e (no real payment creds in CI).
+      TELEBIRR_ENV: mock
     steps:
       - uses: actions/checkout@v4
       - uses: oven-sh/setup-bun@v2

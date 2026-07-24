@@ -91,6 +91,7 @@ CREATE TABLE "Session" (
     "expiresAt" DATETIME NOT NULL,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "revokedAt" DATETIME,
+    "lastSeenAt" DATETIME,
     CONSTRAINT "Session_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
@@ -233,7 +234,7 @@ CREATE TABLE "Subscription" (
     "cancelledAt" DATETIME,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" DATETIME NOT NULL,
-    CONSTRAINT "Subscription_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "Subscription_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE RESTRICT ON UPDATE CASCADE,
     CONSTRAINT "Subscription_planId_fkey" FOREIGN KEY ("planId") REFERENCES "SubscriptionPlan" ("id") ON DELETE RESTRICT ON UPDATE CASCADE,
     CONSTRAINT "Subscription_corporateId_fkey" FOREIGN KEY ("corporateId") REFERENCES "Corporate" ("id") ON DELETE SET NULL ON UPDATE CASCADE
 );
@@ -247,12 +248,13 @@ CREATE TABLE "Payment" (
     "seatClaimId" TEXT,
     "method" TEXT NOT NULL,
     "amountCents" INTEGER NOT NULL,
+    "subsidyCents" INTEGER NOT NULL DEFAULT 0,
     "status" TEXT NOT NULL DEFAULT 'pending',
     "refundAmountCents" INTEGER NOT NULL DEFAULT 0,
     "refundedAt" DATETIME,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" DATETIME NOT NULL,
-    CONSTRAINT "Payment_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "Payment_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE RESTRICT ON UPDATE CASCADE,
     CONSTRAINT "Payment_subscriptionId_fkey" FOREIGN KEY ("subscriptionId") REFERENCES "Subscription" ("id") ON DELETE SET NULL ON UPDATE CASCADE
 );
 
@@ -294,6 +296,7 @@ CREATE TABLE "SeatRelease" (
     "window" TEXT NOT NULL,
     "status" TEXT NOT NULL DEFAULT 'open',
     "expiresAt" DATETIME NOT NULL,
+    "priceCents" INTEGER,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" DATETIME NOT NULL,
     CONSTRAINT "SeatRelease_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
@@ -323,6 +326,7 @@ CREATE TABLE "Ride" (
     "seatClaimId" TEXT,
     "pickupLocationId" TEXT,
     "assignmentId" TEXT,
+    "farePaidCents" INTEGER,
     "status" TEXT NOT NULL DEFAULT 'booked',
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" DATETIME NOT NULL,
@@ -332,6 +336,20 @@ CREATE TABLE "Ride" (
     CONSTRAINT "Ride_seatClaimId_fkey" FOREIGN KEY ("seatClaimId") REFERENCES "SeatClaim" ("id") ON DELETE SET NULL ON UPDATE CASCADE,
     CONSTRAINT "Ride_pickupLocationId_fkey" FOREIGN KEY ("pickupLocationId") REFERENCES "PickupLocation" ("id") ON DELETE SET NULL ON UPDATE CASCADE,
     CONSTRAINT "Ride_assignmentId_fkey" FOREIGN KEY ("assignmentId") REFERENCES "RouteAssignment" ("id") ON DELETE SET NULL ON UPDATE CASCADE
+);
+
+-- CreateTable
+CREATE TABLE "RideRating" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "rideId" TEXT NOT NULL,
+    "riderId" TEXT NOT NULL,
+    "contractorId" TEXT NOT NULL,
+    "rating" INTEGER NOT NULL,
+    "comment" TEXT,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "RideRating_rideId_fkey" FOREIGN KEY ("rideId") REFERENCES "Ride" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "RideRating_riderId_fkey" FOREIGN KEY ("riderId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
+    CONSTRAINT "RideRating_contractorId_fkey" FOREIGN KEY ("contractorId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
 -- CreateTable
@@ -374,6 +392,15 @@ CREATE TABLE "FaqArticle" (
     "isActive" BOOLEAN NOT NULL DEFAULT true,
     "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     "updatedAt" DATETIME NOT NULL
+);
+
+-- CreateTable
+CREATE TABLE "Holiday" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "date" DATETIME NOT NULL,
+    "name" TEXT NOT NULL,
+    "isActive" BOOLEAN NOT NULL DEFAULT true,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 -- CreateTable
@@ -485,6 +512,49 @@ CREATE TABLE "CorporateInvite" (
     CONSTRAINT "CorporateInvite_createdById_fkey" FOREIGN KEY ("createdById") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
 );
 
+-- CreateTable
+CREATE TABLE "CorporateInvoice" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "corporateId" TEXT NOT NULL,
+    "periodStart" DATETIME NOT NULL,
+    "periodEnd" DATETIME NOT NULL,
+    "subtotalCents" INTEGER NOT NULL,
+    "taxCents" INTEGER NOT NULL DEFAULT 0,
+    "totalCents" INTEGER NOT NULL,
+    "status" TEXT NOT NULL DEFAULT 'draft',
+    "issuedAt" DATETIME,
+    "dueAt" DATETIME,
+    "paidAt" DATETIME,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "CorporateInvoice_corporateId_fkey" FOREIGN KEY ("corporateId") REFERENCES "Corporate" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+-- CreateTable
+CREATE TABLE "Mandate" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "userId" TEXT NOT NULL,
+    "subscriptionId" TEXT,
+    "mctContractNo" TEXT NOT NULL,
+    "mandateTemplateId" TEXT,
+    "status" TEXT NOT NULL DEFAULT 'pending',
+    "signedAt" DATETIME,
+    "cancelledAt" DATETIME,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    "updatedAt" DATETIME NOT NULL,
+    CONSTRAINT "Mandate_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+);
+
+-- CreateTable
+CREATE TABLE "TwoFactorBackupCode" (
+    "id" TEXT NOT NULL PRIMARY KEY,
+    "userId" TEXT NOT NULL,
+    "codeHash" TEXT NOT NULL,
+    "usedAt" DATETIME,
+    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT "TwoFactorBackupCode_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
+);
+
 -- CreateIndex
 CREATE UNIQUE INDEX "User_phone_key" ON "User"("phone");
 
@@ -567,6 +637,9 @@ CREATE INDEX "Trip_driverId_departureAt_idx" ON "Trip"("driverId", "departureAt"
 CREATE INDEX "Trip_status_departureAt_idx" ON "Trip"("status", "departureAt");
 
 -- CreateIndex
+CREATE UNIQUE INDEX "Trip_routeId_departureAt_window_key" ON "Trip"("routeId", "departureAt", "window");
+
+-- CreateIndex
 CREATE INDEX "RouteAssignment_contractorId_monthStart_idx" ON "RouteAssignment"("contractorId", "monthStart");
 
 -- CreateIndex
@@ -612,9 +685,6 @@ CREATE INDEX "RefundRetry_paymentId_idx" ON "RefundRetry"("paymentId");
 CREATE INDEX "RefundRetry_status_nextAttemptAt_idx" ON "RefundRetry"("status", "nextAttemptAt");
 
 -- CreateIndex
-CREATE INDEX "TelebirrNotifyEvent_merchOrderId_receivedAt_idx" ON "TelebirrNotifyEvent"("merchOrderId", "receivedAt");
-
--- CreateIndex
 CREATE INDEX "SeatRelease_status_expiresAt_idx" ON "SeatRelease"("status", "expiresAt");
 
 -- CreateIndex
@@ -651,6 +721,15 @@ CREATE INDEX "Ride_assignmentId_idx" ON "Ride"("assignmentId");
 CREATE INDEX "Ride_tripId_userId_status_idx" ON "Ride"("tripId", "userId", "status");
 
 -- CreateIndex
+CREATE INDEX "RideRating_contractorId_createdAt_idx" ON "RideRating"("contractorId", "createdAt");
+
+-- CreateIndex
+CREATE INDEX "RideRating_rideId_idx" ON "RideRating"("rideId");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "RideRating_rideId_riderId_key" ON "RideRating"("rideId", "riderId");
+
+-- CreateIndex
 CREATE INDEX "SupportTicket_userId_idx" ON "SupportTicket"("userId");
 
 -- CreateIndex
@@ -658,6 +737,9 @@ CREATE INDEX "SupportTicket_status_idx" ON "SupportTicket"("status");
 
 -- CreateIndex
 CREATE INDEX "TicketMessage_ticketId_createdAt_idx" ON "TicketMessage"("ticketId", "createdAt");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "Holiday_date_key" ON "Holiday"("date");
 
 -- CreateIndex
 CREATE INDEX "Notification_userId_readAt_idx" ON "Notification"("userId", "readAt");
@@ -713,3 +795,55 @@ CREATE UNIQUE INDEX "CorporateInvite_code_key" ON "CorporateInvite"("code");
 -- CreateIndex
 CREATE INDEX "CorporateInvite_corporateId_idx" ON "CorporateInvite"("corporateId");
 
+-- CreateIndex
+CREATE INDEX "CorporateInvoice_corporateId_periodStart_idx" ON "CorporateInvoice"("corporateId", "periodStart");
+
+-- CreateIndex
+CREATE INDEX "CorporateInvoice_status_idx" ON "CorporateInvoice"("status");
+
+-- CreateIndex
+CREATE UNIQUE INDEX "Mandate_mctContractNo_key" ON "Mandate"("mctContractNo");
+
+-- CreateIndex
+CREATE INDEX "Mandate_userId_idx" ON "Mandate"("userId");
+
+-- CreateIndex
+CREATE INDEX "Mandate_subscriptionId_idx" ON "Mandate"("subscriptionId");
+
+-- CreateIndex
+CREATE INDEX "Mandate_status_idx" ON "Mandate"("status");
+
+-- CreateIndex
+CREATE INDEX "TwoFactorBackupCode_userId_idx" ON "TwoFactorBackupCode"("userId");
+
+
+-- C-1 fix: pending renewal extension fields on Subscription
+ALTER TABLE "Subscription" ADD COLUMN "pendingEndDate" DATETIME;
+ALTER TABLE "Subscription" ADD COLUMN "pendingRidesReset" BOOLEAN NOT NULL DEFAULT 0;
+
+-- H-4 fix: prevent double-booking the same user on the same trip.
+-- Partial unique index on (tripId, userId) for active rides only.
+-- Works on both SQLite (3.8.0+) and Postgres.
+CREATE UNIQUE INDEX IF NOT EXISTS "ride_trip_user_active_unique"
+  ON "Ride"("tripId", "userId")
+  WHERE status IN ('booked', 'boarded');
+
+-- H-9 fix: prevent duplicate corporate invoices for the same (corporateId, periodStart).
+-- Without this, two concurrent scheduler ticks could both create an invoice.
+CREATE UNIQUE INDEX IF NOT EXISTS "corporate_invoice_corporate_period_unique"
+  ON "CorporateInvoice"("corporateId", "periodStart");
+
+-- H-24 fix: make AuditLog append-only at the DB level.
+-- On Postgres these triggers prevent UPDATE/DELETE; on SQLite they also prevent
+-- mutations (SQLite supports triggers). This is defense-in-depth — the hash chain
+-- detects tampering, but the trigger prevents it.
+CREATE TRIGGER IF NOT EXISTS audit_log_no_update
+  BEFORE UPDATE ON "AuditLog"
+  BEGIN
+    SELECT RAISE(ABORT, 'AuditLog is append-only — UPDATE not allowed');
+  END;
+CREATE TRIGGER IF NOT EXISTS audit_log_no_delete
+  BEFORE DELETE ON "AuditLog"
+  BEGIN
+    SELECT RAISE(ABORT, 'AuditLog is append-only — DELETE not allowed');
+  END;

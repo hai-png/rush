@@ -22,8 +22,9 @@ function percentEncodeFilename(name: string): string {
   return encodeURIComponent(name).replace(/['()]/g, escape).replace(/\*/g, '%2A');
 }
 
-export async function handleFileDownload(req: NextRequest, session: any, params: { id: string }): Promise<NextResponse> {
-  const requestId = crypto.randomUUID();
+// H-20 fix: use ctx.requestId from the dispatcher.
+export async function handleFileDownload(req: NextRequest, session: any, params: { id: string }, ctx?: { requestId?: string }): Promise<NextResponse> {
+  const requestId = ctx?.requestId ?? crypto.randomUUID();
   try {
     if (!session) {
       return NextResponse.json({ error: { code: 'UNAUTHORIZED', message: 'Sign in required', requestId } }, { status: 401 });
@@ -71,7 +72,7 @@ export async function handleFileDownload(req: NextRequest, session: any, params:
         // prevent MIME sniffing — browsers must respect the declared
         // content-type and not sniff HTML/script out of a binary blob.
         'x-content-type-options': 'nosniff',
-        'cache-control': 'private, max-age=3600',
+        'cache-control': 'no-store',  // M-4 fix: don't cache sensitive contractor documents in the browser
       },
     });
   } catch (err) {

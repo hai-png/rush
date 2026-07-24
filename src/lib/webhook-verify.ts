@@ -74,3 +74,38 @@ export function verifyResendSignature(
   }
   return false;
 }
+
+// CRITICAL FIX (H-13): Twilio signature verification that includes POST body
+// params. Twilio's signature is HMAC-SHA1 over URL + sorted(POST params + query
+// params). The original verifyTwilioSignature only included query params, which
+// allowed an attacker to POST arbitrary body values with a valid query-string
+// signature. This new function accepts the pre-parsed body params and merges
+// them with the query params before computing the HMAC.
+export function verifyTwilioSignatureWithBody(
+  req: NextRequest,
+  authToken: string,
+  bodyParams: Record<string, string>,
+): boolean {
+  const signature = req.headers.get('x-twilio-signature');
+  if (!signature || !authToken) return false;
+
+  const url = req.nextUrl.toString();
+  const params: Record<string, string> = { ...bodyParams };
+  req.nextUrl.searchParams.forEach((v, k) => { params[k] = v; });
+
+  const sortedKeys = Object.keys(params).sort();
+  let data = url;
+  for (const k of sortedKeys) {
+    data += k + params[k];
+  }
+
+  const expected = createHmac('sha1', authToken).update(data).digest('base64');
+  try {
+    const a = Buffer.from(signature);
+    const b = Buffer.from(expected);
+    if (a.length !== b.length) return false;
+    return timingSafeEqual(a, b);
+  } catch {
+    return false;
+  }
+}

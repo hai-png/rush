@@ -6,7 +6,7 @@ import { EthiopianPhone } from '@/lib/phone';
 
 const OTP_TTL_MIN = 5;
 
-export type OtpPurpose = 'signup_verification' | 'password_reset' | 'phone_change';
+export type OtpPurpose = 'signup_verification' | 'password_reset' | 'phone_change' | 'phone_change_current';
 
 export async function sendOtp(rawPhone: string, purpose: OtpPurpose): Promise<{ devCode?: string }> {
   const phone = EthiopianPhone.normalize(rawPhone);

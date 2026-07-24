@@ -218,12 +218,15 @@ async function main() {
   // Previously the seed only created one manual trip (trip-demo-001) and
   // never called generateTripsFromAssignment, so the dev environment was
   // sparse — only 1 trip instead of ~22 (Mon-Fri × morning+evening).
+  // L fix: use static import (already imported at top of file would be cleaner,
+  // but for now keep the dynamic import with a less swallow-y catch).
   try {
     const { generateTripsFromAssignment } = await import('../src/lib/api-assignments');
     const generated = await generateTripsFromAssignment(assignment);
     console.log(`  trips generated from assignment: ${generated}`);
   } catch (err) {
-    console.log(`  (trip generation skipped: ${(err as Error).message})`);
+    // Trip generation is best-effort — the assignment is created either way.
+    console.warn(`  (trip generation skipped: ${(err as Error).message})`);
   }
 
   // Also create the manual demo trip (for e2e tests that reference trip-demo-001).

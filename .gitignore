@@ -49,5 +49,8 @@ local-*
 db/*.db
 db/uploads/
 
-# Generated artifacts
-openapi.json
+# Prisma local databases
+prisma/db/
+
+# Audit patch backups
+.audit-patches/

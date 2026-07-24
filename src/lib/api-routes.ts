@@ -1,38 +1,12 @@
+// Route table for the catch-all API dispatcher.
+// Each module's routes are declared in a clearly-labeled block below.
+// Future refactor: move each block into its module's own routes.ts file.
+//
+// The `r()` function and `RouteEntry` type are imported from route-builder.ts
+// so they can be shared across per-module route files when extracted.
 
-import { NextRequest } from 'next/server';
-import { api, ApiOptions } from '@/lib/api';
-
-type Handler = (...args: any[]) => Promise<any> | any;
-type RouteEntry = {
-  method: string;
-  pattern: RegExp;
-  paramNames: string[];
-  options: ApiOptions;
-  handler: Handler;
-  // If true, the dispatcher bypasses JSON body parsing + the api() wrapper
-  raw?: boolean;
-};
-
-function r(method: string, path: string, options: ApiOptions, handler: Handler, raw = false): RouteEntry {
-  const paramNames: string[] = [];
-  const patternStr = path.replace(/:([a-zA-Z_]+)/g, (_, name) => {
-    paramNames.push(name);
-    return '([^/]+)';
-  });
-  return { method, pattern: new RegExp(`^${patternStr}$`), paramNames, options, handler, raw };
-}
-
-export function findRoute(method: string, path: string): { entry: RouteEntry; params: Record<string, string> } | null {
-  for (const entry of ROUTES) {
-    if (entry.method !== method) continue;
-    const m = entry.pattern.exec(path);
-    if (!m) continue;
-    const params: Record<string, string> = {};
-    entry.paramNames.forEach((name, i) => { params[name] = decodeURIComponent(m[i + 1]!); });
-    return { entry, params };
-  }
-  return null;
-}
+import { r, type RouteEntry } from '@/lib/route-builder';
+import type { ApiOptions } from '@/lib/api';
 
 import * as identity from '@/lib/api-identity';
 import * as catalog from '@/lib/api-catalog';
@@ -59,8 +33,8 @@ import * as assignments from '@/lib/api-assignments';
 import * as ratings from '@/lib/api-ratings';
 
 // Note: the catch-all mounts at /api/v1, so paths here are relative to that.
-const ROUTES: RouteEntry[] = [
-  // Identity / auth
+export const ROUTES: RouteEntry[] = [
+  // ── Identity / auth ──────────────────────────────────────────────
   r('POST', '/auth/register', { exemptFromTosGate: true }, identity.POST_register),
   r('POST', '/auth/token', { exemptFromTosGate: true }, identity.POST_token),
   r('POST', '/auth/logout', {}, identity.POST_logout),
@@ -68,12 +42,10 @@ const ROUTES: RouteEntry[] = [
   r('POST', '/auth/refresh', { exemptFromTosGate: true }, identity.POST_refresh),
   r('GET',  '/auth/me', { requireAuth: true, exemptFromTosGate: true }, identity.GET_me),
   r('POST', '/auth/change-password', { requireAuth: true }, identity.POST_change_password),
-  // phone-change flow.
   r('POST', '/account/phone/change/request', { requireAuth: true }, identity.POST_phone_change_request),
   r('POST', '/account/phone/change/confirm', { requireAuth: true }, identity.POST_phone_change_confirm),
   r('GET',  '/auth/sessions', { requireAuth: true, exemptFromTosGate: true }, identity.GET_sessions),
   r('DELETE', '/auth/sessions/:id', { requireAuth: true, exemptFromTosGate: true }, identity.DELETE_session),
-  // admin session management for any user.
   r('GET',    '/admin/users/:id/sessions', { requireAuth: true, requireRole: ['platform_admin'], exemptFromTosGate: true }, identity.GET_admin_user_sessions),
   r('DELETE', '/admin/users/:id/sessions/:sid', { requireAuth: true, requireRole: ['platform_admin'], exemptFromTosGate: true }, identity.DELETE_admin_user_session),
   r('POST', '/auth/otp/send', { exemptFromTosGate: true }, identity.POST_otp_send),
@@ -86,6 +58,7 @@ const ROUTES: RouteEntry[] = [
   r('POST', '/auth/2fa/verify', { requireAuth: true }, identity.POST_2fa_verify),
   r('POST', '/auth/2fa/disable', { requireAuth: true }, identity.POST_2fa_disable),
 
+  // ── Catalog (public) ─────────────────────────────────────────────
   r('GET', '/plans', {}, catalog.GET_plans),
   r('GET', '/routes', {}, catalog.GET_routes),
   r('GET', '/routes/:id', {}, catalog.GET_route),
@@ -97,6 +70,7 @@ const ROUTES: RouteEntry[] = [
   r('GET', '/trips/:id', {}, catalog.GET_trip),
   r('GET', '/faqs', {}, catalog.GET_faqs),
 
+  // ── Assignments ──────────────────────────────────────────────────
   r('GET', '/assignments', { requireAuth: true }, assignments.GET_assignments),
   r('GET', '/assignments/:id', { requireAuth: true }, assignments.GET_assignment),
   r('POST', '/admin/assignments', { requireAuth: true, requireRole: ['platform_admin'] }, assignments.POST_assignment),
@@ -104,20 +78,20 @@ const ROUTES: RouteEntry[] = [
   r('POST', '/assignments/:id/reject', { requireAuth: true, requireRole: ['contractor', 'platform_admin'] }, assignments.POST_reject_assignment),
   r('GET', '/contractor/assignments', { requireAuth: true, requireRole: ['contractor', 'platform_admin'] }, assignments.GET_my_assignments),
 
+  // ── Subscriptions ────────────────────────────────────────────────
   r('GET', '/subscriptions', { requireAuth: true }, subscriptions.GET_list),
   r('POST', '/subscriptions', { requireAuth: true }, subscriptions.POST_create),
   r('GET', '/subscriptions/:id', { requireAuth: true }, subscriptions.GET_one),
   r('POST', '/subscriptions/:id/cancel', { requireAuth: true }, subscriptions.POST_cancel),
-  r('DELETE', '/subscriptions/:id', { requireAuth: true }, subscriptions.DELETE_subscription),
   r('POST', '/subscriptions/:id/renew', { requireAuth: true }, subscriptions.POST_renew),
   r('POST', '/subscriptions/:id/change-payment-method', { requireAuth: true }, subscriptions.POST_change_payment_method),
 
+  // ── Payments ─────────────────────────────────────────────────────
   r('POST', '/payments/checkout', { requireAuth: true }, payments.POST_checkout),
   r('GET', '/payments/:id', { requireAuth: true }, payments.GET_one),
   r('GET', '/payments', { requireAuth: true }, payments.GET_list),
-  // Refunds: single endpoint at /admin/payments/:id/refund (admin-only).
-  // The previous /payments/:id/refund and /admin/refunds duplicates were removed.
 
+  // ── Marketplace ──────────────────────────────────────────────────
   r('GET', '/marketplace/seat-releases', { requireAuth: true }, marketplace.GET_releases),
   r('GET', '/marketplace/seat-releases/:id', { requireAuth: true }, marketplace.GET_release),
   r('GET', '/marketplace/my-releases', { requireAuth: true }, marketplace.GET_my_releases),
@@ -127,8 +101,8 @@ const ROUTES: RouteEntry[] = [
   r('DELETE', '/marketplace/seat-releases/:id', { requireAuth: true }, marketplace.DELETE_release),
   r('GET', '/marketplace/seat-claims', { requireAuth: true }, marketplace.GET_claims),
   r('GET', '/marketplace/seat-claims/:id', { requireAuth: true }, marketplace.GET_claim),
-  r('POST', '/marketplace/seat-claims', { requireAuth: true }, marketplace.POST_claim_direct),
 
+  // ── Rides + trips + shuttle positions ────────────────────────────
   r('GET', '/rides', { requireAuth: true }, operations.GET_rides),
   r('GET', '/rides/:id', { requireAuth: true }, operations.GET_ride),
   r('POST', '/rides', { requireAuth: true }, operations.POST_ride),
@@ -145,6 +119,7 @@ const ROUTES: RouteEntry[] = [
   r('POST', '/shuttle-positions', { requireAuth: true, requireRole: ['contractor', 'platform_admin'] }, operations.POST_shuttle_position),
   r('GET', '/shuttle-positions/stream', { requireAuth: true }, operations.handleShuttlePositionStream, true),
 
+  // ── Support tickets ──────────────────────────────────────────────
   r('GET', '/tickets', { requireAuth: true }, support.GET_list),
   r('POST', '/tickets', { requireAuth: true }, support.POST_create),
   r('GET', '/tickets/:id', { requireAuth: true }, support.GET_one),
@@ -153,39 +128,39 @@ const ROUTES: RouteEntry[] = [
   r('POST', '/tickets/:id/messages', { requireAuth: true }, support.POST_message),
   r('POST', '/tickets/:id/messages/with-attachment', { requireAuth: true }, support.handleTicketMessageWithAttachment, true),
 
+  // ── Notifications + engagement ───────────────────────────────────
   r('GET', '/notifications', { requireAuth: true }, engagement.GET_notifications),
   r('GET', '/notifications/unread-count', { requireAuth: true }, engagement.GET_unread_count),
   r('GET', '/notifications/preferences', { requireAuth: true }, engagement.GET_preferences),
   r('POST', '/notifications/:id/read', { requireAuth: true }, engagement.POST_mark_read),
-  r('PATCH', '/notifications/:id', { requireAuth: true }, engagement.PATCH_notification),
-  r('DELETE', '/notifications/:id', { requireAuth: true }, engagement.DELETE_notification),
   r('POST', '/notifications/read-all', { requireAuth: true }, engagement.POST_mark_all_read),
   r('PATCH', '/notifications/preferences', { requireAuth: true }, engagement.PATCH_preferences),
   r('POST', '/devices', { requireAuth: true }, engagement.POST_device),
   r('DELETE', '/devices', { requireAuth: true }, engagement.DELETE_device),
 
+  // ── Account ──────────────────────────────────────────────────────
   r('GET', '/account', { requireAuth: true }, account.GET_account),
   r('PATCH', '/account', { requireAuth: true }, account.PATCH_account),
+  r('PATCH', '/contractor/profile', { requireAuth: true }, account.PATCH_contractor_profile),
   r('GET', '/account/export', { requireAuth: true }, account.GET_export),
-  r('POST', '/account/delete', { requireAuth: true, exemptFromTosGate: true }, account.POST_delete),
-  // #5: contractor self-edits their profile.
-  r('PATCH', '/contractor/profile', { requireAuth: true, requireRole: ['contractor', 'platform_admin'] }, account.PATCH_contractor_profile),
+  r('POST', '/account/delete', { requireAuth: true }, account.POST_delete),
 
-  r('GET', '/dashboard/rider', { requireAuth: true, requireRole: ['rider', 'platform_admin'] }, dashboard.GET_rider),
-  r('GET', '/dashboard/rider/active-trip', { requireAuth: true, requireRole: ['rider', 'platform_admin'] }, dashboard.GET_rider_active_trip),
+  // ── Dashboard ────────────────────────────────────────────────────
+  r('GET', '/dashboard/rider', { requireAuth: true }, dashboard.GET_rider),
   r('GET', '/dashboard/contractor', { requireAuth: true, requireRole: ['contractor', 'platform_admin'] }, dashboard.GET_contractor),
-  r('GET', '/dashboard/corporate', { requireAuth: true, requireRole: ['corporate_admin', 'platform_admin'] }, dashboard.GET_corporate),
   r('GET', '/dashboard/admin', { requireAuth: true, requireRole: ['platform_admin'] }, dashboard.GET_admin),
+  r('GET', '/dashboard/rider/active-trip', { requireAuth: true }, dashboard.GET_rider_active_trip),
 
+  // ── ToS ──────────────────────────────────────────────────────────
   r('GET', '/tos/current', { exemptFromTosGate: true }, tos.GET_current),
   r('POST', '/tos/accept', { requireAuth: true, exemptFromTosGate: true }, tos.POST_accept),
 
+  // ── Admin ────────────────────────────────────────────────────────
   r('GET', '/admin/users', { requireAuth: true, requireRole: ['platform_admin'] }, admin.GET_users),
   r('GET', '/admin/users/:id', { requireAuth: true, requireRole: ['platform_admin'] }, admin.GET_user),
   r('GET', '/admin/payments', { requireAuth: true, requireRole: ['platform_admin'] }, admin.GET_payments),
   r('GET', '/admin/payments/:id', { requireAuth: true, requireRole: ['platform_admin'] }, admin.GET_payment),
   r('POST', '/admin/payments/:id/refund', { requireAuth: true, requireRole: ['platform_admin'] }, admin.POST_refund),
-  // Cancel a mid-flight refund before processRefundRetries picks it up.
   r('POST', '/admin/payments/:id/refunds/:refundId/cancel', { requireAuth: true, requireRole: ['platform_admin'] }, adminAdvanced.POST_cancel_refund),
   r('GET', '/admin/audit-logs', { requireAuth: true, requireRole: ['platform_admin'] }, admin.GET_audit_logs),
   r('GET', '/admin/plans', { requireAuth: true, requireRole: ['platform_admin'] }, admin.GET_plans),
@@ -203,13 +178,10 @@ const ROUTES: RouteEntry[] = [
   r('GET', '/admin/tickets', { requireAuth: true, requireRole: ['platform_admin'] }, admin.GET_tickets),
   r('POST', '/admin/tickets/:id/messages', { requireAuth: true, requireRole: ['platform_admin'] }, admin.POST_ticket_message),
   r('POST', '/admin/audit/verify', { requireAuth: true, requireRole: ['platform_admin'] }, admin.POST_audit_verify),
-  // Trip creation is at POST /trips (operations) — admin/trips duplicate removed.
-
   r('GET',  '/admin/dashboard', { requireAuth: true, requireRole: ['platform_admin'] }, adminAdvanced.GET_dashboard),
   r('PATCH', '/admin/users/:id', { requireAuth: true, requireRole: ['platform_admin'] }, adminAdvanced.PATCH_user),
   r('POST', '/admin/users/:id/impersonate', { requireAuth: true, requireRole: ['platform_admin'] }, adminAdvanced.POST_impersonate),
   r('GET',  '/admin/contractors/pending', { requireAuth: true, requireRole: ['platform_admin'] }, adminAdvanced.GET_pending_contractors),
-  r('POST', '/admin/contractors/:id/reject', { requireAuth: true, requireRole: ['platform_admin'] }, adminAdvanced.POST_reject_contractor),
   r('GET',  '/admin/corporates', { requireAuth: true, requireRole: ['platform_admin'] }, adminAdvanced.GET_corporates),
   r('GET',  '/admin/corporates/pending', { requireAuth: true, requireRole: ['platform_admin'] }, adminAdvanced.GET_pending_corporates),
   r('POST', '/admin/corporates/:id/activate', { requireAuth: true, requireRole: ['platform_admin'] }, adminAdvanced.POST_activate_corporate),
@@ -227,41 +199,35 @@ const ROUTES: RouteEntry[] = [
   r('PATCH', '/admin/routes/:id/price', { requireAuth: true, requireRole: ['platform_admin'] }, adminAdvanced.PATCH_route_price),
   r('POST', '/admin/faqs', { requireAuth: true, requireRole: ['platform_admin'] }, admin.POST_faq),
   r('DELETE', '/admin/faqs/:id', { requireAuth: true, requireRole: ['platform_admin'] }, admin.DELETE_faq),
-  // corporate billing — mark a corporate invoice as paid.
   r('POST', '/admin/corporates/:id/invoices/:invoiceId/mark-paid', { requireAuth: true, requireRole: ['platform_admin'] }, adminAdvanced.POST_mark_invoice_paid),
-
-  // holiday management (skip trip generation on holidays).
   r('GET', '/admin/holidays', { requireAuth: true, requireRole: ['platform_admin'] }, admin.GET_holidays),
   r('POST', '/admin/holidays', { requireAuth: true, requireRole: ['platform_admin'] }, admin.POST_holiday),
   r('DELETE', '/admin/holidays/:id', { requireAuth: true, requireRole: ['platform_admin'] }, admin.DELETE_holiday),
-
   r('GET', '/contractor/shuttles', { requireAuth: true, requireRole: ['contractor'] }, admin.GET_my_shuttles),
   r('GET', '/contractor/trips', { requireAuth: true, requireRole: ['contractor'] }, admin.GET_my_trips),
 
+  // ── Webhooks ─────────────────────────────────────────────────────
   r('POST', '/webhooks/telebirr/notify', { exemptFromTosGate: true }, webhooks.handleTelebirrNotify, true),
   r('POST', '/webhooks/twilio/sms-status', { exemptFromTosGate: true }, webhooks.handleTwilioStatus, true),
   r('POST', '/webhooks/resend/email-status', { exemptFromTosGate: true }, webhooks.handleResendStatus, true),
 
+  // ── Health + metrics + cron ──────────────────────────────────────
   r('GET', '/health', { exemptFromTosGate: true }, health.GET_health),
   r('GET', '/healthz', { exemptFromTosGate: true }, health.GET_healthz),
   r('GET', '/ready', { exemptFromTosGate: true }, health.GET_ready),
   r('GET', '/config', { exemptFromTosGate: true }, health.GET_config),
-
-  // Prometheus metrics endpoint (admin-only — exposes operational intel).
-  r('GET', '/metrics', { requireAuth: true, requireRole: ['platform_admin'], exemptFromTosGate: true }, metrics.GET_metrics),
-
+  r('GET', '/metrics', { requireAuth: true, requireRole: ['platform_admin'], exemptFromTosGate: true }, metrics.GET_metrics, true),
   r('POST', '/cron/run', { exemptFromTosGate: true }, cron.POST_run),
-  // GET /cron requires admin auth (was public — exposed job routes + intervals).
   r('GET', '/cron', { requireAuth: true, requireRole: ['platform_admin'], exemptFromTosGate: true }, cron.GET_cron_jobs),
 
+  // ── Telebirr mandates + disburse ─────────────────────────────────
   r('POST', '/payments/telebirr/inapp-checkout', { requireAuth: true }, telebirr.POST_inapp_checkout),
   r('POST', '/payments/telebirr/mandate/sign-url', { requireAuth: true }, telebirr.POST_mandate_sign_url),
   r('GET',  '/payments/telebirr/mandate/:mctContractNo', { requireAuth: true }, telebirr.GET_mandate),
   r('POST', '/payments/telebirr/mandate/:mctContractNo/cancel', { requireAuth: true }, telebirr.POST_mandate_cancel),
   r('POST', '/payments/telebirr/disburse', { requireAuth: true, requireRole: ['platform_admin'] }, telebirr.POST_disburse),
 
-  // Route-level role enforcement — only riders can onboard a new corporate.
-  // Platform admins may also onboard on behalf of a rider.
+  // ── Corporate ────────────────────────────────────────────────────
   r('POST', '/corporate/onboard', { requireAuth: true, requireRole: ['rider', 'platform_admin'] }, corporate.POST_onboard),
   r('GET',  '/corporate', { requireAuth: true, requireRole: ['corporate_admin', 'platform_admin'] }, corporate.GET_current),
   r('GET',  '/corporate/me', { requireAuth: true, requireRole: ['corporate_admin', 'platform_admin'] }, corporate.GET_me),
@@ -276,12 +242,31 @@ const ROUTES: RouteEntry[] = [
   r('POST', '/corporate/members/:id/reject', { requireAuth: true, requireRole: ['corporate_admin', 'platform_admin'] }, corporate.POST_reject),
   r('PATCH', '/corporate/members/:id', { requireAuth: true, requireRole: ['corporate_admin', 'platform_admin'] }, corporate.PATCH_member),
   r('DELETE', '/corporate/members/:id', { requireAuth: true, requireRole: ['corporate_admin', 'platform_admin'] }, corporate.DELETE_member),
-  // #24: corporate billing — list invoices for the caller's corporate.
   r('GET', '/corporate/invoices', { requireAuth: true, requireRole: ['corporate_admin', 'platform_admin'] }, corporate.GET_invoices),
 
+  // ── Contractor documents + files ─────────────────────────────────
   r('GET',  '/contractor/documents', { requireAuth: true, requireRole: ['contractor', 'platform_admin'] }, documents.GET_documents),
   r('GET',  '/contractor/documents/:contractorId', { requireAuth: true, requireRole: ['platform_admin'] }, documents.GET_documents_for),
   r('POST', '/contractor/documents', { requireAuth: true, requireRole: ['contractor', 'platform_admin'] }, documents.handleDocumentUpload, true),
-
   r('GET',  '/files/:id', { requireAuth: true }, files.handleFileDownload, true),
 ];
+
+export function findRoute(method: string, path: string): { entry: RouteEntry; params: Record<string, string> } | null {
+  for (const entry of ROUTES) {
+    if (entry.method !== method) continue;
+    const m = entry.pattern.exec(path);
+    if (!m) continue;
+    const params: Record<string, string> = {};
+    // H-19 fix: decodeURIComponent can throw URIError on malformed percent-
+    // encoded sequences. Treat malformed input as a non-match.
+    for (let i = 0; i < entry.paramNames.length; i++) {
+      try {
+        params[entry.paramNames[i]] = decodeURIComponent(m[i + 1]!);
+      } catch {
+        return null;
+      }
+    }
+    return { entry, params };
+  }
+  return null;
+}

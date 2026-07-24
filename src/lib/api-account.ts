@@ -95,7 +95,16 @@ export async function PATCH_account({ session, body, ipAddress, userAgent }: any
   if (input.email !== undefined && input.email !== user.email) {
     if (input.email) {
       const existing = await db.user.findFirst({ where: { email: input.email, NOT: { id: session.id } } });
-      if (existing) throw new BadRequestError('Email already in use');
+      // H-23 fix: don't reveal that the email is already registered via a
+      // 409/400 error — an authenticated insider could enumerate the user base.
+      // Instead, silently ignore the change and return 200. The caller can't
+      // tell whether the email was taken or successfully updated. (A proper fix
+      // would send a verification email to the new address and only swap after
+      // verification, but that's a larger feature.)
+      if (existing) {
+        // Drop the email from the update payload so it's not written.
+        input.email = user.email;
+      }
     }
   }
 
@@ -175,6 +184,8 @@ export async function PATCH_contractor_profile({ session, body, ipAddress, userA
     data: {
       ...(input.licenseNumber !== undefined && { licenseNumber: input.licenseNumber }),
       ...(input.experienceYears !== undefined && { experienceYears: input.experienceYears }),
+      // L fix: vehicleType was in the Zod schema but never written to the DB.
+      ...(input.vehicleType !== undefined && { vehicleType: input.vehicleType }),
     },
   });
   await audit({

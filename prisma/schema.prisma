@@ -351,6 +351,11 @@ model Subscription {
   endDate     DateTime
   ridesUsed   Int              @default(0)
   cancelledAt DateTime?
+  // CRITICAL FIX (C-1): pending extension applied atomically inside
+  // settlePayment() when the renewal payment transitions to 'completed'.
+  // NULL when no renewal is in flight.
+  pendingEndDate    DateTime?
+  pendingRidesReset Boolean   @default(false)
   createdAt   DateTime         @default(now())
   updatedAt   DateTime         @updatedAt
 
@@ -500,6 +505,9 @@ model Ride {
   @@index([pickupLocationId])
   @@index([assignmentId])
   @@index([tripId, userId, status]) // marketplace release/claim + double-book check
+  // H-4 fix: partial unique index on (tripId, userId) for active rides.
+  // Prisma doesn't natively express partial indexes, so this is enforced via
+  // raw SQL in migration.sql. Prevents double-booking on Postgres multi-writer.
 }
 
 // Riders rate their ride after completion (1-5 stars + optional comment). One

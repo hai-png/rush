@@ -9,6 +9,7 @@ import { AppError, UnauthorizedError, ForbiddenError, RateLimitError, ConflictEr
 import { CURRENT_TOS_VERSION } from '@/lib/env';
 import { ensureSchedulerStarted } from '@/lib/scheduler';
 import { logger } from '@/lib/logger';
+import { recordRequest } from '@/lib/api-metrics';
 
 // In production, use the __Host- prefix so the cookie can only be set from
 // the origin domain (no subdomain/path overwrite attacks). Requires the
@@ -25,6 +26,27 @@ export type ApiContext = {
   ipAddress: string | undefined;
   userAgent: string | undefined;
   session: Session | null;
+};
+
+// Phase 3 fix: typed ApiHandler so handler bodies get compile-time type
+// checking on session, body, params, query. Previously every handler was
+// typed ({ session, body, params, query }: any) which let typos like
+// params.pymentId propagate to runtime 500s.
+//
+// Usage:
+//   export async function POST_create(ctx: ApiHandler<CreateInput>) { ... }
+//   export async function GET_list(ctx: ApiHandler) { ... }  // no body type
+//
+// The identity module is migrated as a pattern. Other modules can migrate
+// incrementally — the `any` fallback still works.
+export type ApiHandler<I = unknown> = {
+  requestId: string;
+  ipAddress: string | undefined;
+  userAgent: string | undefined;
+  session: Session;
+  body: I;
+  params: Record<string, string>;
+  query: Record<string, string>;
 };
 
 export type ApiOptions = {
@@ -104,8 +126,21 @@ const RATE_RULES: RateRule[] = [
 
 const DEFAULT_AUTHED = { limit: 100, windowSec: 60 };
 const DEFAULT_ANON = { limit: 60, windowSec: 60 };
+// H-17 fix: default GET rate limits (higher than state-changing).
+const DEFAULT_AUTHED_GET = { limit: 300, windowSec: 60 };
+const DEFAULT_ANON_GET = { limit: 120, windowSec: 60 };
 
 export type RateLimitInfo = { limit: number; remaining: number; resetAt: number };
+
+
+// H-16 fix: normalize the path for rate-limit bucketing so parameterized routes
+// share a bucket. /subscriptions/abc/cancel and /subscriptions/def/cancel both
+// become /subscriptions/:id/cancel. Without this, a user with N subscriptions
+// could issue N × 100 mutations/min by hitting each subscription's URL.
+function normalizePathForRateLimit(path: string): string {
+  // Replace cuid-like (24+ char alphanumeric) and numeric segments with :id
+  return path.replace(/\/[a-zA-Z0-9]{20,}/g, '/:id').replace(/\/\d+(?=\/|$)/g, '/:id');
+}
 
 export async function rateLimitCheck(
   path: string,
@@ -124,7 +159,8 @@ export async function rateLimitCheck(
     if (keySuffix.startsWith('ip:undefined')) {
       throw new RateLimitError(60);
     }
-    const key = `rl:${path}:${rule.pattern.source}:${keySuffix}`;
+    const normPath = normalizePathForRateLimit(path);
+    const key = `rl:${normPath}:${rule.pattern.source}:${keySuffix}`;
     const now = Date.now();
     const bucket = rateBuckets.get(key);
     if (!bucket || bucket.expiresAt < now) {
@@ -145,9 +181,15 @@ export async function rateLimitCheck(
   if (matchingRules.length === 0 && (method === 'POST' || method === 'PUT' || method === 'PATCH' || method === 'DELETE')) {
     const { limit, windowSec } = ctx.session ? DEFAULT_AUTHED : DEFAULT_ANON;
     const keySuffix = ctx.session ? `user:${ctx.session.id}` : (ctx.ip ? `ip:${ctx.ip}` : null);
-    if (!keySuffix) return info;
+    // H-22 fix: fail CLOSED when IP is undefined on unauthenticated state-changing
+    // requests. Previously this returned info (fail-open), allowing unbounded
+    // requests when no proxy header was present. The intent was fail-closed.
+    if (!keySuffix) {
+      throw new RateLimitError(60);
+    }
     if (keySuffix.startsWith('ip:undefined')) throw new RateLimitError(60);
-    const key = `rl:${path}:${keySuffix}`;
+    const normPath = normalizePathForRateLimit(path);
+    const key = `rl:${normPath}:${keySuffix}`;
     const now = Date.now();
     const bucket = rateBuckets.get(key);
     if (!bucket || bucket.expiresAt < now) {
@@ -409,6 +451,7 @@ export function api(options: ApiOptions, handler: Handler) {
 
       const responseBody = data === undefined ? null : (pagination ? { data, pagination } : { data });
       const res = NextResponse.json(responseBody, { status });
+    try { recordRequest(req.method, status); } catch { /* metrics must never break the request */ }
       if (headers) {
         for (const [k, v] of Object.entries(headers)) res.headers.set(k, String(v));
       }

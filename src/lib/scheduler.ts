@@ -253,8 +253,9 @@ export async function expireStale(): Promise<void> {
     select: { id: true, tripId: true, userId: true },
     take: 100,
   });
+  // H-10 fix: only mark the 100 releases we queried as expired.
   const expiredReleases = await db.seatRelease.updateMany({
-    where: { status: 'open', expiresAt: { lt: now } },
+    where: { id: { in: expiringReleases.map(r => r.id) } },
     data: { status: 'expired' },
   });
   if (expiringReleases.length > 0) {
@@ -692,7 +693,15 @@ async function corporateBilling(): Promise<void> {
         },
       });
       created++;
-    } catch (err) {
+    } catch (err: any) {
+      // H-9 fix: P2002 means a concurrent scheduler tick already created the
+      // invoice for this (corporateId, periodStart). Skip silently — the unique
+      // index is the real guarantee, this catch just prevents the error from
+      // aborting the rest of the billing run.
+      if (err?.code === 'P2002') {
+        logger.info({ corporateId: corp.id, periodStart }, '[scheduler] corporate invoice already exists (P2002) — skipping');
+        continue;
+      }
       logger.error({ err: (err as Error).message, corporateId: corp.id }, '[scheduler] corporate invoice create failed');
     }
   }

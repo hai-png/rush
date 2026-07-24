@@ -17,7 +17,10 @@
     "openapi:gen": "bun run scripts/gen-openapi.ts",
     "e2e": "bash scripts/e2e-test.sh",
     "test": "bun test scripts/",
-    "test:race": "bun test scripts/race-condition-tests.test.ts"
+    "test:race": "bun test scripts/integration-tests.test.ts",
+    "prebuild": "bun run openapi:gen",
+    "postinstall": "bun run db:generate || true",
+    "e2e:test": "bun test scripts/e2e.test.ts"
   },
   "dependencies": {
     "@prisma/client": "^6.11.1",

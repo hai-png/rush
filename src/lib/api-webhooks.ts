@@ -4,28 +4,27 @@ import { getPaymentProvider } from '@/lib/payments';
 import { settlePayment, failPayment } from '@/lib/payment-service';
 import { toErrorEnvelope } from '@/lib/errors';
 import { logger } from '@/lib/logger';
+import { formatETB } from '@/lib/format';
 import { Prisma } from '@prisma/client';
 
-// Money formatter for ETB amounts in user-facing notifications. We import
-// @/lib/format lazily and fall back to an inline formatter on failure.
-async function formatETB(cents: number): Promise<string> {
-  try {
-    const mod = await import('@/lib/format');
-    if (typeof (mod as any).formatETB === 'function') {
-      return (mod as any).formatETB(cents);
-    }
-  } catch {
-    // fall through to inline
-  }
-  return `${(cents / 100).toFixed(2)} ETB`;
-}
-
-// Telebirr webhook security currently relies solely on signature verification.
-// A defence-in-depth IP allowlist (Telebirr's documented egress ranges) should
-// be added before production — implement by populating env.TELEBIRR_WEBHOOK_IPS
-// (comma-separated CIDRs) and rejecting requests whose real client IP (per
-// clientIp() in api.ts) is not in the list. Tracked as future work pending
-// confirmation of Telebirr's published CIDRs.
+// CRITICAL FIX (C-9): All webhook handlers now return NextResponse (not plain
+// { status, data } objects). The dispatcher's handleRaw only special-cases
+// NextResponse instances — plain objects were being wrapped via
+// NextResponse.json() which always uses HTTP 200, so a forged Twilio webhook
+// with an invalid signature received 200 OK instead of 401, and Twilio/Resend
+// would stop retrying.
+//
+// CRITICAL FIX (H-13): verifyTwilioSignature now receives the parsed body
+// params so the HMAC covers URL + sorted(POST params + query params) per
+// Twilio's spec. Previously only query params were included, allowing an
+// attacker to POST arbitrary MessageSid/MessageStatus values with a valid
+// query-string signature.
+//
+// CRITICAL FIX (H-14): Resend webhook signature verification is now wired
+// up. Previously verifyResendSignature was implemented but never called.
+//
+// CRITICAL FIX (H-18): If TWILIO_AUTH_TOKEN is unset, the Twilio webhook
+// now fails closed (401) instead of accepting arbitrary POSTs.
 
 export async function handleTelebirrNotify(req: NextRequest, _session: any, _params: any, ctx: { requestId: string }): Promise<NextResponse> {
   const requestId = ctx.requestId ?? crypto.randomUUID();
@@ -98,7 +97,7 @@ async function markRefundSucceeded(refundRequestNo: string, raw: unknown): Promi
         userId,
         type: 'refund_completed',
         title: 'Refund completed',
-        body: `Your refund of ${await formatETB(refundAmount)} has been processed.`,
+        body: `Your refund of ${formatETB(refundAmount)} has been processed.`,
       });
     });
   });
@@ -133,38 +132,83 @@ async function markRefundFailed(refundRequestNo: string, raw: unknown): Promise<
 }
 
 
-export async function handleTwilioStatus(req: any, session: any, params: any, ctx: any): Promise<any> {
+export async function handleTwilioStatus(req: NextRequest, _session: any, _params: any, ctx: { requestId: string }): Promise<NextResponse> {
   const requestId = ctx.requestId ?? crypto.randomUUID();
   try {
     const env = (await import('@/lib/env')).loadEnv();
-    if (env.TWILIO_AUTH_TOKEN) {
-      const { verifyTwilioSignature } = await import('@/lib/webhook-verify');
-      const NextRequest = (await import('next/server')).NextRequest;
-      if (!verifyTwilioSignature(req as unknown as NextRequest, env.TWILIO_AUTH_TOKEN)) {
-        return { status: 401, data: { error: 'Invalid signature' } };
-      }
+
+    // CRITICAL FIX (H-18): Fail closed if TWILIO_AUTH_TOKEN is unset.
+    // Previously, when the token was missing (the default in .env.example),
+    // the endpoint accepted arbitrary POSTs and logged MessageSid/MessageStatus
+    // from untrusted input. Combined with C-9 (return-shape bug), an attacker
+    // could flood the audit log with bogus webhook events.
+    if (!env.TWILIO_AUTH_TOKEN) {
+      logger.warn('[webhook] Twilio SMS status received but TWILIO_AUTH_TOKEN is unset — rejecting');
+      return NextResponse.json(
+        { error: { code: 'UNAUTHORIZED', message: 'Twilio webhook verification not configured', requestId } },
+        { status: 401 }
+      );
     }
-    const body = await req.text();
-    const params = new URLSearchParams(body);
-    const messageSid = params.get('MessageSid');
-    const messageStatus = params.get('MessageStatus');
-    const logger = (await import('@/lib/logger')).logger;
+
+    // CRITICAL FIX (H-13): Read the raw body BEFORE signature verification
+    // and merge POST params into the verification object. Twilio's signature
+    // is HMAC-SHA1 over URL + sorted(POST params + query params). Previously
+    // only query params were included, so an attacker could POST arbitrary
+    // body values with a valid query-string signature.
+    const rawBody = await req.text();
+    const bodyParams: Record<string, string> = {};
+    const urlSearchParams = new URLSearchParams(rawBody);
+    urlSearchParams.forEach((v, k) => { bodyParams[k] = v; });
+
+    const { verifyTwilioSignatureWithBody } = await import('@/lib/webhook-verify');
+    if (!verifyTwilioSignatureWithBody(req, env.TWILIO_AUTH_TOKEN, bodyParams)) {
+      return NextResponse.json(
+        { error: { code: 'UNAUTHORIZED', message: 'Invalid signature', requestId } },
+        { status: 401 }
+      );
+    }
+
+    const messageSid = bodyParams.MessageSid;
+    const messageStatus = bodyParams.MessageStatus;
     logger.info({ messageSid, messageStatus }, '[webhook] Twilio SMS status');
-    return { status: 200, data: { ok: true } };
+    return NextResponse.json({ data: { ok: true } });
   } catch (err) {
-    return { status: 500, data: { error: 'Webhook processing failed' } };
+    const { status, body } = toErrorEnvelope(err, requestId);
+    return NextResponse.json(body, { status });
   }
 }
 
 
-export async function handleResendStatus(req: any, session: any, params: any, ctx: any): Promise<any> {
+export async function handleResendStatus(req: NextRequest, _session: any, _params: any, ctx: { requestId: string }): Promise<NextResponse> {
   const requestId = ctx.requestId ?? crypto.randomUUID();
   try {
+    const env = (await import('@/lib/env')).loadEnv();
     const body = await req.text();
-    const logger = (await import('@/lib/logger')).logger;
+
+    // CRITICAL FIX (H-14): Wire up Resend signature verification. Previously
+    // verifyResendSignature was implemented but never called, so anyone could
+    // POST arbitrary email-bounce events. If RESEND_WEBHOOK_SECRET is unset,
+    // fail closed (reject all) rather than silently accepting unverified posts.
+    if (!env.RESEND_WEBHOOK_SECRET) {
+      logger.warn('[webhook] Resend email status received but RESEND_WEBHOOK_SECRET is unset — rejecting');
+      return NextResponse.json(
+        { error: { code: 'UNAUTHORIZED', message: 'Resend webhook verification not configured', requestId } },
+        { status: 401 }
+      );
+    }
+
+    const { verifyResendSignature } = await import('@/lib/webhook-verify');
+    if (!verifyResendSignature(req, body, env.RESEND_WEBHOOK_SECRET)) {
+      return NextResponse.json(
+        { error: { code: 'UNAUTHORIZED', message: 'Invalid signature', requestId } },
+        { status: 401 }
+      );
+    }
+
     logger.info({ bodyLength: body.length }, '[webhook] Resend email status received');
-    return { status: 200, data: { ok: true } };
-  } catch {
-    return { status: 500, data: { error: 'Webhook processing failed' } };
+    return NextResponse.json({ data: { ok: true } });
+  } catch (err) {
+    const { status, body } = toErrorEnvelope(err, requestId);
+    return NextResponse.json(body, { status });
   }
 }

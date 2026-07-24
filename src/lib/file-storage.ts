@@ -32,6 +32,27 @@ function uploadDir(): string {
   return dir;
 }
 
+
+// M-5 fix: magic-byte validation for uploaded files. Prevents MIME/extension
+// spoofing (e.g. evil.pdf with Content-Type: application/pdf whose content is HTML).
+function validateMagicBytes(bytes: Uint8Array, ext: string): string | null {
+  if (bytes.length < 4) return 'File too small';
+  const sig = Array.from(bytes.slice(0, 8)).map(b => b.toString(16).padStart(2, '0')).join('');
+  const checks: Record<string, string[]> = {
+    '.pdf': ['25504446'],  // %PDF
+    '.jpg': ['ffd8ff'],
+    '.jpeg': ['ffd8ff'],
+    '.png': ['89504e47'],
+    '.webp': ['52494646'],  // RIFF....WEBP
+    '.doc': ['d0cf11e0'],  // OLE2 compound document
+    '.docx': ['504b0304'],  // ZIP (OOXML is ZIP-based)
+  };
+  const expected = checks[ext];
+  if (!expected) return null;  // no check for this extension
+  const ok = expected.some(prefix => sig.startsWith(prefix));
+  return ok ? null : `File content does not match extension "${ext}" (magic bytes mismatch)`;
+}
+
 export async function saveFile(
   file: File,
   namespace: string,
@@ -55,6 +76,14 @@ export async function saveFile(
 
   const bytes = new Uint8Array(await file.arrayBuffer());
   const checksum = createHash('sha256').update(bytes).digest('hex');
+
+  // M-5 fix: validate magic bytes so a renamed HTML file can't pass as a PDF.
+  // The client-supplied MIME type and extension are easy to spoof; the magic
+  // bytes are not. We check the first few bytes against known signatures.
+  const magicError = validateMagicBytes(bytes, ext);
+  if (magicError) {
+    throw new FileUploadError(magicError);
+  }
 
   const id = randomUUID();
   const storageKey = `${namespace}/${id}${ext}`;

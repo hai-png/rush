@@ -4,14 +4,23 @@
 //
 // Metrics:
 //   addis_ride_requests_total{method,status} — counter
-//   addis_ride_request_duration_ms{method} — histogram (p50/p95/p99)
 //   addis_ride_outbox_pending — gauge
 //   addis_ride_outbox_dead — gauge
 //   addis_ride_refund_retries_pending — gauge
-//   addis_ride_db_connections_active — gauge (always 1 for SQLite)
+//   addis_ride_active_sessions — gauge
+//   addis_ride_users{role} — gauge
 //   addis_ride_uptime_seconds — gauge
-//   addis_ride_scheduler_running — gauge (1 if started, 0 if not)
+//
+// CRITICAL FIX (C-12): This handler is now a RAW handler (registered with
+// `raw: true` in api-routes.ts). It returns a NextResponse with text/plain
+// content-type so Prometheus can parse it. The previous non-raw version
+// returned `{ status, data, headers }` which the api() wrapper serialized
+// as JSON, breaking Prometheus scraping.
+//
+// CRITICAL FIX (C-12): recordRequest is now called from the api() wrapper's
+// completion path (see api.ts) so the request counter is actually incremented.
 
+import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 
 const startTime = Date.now();
@@ -25,7 +34,10 @@ export function recordRequest(method: string, status: number): void {
   requestCounters.set(key, (requestCounters.get(key) ?? 0) + 1);
 }
 
-export async function GET_metrics(): Promise<{ status: number; data: string; headers: Record<string, string> }> {
+// Raw handler — registered with `raw: true` in api-routes.ts.
+// Returns NextResponse with text/plain content-type so Prometheus can parse it.
+export async function GET_metrics(req: NextRequest, session: any, params: any, ctx: { requestId: string }): Promise<NextResponse> {
+  const requestId = ctx.requestId ?? crypto.randomUUID();
   const lines: string[] = [];
 
   // Uptime
@@ -75,9 +87,11 @@ export async function GET_metrics(): Promise<{ status: number; data: string; hea
 
   const body = lines.join('\n') + '\n';
 
-  return {
+  return new NextResponse(body, {
     status: 200,
-    data: body,
-    headers: { 'content-type': 'text/plain; charset=utf-8; version=0.0.4' },
-  };
+    headers: {
+      'content-type': 'text/plain; charset=utf-8; version=0.0.4',
+      'x-request-id': requestId,
+    },
+  });
 }

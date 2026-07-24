@@ -3,6 +3,7 @@ import { router } from 'expo-router';
 import { View, ActivityIndicator } from 'react-native';
 import { useAuthStore } from '../src/lib/auth-store';
 import { colors } from '../src/lib/theme';
+import { routeByRole } from '../src/lib/route-by-role';
 
 export default function Index() {
   const restore = useAuthStore(s => s.restore);
@@ -11,7 +12,13 @@ export default function Index() {
     let active = true;
     restore().then(ok => {
       if (!active) return;
-      router.replace(ok ? '/rider/dashboard' : '/auth/login');
+      if (!ok) {
+        router.replace('/auth/login');
+        return;
+      }
+      // H-29 fix: route by role instead of hardcoding /rider/dashboard.
+      const user = useAuthStore.getState().user;
+      router.replace(routeByRole(user?.role));
     });
     return () => { active = false; };
   }, [restore]);

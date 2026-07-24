@@ -89,6 +89,30 @@ export async function settlePayment(reference: string, reportedAmount: Money | u
           });
         });
       }
+      // CRITICAL FIX (C-1): Apply pending renewal extension atomically when
+      // the renewal payment settles. Previously the renewal handler extended
+      // endDate + reset ridesUsed BEFORE payment, so users could get free
+      // rides by never paying. Now we apply the pending fields here.
+      if (sub && sub.status === 'active' && (sub.pendingEndDate || sub.pendingRidesReset)) {
+        const updateData: any = { pendingEndDate: null, pendingRidesReset: false };
+        if (sub.pendingEndDate) updateData.endDate = sub.pendingEndDate;
+        if (sub.pendingRidesReset) updateData.ridesUsed = 0;
+        await tx.subscription.update({
+          where: { id: sub.id },
+          data: updateData,
+        });
+        sideEffects.push(async () => {
+          await enqueueNotification({
+            userId: sub.userId,
+            type: 'subscription_activated',
+            title: 'Subscription renewed',
+            body: sub.pendingEndDate
+              ? `Your subscription has been renewed until ${new Date(sub.pendingEndDate).toLocaleDateString()}.`
+              : 'Your subscription has been renewed.',
+            link: '/dashboard/rider',
+          });
+        });
+      }
     }
     if (p.seatClaimId) {
       await tx.seatClaim.update({ where: { id: p.seatClaimId }, data: { status: 'confirmed' } });
@@ -156,19 +180,24 @@ export async function failPayment(reference: string, reasonRaw: unknown, outRequ
           where: { id: claim.seatReleaseId, status: 'claimed' },
           data: { status: 'open' },
         });
-        // Restore the seller's ride + trip capacity — without this, the
-        // seller's seat stays 'released' (decremented from seatsBooked) but
-        // the release is now 'open' with no buyer, so the seller permanently
-        // loses their seat AND the trip shows a phantom free seat.
-        if (release) {
-          const sellerRide = await tx.ride.findFirst({
-            where: { tripId: release.tripId, userId: release.userId, status: 'released' },
-          });
-          if (sellerRide) {
-            await tx.ride.update({ where: { id: sellerRide.id }, data: { status: 'booked' } });
-            await tx.trip.update({ where: { id: release.tripId }, data: { seatsBooked: { increment: 1 } } });
-          }
-        }
+        // CRITICAL FIX (H-2/H-3): Do NOT restore the seller's ride here.
+        // Previously, failPayment both reopened the release AND restored the
+        // seller's ride + incremented seatsBooked. This double-counted the
+        // seat: the release was 'open' (allowing another buyer to claim it)
+        // AND the seller's seat was 'booked' (consuming capacity). Under
+        // concurrent direct booking + failPayment, this caused overbooking.
+        //
+        // Now: only reopen the release. The seller's seat stays 'released'
+        // until either (a) another buyer claims it (settlePayment transitions
+        // the seller's ride to 'cancelled' via the marketplace flow), or
+        // (b) the release expires (scheduler.expireStale restores the seller).
+        // This matches the semantics of POST_cancel_release and
+        // scheduler.expireStale, which are the only legitimate paths to
+        // restore a released ride.
+        //
+        // If you need to restore the seller's ride on payment failure, use
+        // POST_cancel_release or DELETE_release instead — both correctly
+        // increment seatsBooked with a capacity CAS.
       }
     }
 

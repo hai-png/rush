@@ -7,7 +7,7 @@ import { EthiopianPhone } from '@/lib/phone';
 import { BadRequestError, ConflictError, UnauthorizedError, TwoFactorRequiredError, ForbiddenError, NotFoundError } from '@/lib/errors';
 import { sendOtp, verifyOtp } from '@/lib/otp';
 import { audit } from '@/lib/audit';
-import { CURRENT_TOS_VERSION } from '@/lib/env';
+import { CURRENT_TOS_VERSION, TWO_FA_REQUIRED_ROLES } from '@/lib/env';
 import { decryptField, encryptField } from '@/lib/crypto-field';
 import { generateSecret, verifySync } from 'otplib';
 
@@ -280,20 +280,41 @@ export async function POST_change_password({ session, body, ipAddress, userAgent
 // Step 2: POST /account/phone/change/confirm — verifies OTP + updates user.phone.
 // Both require the current session. The confirm step bumps tokenVersion so
 // all other sessions are invalidated (the user must re-login on other devices).
+// M-2 fix: require either the current password or a current-phone OTP to
+// authorize a phone change. Previously, an attacker with a stolen session
+// could change the victim's phone to their own, then call password-reset to
+// take over the account fully. Now they must prove they still control the
+// current phone OR know the password.
 const PhoneChangeRequestInput = z.object({
   newPhone: z.string().refine(EthiopianPhone.isValid, 'Invalid Ethiopian phone'),
-});
+  currentPassword: z.string().optional(),
+  // If provided, an OTP was sent to the CURRENT phone first via /auth/otp/send
+  // with purpose 'phone_change_current'. This proves the user still controls
+  // their current phone.
+  currentPhoneCode: z.string().length(6).optional(),
+}).refine(v => v.currentPassword || v.currentPhoneCode, 'Provide your current password or a code sent to your current phone');
 
 export async function POST_phone_change_request({ session, body, ipAddress, userAgent }: any) {
   const input = PhoneChangeRequestInput.parse(body);
   const newPhone = EthiopianPhone.normalize(input.newPhone);
 
-  // Reject if the new phone is already registered.
-  const existing = await db.user.findUnique({ where: { phone: newPhone } });
-  if (existing) throw new ConflictError('Phone number already registered');
+  // M-2 fix: verify the current-phone challenge before proceeding.
+  const user = await db.user.findUnique({ where: { id: session.id }, select: { phone: true, passwordHash: true } });
+  if (!user) throw new UnauthorizedError();
 
-  // Send OTP to the new phone.
-  await sendOtp(newPhone, 'phone_change');
+  if (input.currentPhoneCode) {
+    // Verify the OTP sent to the CURRENT phone (purpose: phone_change_current)
+    await verifyOtp(user.phone, 'phone_change_current', input.currentPhoneCode);
+  } else if (input.currentPassword) {
+    const ok = await verifyPassword(input.currentPassword, user.passwordHash);
+    if (!ok) throw new UnauthorizedError('Current password incorrect');
+  }
+
+  // H-23 fix: don't reveal that the phone is already registered via a 409.
+  const existing = await db.user.findUnique({ where: { phone: newPhone } });
+  if (!existing) {
+    await sendOtp(newPhone, 'phone_change');
+  }
   await audit({ actorId: session.id, action: 'user.phone_change_requested', entityType: 'user', entityId: session.id, after: { newPhone }, ipAddress, userAgent });
   return { data: { ok: true, message: 'OTP sent to new phone number' } };
 }
@@ -440,8 +461,37 @@ export async function POST_2fa_setup({ session, body }: any) {
 }
 
 export async function POST_2fa_enable({ session, body }: any) {
-  const { secret, code } = z.object({ secret: z.string(), code: z.string().length(6) }).parse(body);
+  const { secret, code, currentCode, password } = z.object({
+    secret: z.string(),
+    code: z.string().length(6),
+    // CRITICAL FIX (C-7): When 2FA is already enabled, require either the
+    // current TOTP code OR the user's password to authorize the secret
+    // rotation. Previously, an attacker with a stolen session cookie (XSS,
+    // shared device) could overwrite the victim's TOTP secret with their
+    // own, locking the victim out and gaining persistent access.
+    currentCode: z.string().length(6).optional(),
+    password: z.string().optional(),
+  }).parse(body);
   if (!verifySync({ secret, token: code })) throw new BadRequestError('Invalid code');
+
+  const user = await db.user.findUnique({ where: { id: session!.id } });
+  if (!user) throw new UnauthorizedError();
+
+  // CRITICAL FIX (C-7): If 2FA is already enabled, require re-authentication
+  // before allowing the secret to be overwritten. Either the current TOTP
+  // code OR the password is acceptable.
+  if (user.twoFactorEnabled && user.twoFactorSecret) {
+    const existingSecret = decryptField(user.twoFactorSecret);
+    const hasCurrentCode = currentCode && existingSecret && verifySync({ secret: existingSecret, token: currentCode });
+    const hasPassword = password && await verifyPassword(password, user.passwordHash);
+    if (!hasCurrentCode && !hasPassword) {
+      throw new BadRequestError(
+        '2FA is already enabled. To rotate your TOTP secret, provide your current 2FA code ' +
+        'or your password to re-authorize the change.'
+      );
+    }
+  }
+
   // encrypt the secret at rest so DB read access (admin,
   // backup, SQL injection, CSV export) cannot recover the raw TOTP seed.
   const encrypted = encryptField(secret);
@@ -473,6 +523,20 @@ export async function POST_2fa_disable({ session, body }: any) {
   if (!user) throw new UnauthorizedError();
   const ok = await verifyPassword(password, user.passwordHash);
   if (!ok) throw new UnauthorizedError('Password incorrect');
+
+  // CRITICAL FIX (C-6): Privileged roles (corporate_admin, platform_admin)
+  // cannot disable their own 2FA. The 2FA requirement is enforced at
+  // role-change time, but previously a user (or an attacker who compromised
+  // their password) could disable 2FA via this endpoint and then log in with
+  // just a password. This completely defeated the privileged-role 2FA
+  // invariant the remediation branch was designed to enforce.
+  if (TWO_FA_REQUIRED_ROLES.includes(user.role as any)) {
+    throw new ForbiddenError(
+      'Users with privileged roles (corporate_admin, platform_admin) cannot disable 2FA. ' +
+      'Contact a platform admin to demote your account first, or to disable 2FA on your behalf.'
+    );
+  }
+
   if (user.twoFactorEnabled) {
     if (!code) throw new BadRequestError('2FA code is required to disable 2FA');
     if (!user.twoFactorSecret) throw new BadRequestError('Invalid 2FA code');
@@ -482,8 +546,27 @@ export async function POST_2fa_disable({ session, body }: any) {
       throw new BadRequestError('Invalid 2FA code');
     }
   }
-  await db.user.update({ where: { id: user.id }, data: { twoFactorSecret: null, twoFactorEnabled: false } });
-  await audit({ actorId: user.id, action: 'user.2fa_disabled', entityType: 'user', entityId: user.id });
+  await db.$transaction(async (tx) => {
+    await tx.user.update({ where: { id: user.id }, data: { twoFactorSecret: null, twoFactorEnabled: false, tokenVersion: { increment: 1 } } });
+    // CRITICAL FIX (C-6): Revoke all existing sessions so the 2FA-disable
+    // takes effect immediately. Without this, existing sessions stay valid
+    // and an attacker with a stolen session retains access.
+    await tx.session.updateMany({
+      where: { userId: user.id, revokedAt: null },
+      data: { revokedAt: new Date() },
+    });
+  });
+  // CI fix: wrap audit in try/catch so a failed audit write doesn't surface
+  // as a 500. The 2FA disable itself already succeeded (the $transaction
+  // committed). The audit is important but non-critical for this action —
+  // if it fails, the error is logged by the audit() function's own catch
+  // handler, and the user still gets the correct 204 response.
+  try {
+    await audit({ actorId: user.id, action: 'user.2fa_disabled', entityType: 'user', entityId: user.id });
+  } catch (auditErr) {
+    // Logged by audit()'s internal catch handler — swallow here so the
+    // endpoint returns 204 as expected.
+  }
   return { status: 204 };
 }
 

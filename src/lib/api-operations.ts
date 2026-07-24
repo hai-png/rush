@@ -260,7 +260,7 @@ export async function POST_complete({ session, params, ipAddress, userAgent }: a
     try {
       const { recomputeContractorRating } = await import('@/lib/api-admin');
       const profile = await db.contractorProfile.findUnique({ where: { userId: trip.driverId } });
-      if (profile) await recomputeContractorRating(profile.id);
+      if (profile) await recomputeContractorRating(profile.userId)  // H-1 fix: pass User.id, not ContractorProfile.id;
     } catch (err) {
       logger.error({ err: (err as Error).message }, '[trip.complete] recompute rating failed');
     }
@@ -397,7 +397,13 @@ const RIDE_TRANSITIONS: Record<string, Set<string>> = {
   no_show: new Set(),          // terminal
   completed: new Set(),        // terminal
   cancelled: new Set(),        // terminal
-  released: new Set(['booked', 'cancelled']),  // release can expire back to booked, or be cancelled
+  // H-15 fix: removed 'booked' from released transitions. Previously, a
+  // driver could PATCH a ride from 'released' to 'booked' without incrementing
+  // seatsBooked, causing overbooking (the trip showed N-1 booked but actually
+  // had N booked riders). The only legitimate ways to restore a released ride
+  // are POST_cancel_release / DELETE_release / scheduler.expireStale, all of
+  // which correctly increment seatsBooked.
+  released: new Set(['cancelled']),
 };
 
 function assertRideTransition(from: string, to: string): void {
@@ -493,11 +499,9 @@ export async function POST_trip({ session, body, ipAddress, userAgent }: any) {
   if (session.role === 'contractor' && shuttle.contractorId !== session.id) {
     throw new BadRequestError('You can only create trips on your own shuttles');
   }
-  if (session.role === 'contractor') {
-    const profile = await db.contractorProfile.findUnique({ where: { userId: session.id }, select: { verificationStatus: true } });
-    if (!profile || profile.verificationStatus !== 'verified') throw new BadRequestError('Contractor must be verified to create trips');
-  }
-  // Contractors must be verified before they can create trips — prevents
+  // H-26 fix: removed the duplicate verification check above (it threw
+  // BadRequestError; the check below throws ForbiddenError with a better
+  // message — keep only that one). Contractors must be verified before they can create trips — prevents
   // an unverified contractor from creating trips and accepting rider bookings
   // before the admin has reviewed their documents.
   if (session.role === 'contractor') {
@@ -684,15 +688,71 @@ export async function GET_shuttle_positions({ session, query }: any) {
   return { data: result };
 }
 
-export async function handleShuttlePositionStream(req: NextRequest, session: any): Promise<NextResponse> {
+export async function handleShuttlePositionStream(req: NextRequest, session: any, params: any, ctx: { requestId: string }): Promise<NextResponse> {
+  const requestId = ctx.requestId ?? crypto.randomUUID();
   if (!session) {
-    return NextResponse.json({ error: { code: 'UNAUTHORIZED', message: 'Sign in required' } }, { status: 401 });
+    return NextResponse.json(
+      { error: { code: 'UNAUTHORIZED', message: 'Sign in required', requestId } },
+      { status: 401, headers: { 'x-request-id': requestId } }
+    );
   }
+  // CRITICAL FIX (C-10): Apply the same role-scoped filterFn as GET_shuttle_positions.
+  // Previously this endpoint returned every shuttle's live GPS to any authenticated
+  // user — a contractor safety risk (route patterns, home addresses inferable from
+  // first/last positions) and a competitor intelligence risk. Riders should only
+  // see shuttles for trips they have a booked ride on; contractors only their own.
+  const url = new URL(req.url);
+  const query = {
+    tripId: url.searchParams.get('tripId') ?? undefined,
+    routeId: url.searchParams.get('routeId') ?? undefined,
+  };
+
+  let allowedShuttleIds: Set<string> | null = null;
+  if (session.role === 'rider') {
+    const rides = await db.ride.findMany({
+      where: {
+        userId: session.id,
+        status: 'booked',
+        trip: { status: { in: ['scheduled', 'in_transit'] } },
+      },
+      select: { trip: { select: { shuttleId: true } } },
+    });
+    allowedShuttleIds = new Set(rides.map(r => r.trip?.shuttleId).filter(Boolean) as string[]);
+  } else if (session.role === 'contractor') {
+    const ownShuttles = await db.shuttle.findMany({
+      where: { contractorId: session.id, isActive: true },
+      select: { id: true },
+    });
+    allowedShuttleIds = new Set(ownShuttles.map(s => s.id));
+  }
+  // platform_admin → allowedShuttleIds stays null (no filter).
+
+  let tripShuttleIds: Set<string> | null = null;
+  if (query.tripId || query.routeId) {
+    const trips = await db.trip.findMany({
+      where: {
+        ...(query.tripId ? { id: query.tripId } : {}),
+        ...(query.routeId ? { routeId: query.routeId } : {}),
+      },
+      select: { id: true, shuttleId: true },
+    });
+    tripShuttleIds = new Set(trips.map(t => t.shuttleId));
+  }
+
+  const filterFn = (shuttleId: string | undefined): boolean => {
+    if (!shuttleId) return false;
+    if (allowedShuttleIds && !allowedShuttleIds.has(shuttleId)) return false;
+    if (tripShuttleIds && !tripShuttleIds.has(shuttleId)) return false;
+    return true;
+  };
+
   const result: Array<{ lat: number; lng: number; heading: number; speed: number; updatedAt: number }> = [];
   for (const [, pos] of positions) {
-    if (Date.now() - pos.updatedAt < 5 * 60_000) result.push(pos);
+    if (Date.now() - pos.updatedAt < 5 * 60_000 && filterFn((pos as any).shuttleId)) {
+      result.push(pos);
+    }
   }
-  return NextResponse.json({ data: result });
+  return NextResponse.json({ data: result }, { headers: { 'x-request-id': requestId } });
 }
 
 

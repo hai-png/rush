@@ -1,0 +1,71 @@
+{
+  "auth.login": {
+    "title": "Sign in",
+    "description": "Use a demo account from the home page or your own.",
+    "phone": "Phone",
+    "password": "Password",
+    "code": "2FA code (optional)",
+    "codePlaceholder": "Only if 2FA is enabled",
+    "submit": "Sign in",
+    "submitting": "Signing in…",
+    "noAccount": "No account?",
+    "signUpRider": "Sign up as rider",
+    "forgotPassword": "Forgot password?",
+    "backToHome": "Back to home",
+    "twoFactorRequired": "2FA code required — enter it below and sign in again",
+    "signInFailed": "Sign-in failed",
+    "signedIn": "Signed in"
+  },
+  "checkout": {
+    "corporateCode": "Corporate code (optional)",
+    "corporateCodePlaceholder": "Enter code for subsidy",
+    "paymentMethod": "Payment method",
+    "telebirr": "Telebirr",
+    "cbe": "CBE Birr (manual)",
+    "subscribe": "Subscribe",
+    "starting": "Starting…",
+    "cbeInstructions": "CBE transfer instructions",
+    "unknownResponse": "Unknown checkout response",
+    "failed": "Failed"
+  },
+  "dashboard": {
+    "rider": {
+      "title": "Rider Dashboard",
+      "activeSubscriptions": "Active Subscriptions",
+      "recentRides": "Recent Rides",
+      "recentPayments": "Recent Payments",
+      "openTickets": "Open Tickets",
+      "unreadNotifications": "Unread Notifications"
+    },
+    "contractor": {
+      "title": "Contractor Dashboard",
+      "upcomingTrips": "Upcoming Trips",
+      "shuttles": "My Shuttles",
+      "earnings": "Earnings"
+    },
+    "admin": {
+      "title": "Admin Dashboard",
+      "totalUsers": "Total Users",
+      "activeSubscriptions": "Active Subscriptions",
+      "revenue": "Revenue (30d)",
+      "pendingVerifications": "Pending Verifications"
+    }
+  },
+  "common": {
+    "loading": "Loading…",
+    "error": "Something went wrong",
+    "retry": "Retry",
+    "cancel": "Cancel",
+    "save": "Save",
+    "delete": "Delete",
+    "edit": "Edit",
+    "search": "Search",
+    "filter": "Filter",
+    "clear": "Clear",
+    "prev": "Prev",
+    "next": "Next",
+    "page": "Page",
+    "of": "of",
+    "total": "total"
+  }
+}

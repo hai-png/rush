@@ -44,10 +44,16 @@ export function decryptField(encrypted: string | null | undefined): string | nul
   if (!encrypted) return null;
   const parts = encrypted.split(':');
   if (parts.length !== 4 || parts[0] !== VERSION) {
-    // Not encrypted (legacy plaintext) — return as-is for backward compat.
-    // This allows gradual migration: existing plaintext secrets still work,
-    // new writes are encrypted.
-    return encrypted;
+    // M-1 fix: reject non-v1: prefixed values instead of returning plaintext.
+    // Previously, an attacker with DB write access could replace a victim's
+    // encrypted TOTP secret with a plaintext secret they control, then log in
+    // with their own TOTP code. The documented threat model is "DB read access
+    // cannot recover the raw secret" — but the old code also gave up integrity
+    // on DB write. Now we return null (treated as "no 2FA secret") so the
+    // legitimate user is locked out rather than the attacker being let in.
+    // Migration path: run a one-time script to encrypt any legacy plaintext
+    // values before deploying this change.
+    return null;
   }
   try {
     const key = getKey();

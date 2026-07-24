@@ -3,6 +3,7 @@ import { useState } from 'react';
 import { router } from 'expo-router';
 import { useAuthStore } from '../../src/lib/auth-store';
 import { colors, spacing, radius, fontSize, fontWeight } from '../../src/lib/theme';
+import { routeByRole } from '../../src/lib/route-by-role';
 
 // Mobile login: after a TWO_FACTOR_REQUIRED response, prompt for a 6-digit
 // code and resubmit phone + password + code together.
@@ -21,11 +22,8 @@ export default function LoginScreen() {
     try {
       // Pass code only if the 2FA input is shown.
       const user = await login(phone, password, needs2FA ? code : undefined);
-      if (user.role === 'rider') router.replace('/rider/dashboard');
-      else if (user.role === 'contractor') router.replace('/contractor/dashboard');
-      else if (user.role === 'corporate_admin') router.replace('/rider/dashboard');
-      else if (user.role === 'platform_admin') router.replace('/rider/dashboard');
-      else router.replace('/rider/dashboard');
+      // H-29 fix: route by role via shared helper
+      router.replace(routeByRole(user.role));
     } catch (e: any) {
       const msg = e instanceof Error ? e.message : 'Login failed';
       if (msg.includes('2FA') || msg.includes('Two-factor') || msg.includes('TWO_FACTOR')) {
