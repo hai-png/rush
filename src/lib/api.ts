@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
 import { db } from '@/lib/db';
-import { verifySession } from '@/lib/auth';
+import { verifyAccessToken, verifySession } from '@/lib/auth';
 import { AppError, UnauthorizedError, ForbiddenError, RateLimitError, ConflictError, toErrorEnvelope } from '@/lib/errors';
 import { CURRENT_TOS_VERSION } from '@/lib/env';
 import { ensureSchedulerStarted } from '@/lib/scheduler';
@@ -332,7 +332,16 @@ export function api(options: ApiOptions, handler: Handler) {
       }
       const token = bearer ?? cookieToken;
       if (token) {
-        session = await verifySession(token);
+        if (bearer) {
+          try {
+            session = await verifyAccessToken(token);
+          } catch { }
+        }
+        if (!session) {
+          try {
+            session = await verifySession(token);
+          } catch { }
+        }
       }
       if (session) (requestLogger as any).bindings.userId = session.id;
 

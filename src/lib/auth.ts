@@ -7,6 +7,7 @@ import { TWO_FA_REQUIRED_ROLES } from '@/lib/env';
 import { createId } from '@/lib/id';
 import { logger } from '@/lib/logger';
 
+const ACCESS_TTL_SEC = 15 * 60; // 15 minutes
 const SESSION_TTL_SEC = 30 * 24 * 3600; // 30 days
 
 function secretKey(): Uint8Array {
@@ -58,6 +59,42 @@ export async function issueSession(user: { id: string; phone: string; role: stri
     .sign(secretKey());
 
   return { token, expiresAt, jti };
+}
+
+export async function issueAccessToken(user: { id: string; phone: string; role: string; tosVersion: string | null; tokenVersion: number }): Promise<string> {
+  return new SignJWT({
+    sub: user.id,
+    phone: user.phone,
+    role: user.role,
+    tos: user.tosVersion,
+    tv: user.tokenVersion,
+  })
+    .setProtectedHeader({ alg: 'HS256', typ: 'JWT' })
+    .setJti(createId())
+    .setIssuedAt()
+    .setExpirationTime(`${ACCESS_TTL_SEC}s`)
+    .sign(secretKey());
+}
+
+export async function verifyAccessToken(token: string): Promise<SessionUser> {
+  try {
+    const { payload } = await jwtVerify(token, secretKey(), { algorithms: ['HS256'] });
+    return {
+      id: payload.sub!,
+      phone: payload.phone as string,
+      role: payload.role as string,
+      tosVersion: payload.tos as string | null,
+      jti: payload.jti!,
+    };
+  } catch {
+    throw new UnauthorizedError('Invalid or expired access token');
+  }
+}
+
+export async function issueTokenPair(user: { id: string; phone: string; role: string; tosVersion: string | null; tokenVersion: number }, opts: { userAgent?: string; ipAddress?: string } = {}): Promise<{ accessToken: string; refreshToken: string; expiresAt: Date }> {
+  const accessToken = await issueAccessToken(user);
+  const { token: refreshToken, expiresAt } = await issueSession(user, opts);
+  return { accessToken, refreshToken, expiresAt };
 }
 
 export async function verifySession(token: string): Promise<SessionUser> {

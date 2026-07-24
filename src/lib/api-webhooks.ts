@@ -76,7 +76,7 @@ async function markRefundSucceeded(refundRequestNo: string, raw: unknown): Promi
       });
     });
   });
-  for (const fx of sideEffects) { try { await fx(); } catch (e) { logger.error({ err: (e as Error).message }, '[refund-webhook] side effect failed'); } }
+  for (const fx of sideEffects) { fx().catch(e => logger.error({ err: (e as Error).message }, '[refund-webhook] side effect failed')); }
   logger.info({ refundRequestNo }, '[telebirr-webhook] refund succeeded');
 }
 
@@ -102,7 +102,7 @@ async function markRefundFailed(refundRequestNo: string, raw: unknown): Promise<
       });
     });
   });
-  for (const fx of sideEffects) { try { await fx(); } catch (e) { logger.error({ err: (e as Error).message }, '[refund-webhook] side effect failed'); } }
+  for (const fx of sideEffects) { fx().catch(e => logger.error({ err: (e as Error).message }, '[refund-webhook] side effect failed')); }
   logger.warn({ refundRequestNo }, '[telebirr-webhook] refund failed');
 }
 

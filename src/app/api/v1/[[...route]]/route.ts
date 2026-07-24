@@ -2,7 +2,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { findRoute } from '@/lib/api-routes';
 import { api, csrfCheck, rateLimitCheck, tosGate, readCookie, clientIp, SESSION_COOKIE } from '@/lib/api';
-import { verifySession } from '@/lib/auth';
+import { verifyAccessToken, verifySession } from '@/lib/auth';
 import { NotFoundError, BadRequestError, toErrorEnvelope } from '@/lib/errors';
 import { ensureSchedulerStarted } from '@/lib/scheduler';
 
@@ -69,11 +69,14 @@ async function handleRaw(
     const bearer = req.headers.get('authorization')?.replace(/^Bearer\s+/i, '');
     const token = bearer ?? cookieToken;
     if (token) {
-      try {
-        session = await verifySession(token);
-      } catch (err) {
-        const { status, body } = toErrorEnvelope(err, requestId);
-        return NextResponse.json(body, { status, headers: { 'x-request-id': requestId } });
+      if (bearer) {
+        try { session = await verifyAccessToken(token); } catch { }
+      }
+      if (!session) {
+        try { session = await verifySession(token); } catch (err) {
+          const { status, body } = toErrorEnvelope(err, requestId);
+          return NextResponse.json(body, { status, headers: { 'x-request-id': requestId } });
+        }
       }
     }
 

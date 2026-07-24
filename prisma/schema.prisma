@@ -313,14 +313,7 @@ model RouteAssignment {
   // Status: admin assigns → contractor accepts → active → completed
   status String @default("assigned") // assigned | accepted | active | completed | cancelled
 
-  // Capacity tracking
-  maxSeats    Int @default(0) // copied from shuttle.capacity for quick reference
-  // DEPRECATED — seatsBooked on RouteAssignment is never updated by any code
-  // path. The authoritative per-trip seat count lives on Trip.seatsBooked (kept
-  // accurate via CAS-guarded increment/decrement). For per-assignment ride
-  // totals, use `_count.rides`. This column is kept for schema stability but
-  // is always 0; will be dropped in a future migration.
-  seatsBooked Int @default(0)
+  maxSeats    Int @default(0)
 
   assignedById String? // admin who assigned
   assignedBy   User?     @relation("AssignmentAssigner", fields: [assignedById], references: [id], onDelete: SetNull)

@@ -131,7 +131,7 @@ export async function settlePayment(reference: string, reportedAmount: Money | u
   }, { timeout: 15_000, maxWait: 20_000 });
 
   for (const fx of sideEffects) {
-    try { await fx(); } catch (e) { logger.error({ err: (e as Error).message }, '[settlePayment] side effect failed'); }
+    fx().catch(e => logger.error({ err: (e as Error).message }, '[settlePayment] side effect failed'));
   }
   return result;
 }
@@ -181,7 +181,7 @@ export async function failPayment(reference: string, reasonRaw: unknown, outRequ
   });
 
   for (const fx of sideEffects) {
-    try { await fx(); } catch (e) { logger.error({ err: (e as Error).message }, '[failPayment] side effect failed'); }
+    fx().catch(e => logger.error({ err: (e as Error).message }, '[failPayment] side effect failed'));
   }
   return result;
 }
@@ -243,7 +243,7 @@ export async function scheduleRefund(paymentId: string, amount: Money, reason: s
   });
 
   for (const fx of sideEffects) {
-    try { await fx(); } catch (e) { logger.error({ err: (e as Error).message }, '[scheduleRefund] side effect failed'); }
+    fx().catch(e => logger.error({ err: (e as Error).message }, '[scheduleRefund] side effect failed'));
   }
 }
 
@@ -289,7 +289,7 @@ export async function cancelRefund(paymentId: string, refundRetryId: string, act
   });
 
   for (const fx of sideEffects) {
-    try { await fx(); } catch (e) { logger.error({ err: (e as Error).message }, '[cancelRefund] side effect failed'); }
+    fx().catch(e => logger.error({ err: (e as Error).message }, '[cancelRefund] side effect failed'));
   }
 }
 
@@ -386,7 +386,7 @@ export async function processRefundRetries(limit = 10): Promise<{ processed: num
       }
     });
     for (const fx of sideEffects) {
-      try { await fx(); } catch (e) { logger.error({ err: (e as Error).message }, '[processRefundRetries] side effect failed'); }
+      fx().catch(e => logger.error({ err: (e as Error).message }, '[processRefundRetries] side effect failed'));
     }
     processed++;
   }

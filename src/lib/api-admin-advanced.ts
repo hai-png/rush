@@ -350,7 +350,7 @@ export async function POST_bulk_expire({ session, body, ipAddress, userAgent }: 
       }
     }
   }
-  for (const fx of sideEffects) { try { await fx(); } catch {} }
+  for (const fx of sideEffects) { fx().catch(() => {}); }
   await audit({ actorId: session.id, action: 'admin.bulk_expire', entityType: 'subscription', after: { count: result.count }, ipAddress, userAgent });
   return { data: { expired: result.count } };
 }

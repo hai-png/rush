@@ -53,11 +53,10 @@ export function audit(input: AuditInput): Promise<void> {
   const isSecurityCritical = SECURITY_CRITICAL_ACTIONS.has(input.action);
   auditQueue = auditQueue.then(() => auditInternal(input)).catch((err) => {
     logger.error({ err: (err as Error).message, action: input.action }, '[audit] write failed');
-    if (!isSecurityCritical) {
-      logger.warn({ action: input.action, error: (err as Error).message, tag: 'dropped_audit' }, 'audit.dropped');
-    }
     if (isSecurityCritical || process.env.AUDIT_STRICT === '1') {
-      throw err;
+      logger.error({ action: input.action, tag: 'audit_critical_failed' }, 'audit.critical_write_failed');
+    } else {
+      logger.warn({ action: input.action, error: (err as Error).message, tag: 'dropped_audit' }, 'audit.dropped');
     }
   });
   return auditQueue;

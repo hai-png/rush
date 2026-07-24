@@ -2,7 +2,7 @@ import { NextResponse } from 'next/server';
 import { z } from 'zod';
 import { db } from '@/lib/db';
 import { setSessionCookie, clearSessionCookie } from '@/lib/api';
-import { hashPassword, verifyPassword, issueSession, verifySession, revokeSession, revokeAllSessionsForUser } from '@/lib/auth';
+import { hashPassword, verifyPassword, issueSession, verifySession, verifyAccessToken, issueAccessToken, issueTokenPair, revokeSession, revokeAllSessionsForUser } from '@/lib/auth';
 import { EthiopianPhone } from '@/lib/phone';
 import { BadRequestError, ConflictError, UnauthorizedError, TwoFactorRequiredError, ForbiddenError, NotFoundError } from '@/lib/errors';
 import { sendOtp, verifyOtp } from '@/lib/otp';
@@ -162,23 +162,30 @@ export async function POST_token({ body, ipAddress, userAgent }: any) {
     });
   }
 
-  const { token } = await issueSession(user, { userAgent, ipAddress });
+  const { accessToken, refreshToken } = await issueTokenPair(user, { userAgent, ipAddress });
   await audit({ actorId: user.id, action: 'user.login', entityType: 'user', entityId: user.id, ipAddress, userAgent });
 
   const res = NextResponse.json({
     data: {
-      accessToken: token,
-      expiresIn: 30 * 24 * 3600,
+      accessToken,
+      refreshToken,
+      expiresIn: 15 * 60,
       user: { id: user.id, role: user.role, phone: user.phone },
       requiresTosAcceptance: user.tosVersion !== CURRENT_TOS_VERSION,
     },
   });
-  await setSessionCookie(res, token);
+  await setSessionCookie(res, refreshToken);
   return res;
 }
 
-export async function POST_logout({ session, ipAddress, userAgent }: any) {
-  if (session) {
+export async function POST_logout({ body, session, ipAddress, userAgent }: any) {
+  if (body?.refreshToken) {
+    try {
+      const s = await verifySession(body.refreshToken);
+      await revokeSession(s.jti);
+      await audit({ actorId: s.id, action: 'user.logout', entityType: 'user', entityId: s.id, ipAddress, userAgent }).catch(() => {});
+    } catch { }
+  } else if (session) {
     await revokeSession(session.jti);
     await audit({ actorId: session.id, action: 'user.logout', entityType: 'user', entityId: session.id, ipAddress, userAgent }).catch(() => {});
   }
@@ -187,27 +194,53 @@ export async function POST_logout({ session, ipAddress, userAgent }: any) {
   return res;
 }
 
-export async function POST_logout_all({ session, ipAddress, userAgent }: any) {
-  if (!session) throw new UnauthorizedError();
-  await revokeAllSessionsForUser(session.id);
-  await audit({ actorId: session.id, action: 'user.logout_all', entityType: 'user', entityId: session.id, ipAddress, userAgent });
+export async function POST_logout_all({ body, session, ipAddress, userAgent }: any) {
+  let userId = session?.id;
+  if (!userId && body?.refreshToken) {
+    try {
+      const s = await verifySession(body.refreshToken);
+      userId = s.id;
+    } catch { }
+  }
+  if (!userId) throw new UnauthorizedError();
+  await revokeAllSessionsForUser(userId);
+  await audit({ actorId: userId, action: 'user.logout_all', entityType: 'user', entityId: userId, ipAddress, userAgent });
   const res = NextResponse.json({ data: { ok: true } });
   await clearSessionCookie(res);
   return res;
 }
 
-export async function POST_refresh({ session, ipAddress, userAgent }: any) {
-  if (!session) throw new UnauthorizedError();
-  const sessionRow = await db.session.findUnique({ where: { jti: session.jti }, select: { userAgent: true } });
+export async function POST_refresh({ body, session, ipAddress, userAgent }: any) {
+  let refreshTokenValue = body?.refreshToken;
+  let currentJti = session?.jti;
+
+  if (!refreshTokenValue && !currentJti) {
+    throw new UnauthorizedError('Refresh token required');
+  }
+
+  if (refreshTokenValue) {
+    const refreshed = await verifySession(refreshTokenValue);
+    const sessionRow = await db.session.findUnique({ where: { jti: refreshed.jti }, select: { userAgent: true } });
+    if (sessionRow?.userAgent?.startsWith('impersonated-by:')) {
+      throw new ForbiddenError('Cannot refresh an impersonation session. Please sign in directly.');
+    }
+    const user = await db.user.findUnique({ where: { id: refreshed.id } });
+    if (!user) throw new UnauthorizedError();
+    const { accessToken, refreshToken } = await issueTokenPair(user, { userAgent, ipAddress });
+    await revokeSession(refreshed.jti);
+    return { data: { accessToken, refreshToken, expiresIn: 15 * 60 } };
+  }
+
+  const sessionRow = await db.session.findUnique({ where: { jti: currentJti }, select: { userAgent: true } });
   if (sessionRow?.userAgent?.startsWith('impersonated-by:')) {
     throw new ForbiddenError('Cannot refresh an impersonation session. Please sign in directly.');
   }
-  const user = await db.user.findUnique({ where: { id: session.id } });
+  const user = await db.user.findUnique({ where: { id: session!.id } });
   if (!user) throw new UnauthorizedError();
-  const { token } = await issueSession(user, { userAgent, ipAddress });
-  const res = NextResponse.json({ data: { accessToken: token, expiresIn: 30 * 24 * 3600 } });
-  await setSessionCookie(res, token);
-  await revokeSession(session.jti);
+  const { accessToken, refreshToken } = await issueTokenPair(user, { userAgent, ipAddress });
+  const res = NextResponse.json({ data: { accessToken, refreshToken, expiresIn: 15 * 60 } });
+  await setSessionCookie(res, refreshToken);
+  await revokeSession(currentJti!);
   return res;
 }
 
