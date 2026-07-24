@@ -45,7 +45,7 @@ jobs:
       - run: bun run build
 
   race-tests:
-    name: Race-condition integration tests
+    name: Race-condition integration tests (SQLite)
     runs-on: ubuntu-latest
     env:
       AUTH_SECRET: ci-test-secret-32-chars-minimum-length
@@ -60,6 +60,42 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bunx prisma generate --schema prisma/schema.prisma
       - run: bun run test:race
+
+  postgres-tests:
+    name: Integration tests (PostgreSQL)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_USER: addisride
+          POSTGRES_PASSWORD: ci-test-password
+          POSTGRES_DB: addisride
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+    env:
+      AUTH_SECRET: ci-pg-test-secret-32-chars-minimum-length
+      CRON_SECRET: ci-pg-test-cron-secret-32-chars-minimum
+      DATABASE_PROVIDER: postgres
+      DATABASE_URL: postgresql://addisride:ci-test-password@localhost:5432/addisride
+      NODE_ENV: development
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.3.14
+      - run: bun install --frozen-lockfile
+      - name: Generate Prisma client for Postgres schema
+        run: bunx prisma generate --schema prisma/schema.postgres.prisma
+      - name: Push Postgres schema
+        run: bunx prisma db push --skip-generate --schema prisma/schema.postgres.prisma
+      - name: Run integration tests against Postgres
+        run: bun run test:race
 
   e2e-tests:
     name: End-to-end tests

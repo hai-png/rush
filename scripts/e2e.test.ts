@@ -194,3 +194,99 @@ describe('E2E: Health + config', () => {
     expect(body.data.tosVersion).toBeDefined();
   });
 });
+
+describe('E2E: Device registration', () => {
+  test('POST /devices registers a push token', async () => {
+    const { status, body } = await apiFetch('/devices', {
+      method: 'POST',
+      body: JSON.stringify({
+        pushToken: `e2e-test-token-${Date.now()}`,
+        platform: 'web',
+        userAgent: 'e2e-test',
+      }),
+    });
+    expect(status).toBe(200);
+    expect(body.data.ok).toBe(true);
+    expect(body.data.deviceId).toBeDefined();
+  });
+
+  test('POST /devices rejects empty pushToken', async () => {
+    const { status } = await apiFetch('/devices', {
+      method: 'POST',
+      body: JSON.stringify({ platform: 'web' }),
+    });
+    expect(status).toBe(400);
+  });
+});
+
+describe('E2E: Notification preferences', () => {
+  test('GET /notifications/preferences returns defaults', async () => {
+    const { status, body } = await apiFetch('/notifications/preferences');
+    expect(status).toBe(200);
+    expect(body.data.pushEnabled).toBe(true);
+  });
+
+  test('PATCH /notifications/preferences toggles push', async () => {
+    const { status, body } = await apiFetch('/notifications/preferences', {
+      method: 'PATCH',
+      body: JSON.stringify({ pushEnabled: false }),
+    });
+    expect(status).toBe(200);
+    expect(body.data.pushEnabled).toBe(false);
+  });
+});
+
+describe('E2E: Account management', () => {
+  test('PATCH /account updates name', async () => {
+    const { status, body } = await apiFetch('/account', {
+      method: 'PATCH',
+      body: JSON.stringify({ name: 'E2E Updated Name' }),
+    });
+    expect(status).toBe(200);
+  });
+
+  test('PATCH /account email change does not leak existence (H-23 fix)', async () => {
+    const { status, body } = await apiFetch('/account', {
+      method: 'PATCH',
+      body: JSON.stringify({ email: 'nonexistent@test.com' }),
+    });
+    expect(status).toBe(200);
+  });
+
+  test('GET /account/export returns data', async () => {
+    const { status, body } = await apiFetch('/account/export');
+    expect(status).toBe(200);
+    expect(body.data.user).toBeDefined();
+  });
+});
+
+describe('E2E: Unauthenticated error cases', () => {
+  const savedCookie = cookieHeader;
+
+  beforeAll(() => {
+    cookieHeader = '';
+    csrfToken = '';
+  });
+
+  afterAll(() => {
+    cookieHeader = savedCookie;
+  });
+
+  test('GET /account returns 401 without auth', async () => {
+    const { status } = await apiFetch('/account');
+    expect(status).toBe(401);
+  });
+
+  test('POST /devices returns 401 without auth', async () => {
+    const { status } = await apiFetch('/devices', {
+      method: 'POST',
+      body: JSON.stringify({ pushToken: 'no-auth', platform: 'web' }),
+    });
+    expect(status).toBe(401);
+  });
+
+  test('GET /nonexistent returns 404', async () => {
+    const { status } = await apiFetch('/nonexistent-route-12345');
+    expect(status).toBe(404);
+  });
+});

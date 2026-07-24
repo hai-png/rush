@@ -847,3 +847,17 @@ CREATE TRIGGER IF NOT EXISTS audit_log_no_delete
   BEGIN
     SELECT RAISE(ABORT, 'AuditLog is append-only — DELETE not allowed');
   END;
+
+-- C-11 fix: dedicated Device table for push notification tokens.
+CREATE TABLE IF NOT EXISTS "Device" (
+  "id" TEXT NOT NULL PRIMARY KEY,
+  "userId" TEXT NOT NULL,
+  "pushToken" TEXT NOT NULL UNIQUE,
+  "platform" TEXT NOT NULL,
+  "userAgent" TEXT,
+  "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "updatedAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS "Device_userId_idx" ON "Device"("userId");
+CREATE INDEX IF NOT EXISTS "Device_pushToken_idx" ON "Device"("pushToken");

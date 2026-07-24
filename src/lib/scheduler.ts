@@ -186,8 +186,9 @@ export async function expireStale(): Promise<void> {
     take: 100,
   });
 
+  // H-10 fix: only mark the 100 subs we queried as expired (same pattern as releases below).
   const expiredSubs = await db.subscription.updateMany({
-    where: { status: 'active', endDate: { lt: now } },
+    where: { id: { in: expiringSubs.map(s => s.id) } },
     data: { status: 'expired' },
   });
 

@@ -2,11 +2,13 @@ import { db } from '@/lib/db';
 import { logger } from '@/lib/logger';
 import { z } from 'zod';
 import { NotFoundError } from '@/lib/errors';
+import type { HandlerBody, HandlerBodyParams, HandlerParams, HandlerQuery, HandlerSession, HandlerSessionIp } from '@/lib/handler-types';
 
-export async function GET_notifications({ session, query }: any) {
+export async function GET_notifications(ctx: HandlerQuery) {
+  const { session, query } = ctx;
   const { parsePagination, paginatedResponse } = await import('@/lib/pagination');
   const page = parsePagination(query);
-  const where: any = { userId: session.id };
+  const where: any = { userId: session!.id };
   if (query?.type) where.type = query.type;
   if (query?.unread === 'true') where.readAt = null;
   const [notifs, total] = await Promise.all([
@@ -20,40 +22,45 @@ export async function GET_notifications({ session, query }: any) {
   return paginatedResponse(notifs, total, page);
 }
 
-export async function POST_mark_read({ session, params }: any) {
+export async function POST_mark_read(ctx: HandlerParams) {
+  const { session, params } = ctx;
   await db.notification.updateMany({
-    where: { id: params.id, userId: session.id },
+    where: { id: params.id, userId: session!.id },
     data: { readAt: new Date() },
   });
   return { data: { ok: true } };
 }
 
-export async function POST_mark_all_read({ session }: any) {
+export async function POST_mark_all_read(ctx: HandlerSession) {
+  const { session } = ctx;
   await db.notification.updateMany({
-    where: { userId: session.id, readAt: null },
+    where: { userId: session!.id, readAt: null },
     data: { readAt: new Date() },
   });
   return { data: { ok: true } };
 }
 
-export async function GET_unread_count({ session }: any) {
-  const count = await db.notification.count({ where: { userId: session.id, readAt: null } });
+export async function GET_unread_count(ctx: HandlerSession) {
+  const { session } = ctx;
+  const count = await db.notification.count({ where: { userId: session!.id, readAt: null } });
   return { data: { count } };
 }
 
-export async function PATCH_notification({ session, params, body }: any) {
+export async function PATCH_notification(ctx: HandlerBodyParams<{ readAt?: string | null }>) {
+  const { session, params, body } = ctx;
   const input = z.object({ readAt: z.union([z.string().datetime(), z.null()]).optional() }).parse(body ?? {});
   const readAt = input.readAt === null ? null : input.readAt ? new Date(input.readAt) : new Date();
   await db.notification.updateMany({
-    where: { id: params.id, userId: session.id },
+    where: { id: params.id, userId: session!.id },
     data: { readAt },
   });
   return { data: { ok: true } };
 }
 
-export async function DELETE_notification({ session, params }: any) {
+export async function DELETE_notification(ctx: HandlerParams) {
+  const { session, params } = ctx;
   const result = await db.notification.deleteMany({
-    where: { id: params.id, userId: session.id },
+    where: { id: params.id, userId: session!.id },
   });
   if (result.count === 0) throw new NotFoundError('Notification not found');
   return { status: 204 };
@@ -85,21 +92,23 @@ async function readPrefs(userId: string): Promise<typeof DEFAULT_PREFS> {
   }
 }
 
-export async function PATCH_preferences({ session, body }: any) {
+export async function PATCH_preferences(ctx: HandlerBody<{ emailEnabled?: boolean; smsEnabled?: boolean; pushEnabled?: boolean; quietHoursStart?: string | null; quietHoursEnd?: string | null }>) {
+  const { session, body } = ctx;
   const input = PreferencesInput.parse(body);
-  const current = await readPrefs(session.id);
+  const current = await readPrefs(session!.id);
   const merged = { ...current, ...input };
   await db.setting.upsert({
-    where: { key: `notif-prefs:${session.id}` },
+    where: { key: `notif-prefs:${session!.id}` },
     update: { value: JSON.stringify(merged) },
-    create: { key: `notif-prefs:${session.id}`, value: JSON.stringify(merged) },
+    create: { key: `notif-prefs:${session!.id}`, value: JSON.stringify(merged) },
   });
-  return { data: { userId: session.id, ...merged } };
+  return { data: { userId: session!.id, ...merged } };
 }
 
-export async function GET_preferences({ session }: any) {
-  const prefs = await readPrefs(session.id);
-  return { data: { userId: session.id, ...prefs } };
+export async function GET_preferences(ctx: HandlerSession) {
+  const { session } = ctx;
+  const prefs = await readPrefs(session!.id);
+  return { data: { userId: session!.id, ...prefs } };
 }
 
 const DeviceInput = z.object({
@@ -108,25 +117,33 @@ const DeviceInput = z.object({
   userAgent: z.string().optional(),
 });
 
-export async function POST_device({ session, body }: any) {
-  // CRITICAL FIX (C-11): Push notifications are not implemented. The endpoint
-  throw new (await import('@/lib/errors')).NotFoundError(
-    'Push notifications are not yet implemented. The mobile app should display "Notifications unavailable" and hide the push toggle.'
-  );
+export async function POST_device(ctx: HandlerBody<{ pushToken: string; platform: 'ios' | 'android' | 'web'; userAgent?: string }>) {
+  const { session, body } = ctx;
+  const input = DeviceInput.parse(body);
+  const existing = await db.device.findUnique({ where: { pushToken: input.pushToken } });
+  if (existing) {
+    if (existing.userId === session!.id) {
+      await db.device.update({ where: { id: existing.id }, data: { platform: input.platform, userAgent: input.userAgent ?? existing.userAgent } });
+      return { data: { ok: true, deviceId: existing.id } };
+    }
+    await db.device.update({ where: { id: existing.id }, data: { userId: session!.id, platform: input.platform, userAgent: input.userAgent ?? null } });
+    return { data: { ok: true, deviceId: existing.id } };
+  }
+  const device = await db.device.create({
+    data: {
+      userId: session!.id,
+      pushToken: input.pushToken,
+      platform: input.platform,
+      userAgent: input.userAgent ?? null,
+    },
+  });
+  return { data: { ok: true, deviceId: device.id } };
 }
 
-export async function DELETE_device({ session, body }: any) {
+export async function DELETE_device(ctx: HandlerBody<{ pushToken: string }>) {
+  const { session, body } = ctx;
   const { pushToken } = z.object({ pushToken: z.string() }).parse(body);
-  const prefix = `device:${session.id}:`;
-  const rows = await db.setting.findMany({ where: { key: { startsWith: prefix } } });
-  for (const r of rows) {
-    try {
-      const parsed = JSON.parse(r.value);
-      if (parsed.pushToken === pushToken) {
-        await db.setting.delete({ where: { key: r.key } });
-      }
-    } catch {}
-  }
+  await db.device.deleteMany({ where: { userId: session!.id, pushToken } });
   return { data: { ok: true } };
 }
 

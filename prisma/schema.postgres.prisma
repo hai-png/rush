@@ -189,6 +189,12 @@ enum Currency {
   ETB
 }
 
+enum DevicePlatform {
+  ios
+  android
+  web
+}
+
 model User {
   id                  String    @id @default(cuid())
   phone               String    @unique
@@ -237,6 +243,7 @@ model User {
   corporateInvites        CorporateInvite[]     @relation("InviteCreator")
   mandates                Mandate[]
   twoFactorBackupCodes    TwoFactorBackupCode[]
+  devices                 Device[]
 
   @@index([isActive, deletedAt])
   @@index([role, isActive]) // admin lookups (notify all admins)
@@ -953,4 +960,21 @@ model TwoFactorBackupCode {
   createdAt DateTime  @default(now())
 
   @@index([userId])
+}
+
+// ─── Push notification devices ───────────────────────────────────────────────
+// C-11 fix: dedicated Device model replaces the Setting-table-based token
+// storage. Each user can register multiple devices (one per platform).
+model Device {
+  id        String         @id @default(cuid())
+  userId    String
+  user      User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  pushToken String         @unique
+  platform  DevicePlatform
+  userAgent String?
+  createdAt DateTime       @default(now())
+  updatedAt DateTime       @updatedAt
+
+  @@index([userId])
+  @@index([pushToken])
 }

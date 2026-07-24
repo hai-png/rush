@@ -1046,3 +1046,22 @@ CREATE TRIGGER audit_log_no_delete_trigger
   BEFORE DELETE ON "AuditLog"
   FOR EACH ROW
   EXECUTE FUNCTION audit_log_no_delete();
+
+-- C-11 fix: dedicated Device table for push notification tokens.
+DO $$ BEGIN
+  CREATE TYPE "DevicePlatform" AS ENUM ('ios', 'android', 'web');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+CREATE TABLE IF NOT EXISTS "Device" (
+  "id" TEXT NOT NULL PRIMARY KEY,
+  "userId" TEXT NOT NULL,
+  "pushToken" TEXT NOT NULL UNIQUE,
+  "platform" "DevicePlatform" NOT NULL,
+  "userAgent" TEXT,
+  "createdAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  "updatedAt" TIMESTAMP(3) NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  FOREIGN KEY ("userId") REFERENCES "User"("id") ON DELETE CASCADE
+);
+CREATE INDEX IF NOT EXISTS "Device_userId_idx" ON "Device"("userId");
+CREATE INDEX IF NOT EXISTS "Device_pushToken_idx" ON "Device"("pushToken");
