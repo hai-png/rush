@@ -13,10 +13,6 @@ export const db =
   })
 
 // C-14 fix: warn when running SQLite in production. The deployment target is
-// Postgres — SQLite is only suitable for local dev. In production, use
-// DATABASE_PROVIDER=postgres and schema.postgres.prisma (selected via
-// scripts/select-schema.sh). Connection pooling (PgBouncer) is required for
-// multi-instance deployments.
 async function checkProductionDb(): Promise<void> {
   if (process.env.NODE_ENV !== 'production') return;
   const url = process.env.DATABASE_URL ?? '';
@@ -26,7 +22,6 @@ async function checkProductionDb(): Promise<void> {
   } else if (!url.startsWith('postgresql://') && !url.startsWith('postgres://')) {
     logger.warn(`[db] Unrecognized DATABASE_URL scheme: ${url.split(':')[0]}:// — expected postgresql://`);
   }
-  // Remind about connection pooling for Postgres.
   if (url.startsWith('postgresql://') || url.startsWith('postgres://')) {
     if (!process.env.DATABASE_POOL_URL) {
       logger.info('[db] Postgres detected. For multi-instance deployments, set DATABASE_POOL_URL (PgBouncer) ' +
@@ -35,13 +30,6 @@ async function checkProductionDb(): Promise<void> {
   }
 }
 
-// Apply SQLite performance/safety PRAGMAs once per process.
-// WAL mode allows concurrent readers during writes (critical for any real load).
-// busy_timeout makes writers wait up to 5s instead of failing immediately with SQLITE_BUSY.
-// synchronous=NORMAL is the recommended companion to WAL (safe, faster than FULL).
-// foreign_keys=ON is required for Prisma's onDelete semantics to work on SQLite.
-// Skip for non-SQLite databases (e.g. Postgres in production) — the pragmas are no-ops there
-// but we avoid the round-trip entirely.
 async function applySqlitePragmas(): Promise<void> {
   if (globalForPrisma.__prismaPragmasInitialized) return
   globalForPrisma.__prismaPragmasInitialized = true
@@ -50,8 +38,6 @@ async function applySqlitePragmas(): Promise<void> {
   if (!url.startsWith('file:')) return // Postgres or other — skip
 
   try {
-    // Use $queryRaw for PRAGMAs — some (e.g. journal_mode) return result rows,
-    // which $executeRaw rejects on SQLite.
     await db.$queryRaw`PRAGMA journal_mode=WAL`
     await db.$queryRaw`PRAGMA busy_timeout=5000`
     await db.$queryRaw`PRAGMA synchronous=NORMAL`
@@ -62,8 +48,8 @@ async function applySqlitePragmas(): Promise<void> {
   }
 }
 
-// Fire-and-forget; the first query will block on the pragma if needed.
 applySqlitePragmas().catch(() => {})
 checkProductionDb().catch(() => {})
 
 if (process.env.NODE_ENV !== 'production') globalForPrisma.prisma = db
+

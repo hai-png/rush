@@ -1,7 +1,5 @@
 import { logger } from '@/lib/logger';
 
-// lazy-load Sentry so the errors.ts module doesn't crash if
-// @sentry/nextjs isn't installed (e.g. in the test environment).
 let SentryModule: any = null;
 async function getSentry(): Promise<any> {
   if (SentryModule !== null) return SentryModule;
@@ -12,7 +10,6 @@ async function getSentry(): Promise<any> {
   }
   return SentryModule;
 }
-// them to { error: { code, message, requestId } }.
 
 export class AppError extends Error {
   constructor(
@@ -53,16 +50,12 @@ export function toErrorEnvelope(err: unknown, requestId: string): { status: numb
   if (err instanceof AppError) {
     return { status: err.status, body: { error: { code: err.code, message: err.message, requestId } } };
   }
-  // Zod errors
   if (err && typeof err === 'object' && 'name' in err && (err as any).name === 'ZodError') {
     return {
       status: 400,
       body: { error: { code: 'VALIDATION_ERROR', message: 'Invalid request body', details: (err as any).issues, requestId } },
     };
   }
-  // report unhandled (non-AppError) errors to Sentry.
-  // Fire-and-forget — toErrorEnvelope is synchronous and we don't want to
-  // block the error response on Sentry's network call.
   getSentry().then(sentry => {
     if (sentry) sentry.captureException(err, { tags: { requestId } });
   }).catch(() => {});
@@ -72,3 +65,4 @@ export function toErrorEnvelope(err: unknown, requestId: string): { status: numb
     body: { error: { code: 'INTERNAL', message: 'Something went wrong', requestId } },
   };
 }
+

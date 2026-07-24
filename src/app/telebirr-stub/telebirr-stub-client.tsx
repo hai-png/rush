@@ -18,8 +18,6 @@ function TelebirrStubInner() {
 
   const [status, setStatus] = useState<'idle' | 'paying' | 'success' | 'failed'>('idle');
 
-  // defence-in-depth: even if the build-time gate is bypassed, redirect
-  // away from this page if it ever renders in production.
   useEffect(() => {
     if (process.env.NODE_ENV === 'production') {
       router.replace('/');
@@ -29,7 +27,6 @@ function TelebirrStubInner() {
   async function pay(result: 'Success' | 'Fail') {
     setStatus('paying');
     try {
-      // Fire the webhook handler directly.
       const payload = {
         merch_order_id: order,
         out_request_no: `orno-${Date.now()}`,
@@ -105,8 +102,6 @@ function TelebirrStubInner() {
 }
 
 export default function TelebirrStubClient() {
-  // useSearchParams() must be wrapped in a Suspense boundary so that
-  // Next.js 16 can statically prerender the page shell.
   return (
     <Suspense fallback={<div className="min-h-screen flex items-center justify-center">Loading…</div>}>
       <TelebirrStubInner />

@@ -14,8 +14,6 @@ import { api, ApiError } from '@/lib/api-client';
 import { Bus, ChevronLeft } from 'lucide-react';
 import { EthiopianPhone } from '@/lib/phone';
 
-// Client-side validation mirrors the server schema so users get inline
-// feedback before the request is sent.
 const LoginSchema = z.object({
   phone: z.string().refine(EthiopianPhone.isValid, 'Enter a valid Ethiopian phone (+2519XXXXXXXX)'),
   password: z.string().min(1, 'Password is required'),
@@ -122,9 +120,6 @@ function LoginInner() {
   );
 }
 
-// Client-side login form. The page.tsx wrapper exports `metadata` (only
-// server components can do that) and renders this component inside <Suspense>
-// (required because we use useSearchParams).
 export function LoginForm() {
   return (
     <Suspense fallback={<div className="min-h-screen flex items-center justify-center">Loading…</div>}>

@@ -6,8 +6,6 @@ import { Card, CardContent } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { SignOutButton } from '@/components/sign-out-button';
-// lazy-load RouteMap via a client-component wrapper (ssr:false isn't
-// allowed in Server Components directly).
 import { RouteMap } from '@/components/route-map-lazy';
 import { formatETB } from '@/lib/format';
 

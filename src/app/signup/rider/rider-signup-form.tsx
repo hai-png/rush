@@ -13,8 +13,6 @@ import { api } from '@/lib/api-client';
 import { ChevronLeft } from 'lucide-react';
 import { EthiopianPhone } from '@/lib/phone';
 
-// Client-side validation mirrors the server schema so users get inline
-// feedback before the request is sent.
 const SignupSchema = z.object({
   name: z.string().min(2, 'Name must be at least 2 characters'),
   phone: z.string().refine(EthiopianPhone.isValid, 'Enter a valid Ethiopian phone (+2519XXXXXXXX)'),
@@ -23,8 +21,6 @@ const SignupSchema = z.object({
   workArea: z.string().min(1, 'Work area is required'),
 });
 
-// Client-side signup form. The page.tsx wrapper exports the page metadata
-// and renders this.
 export function RiderSignupForm() {
   const router = useRouter();
   const [form, setForm] = useState({ name: '', phone: '', password: '', homeArea: '', workArea: '' });
@@ -47,7 +43,6 @@ export function RiderSignupForm() {
     setLoading(true);
     try {
       await api.post('/api/v1/auth/register', { kind: 'rider', ...form });
-      // Auto-login after signup
       await api.post('/api/v1/auth/token', { phone: form.phone, password: form.password });
       toast.success('Account created');
       router.push('/tos/accept');

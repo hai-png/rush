@@ -8,10 +8,6 @@ import { ensureSchedulerStarted } from '@/lib/scheduler';
 
 type Ctx = { params: Promise<{ route?: string[] }> };
 
-// H-38 fix: validate path params before they reach handlers.
-// Path parameters come from URL segments and are not validated by Zod
-// (which only handles request bodies). Malformed params (extremely long,
-// unexpected characters) are rejected here with a 400 JSON envelope.
 const MAX_PATH_PARAM_LENGTH = 200;
 const PATH_PARAM_PATTERN = /^[a-zA-Z0-9_\-:.+=@%]+$/;
 function validatePathParam(value: string, name: string): void {
@@ -40,7 +36,6 @@ function handle(method: string) {
       return handleRaw(req, ctx, found);
     }
 
-    // H-38 fix: validate path params before passing to handlers.
     const mergedParams = { ...p, ...found.params };
     for (const [key, val] of Object.entries(mergedParams)) {
       if (typeof val === 'string') validatePathParam(val, key);
@@ -69,7 +64,6 @@ async function handleRaw(
   const ua = req.headers.get('user-agent') ?? undefined;
 
   try {
-    // ── Auth (same as api()) ────────────────────────────────────────────
     let session: any = null;
     const cookieToken = readCookie(req, SESSION_COOKIE);
     const bearer = req.headers.get('authorization')?.replace(/^Bearer\s+/i, '');
@@ -83,15 +77,10 @@ async function handleRaw(
       }
     }
 
-    // ── CSRF (shared with api()) ────────────────────────────────────────
     await csrfCheck(req);
 
-    // ── Rate limit (shared with api()) ──────────────────────────────────
-    // from rate limiting — that let a malicious user bypass per-IP throttling
-    // by hitting /contractor/documents instead of a non-raw equivalent.
     await rateLimitCheck(req.nextUrl.pathname, req.method, { session, body: null, ip });
 
-    // ── AuthZ ───────────────────────────────────────────────────────────
     if (found.entry.options.requireAuth && !session) {
       return NextResponse.json({ error: { code: 'UNAUTHORIZED', message: 'Sign in required', requestId } }, { status: 401, headers: { 'x-request-id': requestId } });
     }
@@ -101,10 +90,8 @@ async function handleRaw(
       }
     }
 
-    // ── TOS gate (shared with api()) ────────────────────────────────────
     if (!found.entry.options.exemptFromTosGate) tosGate(req.nextUrl.pathname, session);
 
-    // H-38 fix: validate path params for raw handlers too.
     const mergedParams = { ...p, ...found.params };
     for (const [key, val] of Object.entries(mergedParams)) {
       if (typeof val === 'string') validatePathParam(val, key);

@@ -4,14 +4,6 @@ import bcrypt from 'bcryptjs';
 
 const prisma = new PrismaClient();
 
-// refuse to run the seed script in production with hardcoded
-// demo credentials. If an operator runs `bun run db:seed` in production and
-// doesn't manually change the admin password, an attacker logs in as
-// +251911000001 / admin-pass-1234 with full platform_admin access.
-//
-// To run the seed in production (e.g. for a fresh deploy), set
-// SEED_ALLOW_PRODUCTION=1 AND override each password via env vars:
-//   SEED_ADMIN_PASSWORD, SEED_RIDER_PASSWORD, SEED_CONTRACTOR_PASSWORD.
 const isProd = process.env.NODE_ENV === 'production';
 const allowProdSeed = process.env.SEED_ALLOW_PRODUCTION === '1';
 if (isProd && !allowProdSeed) {
@@ -19,8 +11,6 @@ if (isProd && !allowProdSeed) {
   console.error('Set SEED_ALLOW_PRODUCTION=1 AND override SEED_ADMIN_PASSWORD / SEED_RIDER_PASSWORD / SEED_CONTRACTOR_PASSWORD to proceed.');
   process.exit(1);
 }
-// in production with SEED_ALLOW_PRODUCTION=1, require all three
-// password env vars to be set — don't fall back to hardcoded defaults.
 if (isProd && allowProdSeed) {
   if (!process.env.SEED_ADMIN_PASSWORD || !process.env.SEED_RIDER_PASSWORD || !process.env.SEED_CONTRACTOR_PASSWORD) {
     console.error('SEED_ALLOW_PRODUCTION=1 is set but SEED_ADMIN_PASSWORD / SEED_RIDER_PASSWORD / SEED_CONTRACTOR_PASSWORD are not all provided.');
@@ -111,7 +101,7 @@ async function main() {
       slug: 'trial',
       name: '2-Week Trial',
       description: '14-day trial, 10 rides — paid introduction',
-      priceCents: 50000, // 500 ETB (paid, not free)
+      priceCents: 50000,
       ridesIncluded: 10,
       durationDays: 14,
       isTrial: true,
@@ -125,7 +115,7 @@ async function main() {
       slug: 'monthly-30',
       name: 'Monthly 30',
       description: '30 rides per month',
-      priceCents: 150000, // 1500 ETB
+      priceCents: 150000,
       ridesIncluded: 30,
       durationDays: 30,
       sortOrder: 1,
@@ -138,7 +128,7 @@ async function main() {
       slug: 'monthly-unlimited',
       name: 'Monthly Unlimited',
       description: 'Unlimited rides for 30 days',
-      priceCents: 300000, // 3000 ETB
+      priceCents: 300000,
       ridesIncluded: -1,
       durationDays: 30,
       sortOrder: 2,
@@ -146,7 +136,6 @@ async function main() {
   });
   console.log(`  plans: ${trialPlan.slug}, ${monthlyPlan.slug}, ${monthlyUnlimited.slug}`);
 
-  // Route
   const route = await prisma.route.upsert({
     where: { id: 'route-bole-merkato' },
     update: {},
@@ -156,12 +145,11 @@ async function main() {
       destination: 'Merkato',
       distanceKm: 12.5,
       durationMin: 45,
-      fareCents: 5000, // 50 ETB
+      fareCents: 5000,
     },
   });
   console.log(`  route: ${route.origin} → ${route.destination}`);
 
-  // Pickup locations for the route
   const pickups = [
     { name: 'Bole Friendship', lat: 9.0085, lng: 38.7575, estimatedPickupTime: '07:00', sortOrder: 0 },
     { name: 'Bole Rwanda', lat: 9.0132, lng: 38.7645, estimatedPickupTime: '07:10', sortOrder: 1 },
@@ -177,7 +165,6 @@ async function main() {
   }
   console.log(`  pickups: ${pickups.length} locations`);
 
-  // Shuttle
   const shuttle = await prisma.shuttle.upsert({
     where: { plate: 'AA-12345' },
     update: {},
@@ -192,7 +179,6 @@ async function main() {
   });
   console.log(`  shuttle: ${shuttle.plate}`);
 
-  // Route assignment — contractor commits to this route for the current month
   const now = new Date();
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1);
   const monthEnd = new Date(now.getFullYear(), now.getMonth() + 1, 0, 23, 59, 59);
@@ -214,22 +200,14 @@ async function main() {
   });
   console.log(`  assignment: ${assignment.id} (${assignment.status})`);
 
-  // generate trips from the assignment's schedule pattern.
-  // Previously the seed only created one manual trip (trip-demo-001) and
-  // never called generateTripsFromAssignment, so the dev environment was
-  // sparse — only 1 trip instead of ~22 (Mon-Fri × morning+evening).
-  // L fix: use static import (already imported at top of file would be cleaner,
-  // but for now keep the dynamic import with a less swallow-y catch).
   try {
     const { generateTripsFromAssignment } = await import('../src/lib/api-assignments');
     const generated = await generateTripsFromAssignment(assignment);
     console.log(`  trips generated from assignment: ${generated}`);
   } catch (err) {
-    // Trip generation is best-effort — the assignment is created either way.
     console.warn(`  (trip generation skipped: ${(err as Error).message})`);
   }
 
-  // Also create the manual demo trip (for e2e tests that reference trip-demo-001).
   const trip = await prisma.trip.upsert({
     where: { id: 'trip-demo-001' },
     update: {},
@@ -246,7 +224,6 @@ async function main() {
   });
   console.log(`  trip: ${trip.id}`);
 
-  // FAQ
   await prisma.faqArticle.upsert({
     where: { id: 'faq-1' },
     update: {},

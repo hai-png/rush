@@ -1,18 +1,6 @@
 import Link from 'next/link';
 import { Button } from '@/components/ui/button';
 
-// Phase 3 fix: unified pagination component supporting both offset (legacy)
-// and cursor-based (preferred) pagination.
-//
-// Cursor-based is preferred because:
-//   - O(1) performance regardless of page depth (offset is O(n) on SQLite)
-//   - No skipped/duplicate rows when items are inserted/deleted between pages
-//   - Matches the API's existing cursor-based pagination (src/lib/pagination.ts)
-//
-// Admin pages should use CursorPagination. The offset-based Pagination is
-// retained for backward compatibility but new pages should use cursor-based.
-
-// ── Offset-based (legacy) ───────────────────────────────────────────
 export function Pagination({
   page,
   total,
@@ -66,10 +54,6 @@ export function Pagination({
   );
 }
 
-// ── Cursor-based (preferred) ────────────────────────────────────────
-// Renders Prev/Next buttons using cursor params. The caller passes the
-// current cursor (from searchParams) and the nextCursor (from the API
-// response's pagination.nextCursor).
 export function CursorPagination({
   cursor,
   nextCursor,

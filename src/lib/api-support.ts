@@ -95,8 +95,6 @@ export async function POST_message({ session, params, body }: any) {
     return m;
   });
 
-  // Notify the other party: admin replies notify the rider; rider replies
-  // notify all platform admins (so they know to look at the ticket).
   if (session.role === 'platform_admin') {
     await enqueueNotification({
       userId: ticket.userId,
@@ -106,7 +104,6 @@ export async function POST_message({ session, params, body }: any) {
       link: `/tickets/${ticket.id}`,
     });
   } else {
-    // Rider replied — notify all platform admins.
     const admins = await db.user.findMany({
       where: { role: 'platform_admin', isActive: true },
       select: { id: true },
@@ -148,9 +145,6 @@ export async function handleTicketMessageWithAttachment(req: NextRequest, sessio
     let fileId: string | undefined;
     let fileMeta: any;
     if (file && file instanceof File) {
-      // save file to disk + create UploadedFile row BEFORE the ticketMessage
-      // transaction. If the tx fails, we can clean up the orphaned file.
-      // the file was orphaned with no UploadedFile row to track it.
       fileMeta = await saveFile(file, `tickets/${ticket.id}`);
       try {
         const uploaded = await db.uploadedFile.create({
@@ -166,7 +160,6 @@ export async function handleTicketMessageWithAttachment(req: NextRequest, sessio
         });
         fileId = uploaded.id;
       } catch (err) {
-        // Clean up the orphaned file if UploadedFile creation failed.
         const { unlink } = await import('node:fs/promises');
         try { await unlink(fileMeta.fullPath); } catch {}
         throw err;
@@ -205,7 +198,6 @@ export async function handleTicketMessageWithAttachment(req: NextRequest, sessio
   }
 }
 
-
 const TicketUpdateInput = z.object({
   status: z.enum(['open', 'in_progress', 'resolved', 'closed']).optional(),
   priority: z.enum(['low', 'normal', 'high', 'urgent']).optional(),
@@ -219,7 +211,6 @@ export async function PATCH_ticket({ session, params, body, ipAddress, userAgent
   if (ticket.userId !== session.id && session.role !== 'platform_admin') {
     throw new ForbiddenError('Not your ticket');
   }
-  // Riders can only close their own tickets; only admin can set in_progress/resolved.
   if (session.role !== 'platform_admin' && input.status && input.status !== 'closed') {
     throw new ForbiddenError('Only admin can set that status');
   }
@@ -241,3 +232,4 @@ export async function GET_messages({ session, params }: any) {
   });
   return { data: messages };
 }
+

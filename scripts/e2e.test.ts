@@ -1,20 +1,7 @@
-// Phase 3 fix: e2e test scaffold using bun:test.
-// Replaces the 990-line bash script (scripts/e2e-test.sh) with a typed
-// TypeScript test that uses fetch + proper JSON parsing.
-//
-// Usage:
-//   OTP_DEBUG=1 RATE_LIMIT_DISABLED=1 bun run dev &  # start dev server
-//   bun test scripts/e2e.test.ts
-//
-// This scaffold covers: auth, catalog, subscription + checkout, ride booking,
-// marketplace seat release/claim. The full e2e suite (admin flows, corporate
-// flows, support tickets, etc.) can be added incrementally.
-
 import { test, expect, beforeAll, describe } from 'bun:test';
 
 const BASE = process.env.E2E_BASE_URL || 'http://localhost:3000';
 
-// Cookie jar for session persistence between requests.
 let cookieHeader = '';
 let csrfToken = '';
 
@@ -24,18 +11,14 @@ async function apiFetch(path: string, opts: RequestInit = {}): Promise<any> {
     headers.set('content-type', 'application/json');
   }
   if (cookieHeader) headers.set('cookie', cookieHeader);
-  // CSRF for non-safe methods
   if (opts.method && !['GET', 'HEAD', 'OPTIONS'].includes(opts.method)) {
     if (csrfToken) headers.set('x-csrf-token', csrfToken);
   }
   const res = await fetch(`${BASE}/api/v1${path}`, { ...opts, headers, redirect: 'manual' });
-  // Capture cookies
   const setCookie = res.headers.get('set-cookie');
   if (setCookie) {
-    // Parse the csrf cookie value
     const csrfMatch = setCookie.match(/addis-csrf=([^;]+)/);
     if (csrfMatch) csrfToken = csrfMatch[1];
-    // Build simplified cookie header for next request
     const cookies = setCookie.split(',').map(c => c.split(';')[0].trim()).join('; ');
     cookieHeader = cookies;
   }
@@ -47,7 +30,6 @@ async function apiFetch(path: string, opts: RequestInit = {}): Promise<any> {
   return { status: res.status, body };
 }
 
-// Test state — shared across tests in the suite.
 let riderPhone: string;
 let riderSession: any;
 let planId: string;
@@ -58,9 +40,7 @@ let rideId: string;
 
 describe('E2E: Auth + Catalog + Subscription + Booking', () => {
   beforeAll(async () => {
-    // Seed the CSRF cookie by hitting a public endpoint.
     await apiFetch('/plans');
-    // Generate a unique phone for this test run.
     riderPhone = `+251911${Date.now().toString().slice(-6)}`;
   });
 
@@ -93,7 +73,6 @@ describe('E2E: Auth + Catalog + Subscription + Booking', () => {
       method: 'POST',
       body: JSON.stringify({ phone: riderPhone, password: 'test-pass-1234' }),
     });
-    // 200 = logged in; 409 = ToS required (expected for new users)
     expect([200, 409]).toContain(status);
     if (status === 200) {
       riderSession = body.data;
@@ -121,8 +100,6 @@ describe('E2E: Auth + Catalog + Subscription + Booking', () => {
   });
 
   test('POST /webhooks/telebirr/notify settles the payment (mock)', async () => {
-    // In mock mode, the webhook accepts sign: 'mock-signature'.
-    // Note: in production, this endpoint verifies RSA-PSS-SHA256 signatures.
     const { status, body } = await apiFetch('/webhooks/telebirr/notify', {
       method: 'POST',
       body: JSON.stringify({

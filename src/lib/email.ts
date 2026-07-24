@@ -1,4 +1,3 @@
-
 import { loadEnv } from '@/lib/env';
 import { logger } from '@/lib/logger';
 
@@ -63,3 +62,4 @@ export function getEmailProvider(): EmailProvider {
     : new ConsoleEmailProvider();
   return cachedProvider;
 }
+

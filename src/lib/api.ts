@@ -1,5 +1,3 @@
-// All security invariants baked in from the start. No patches.
-
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { createHash, randomBytes, timingSafeEqual } from 'node:crypto';
@@ -11,9 +9,6 @@ import { ensureSchedulerStarted } from '@/lib/scheduler';
 import { logger } from '@/lib/logger';
 import { recordRequest } from '@/lib/api-metrics';
 
-// In production, use the __Host- prefix so the cookie can only be set from
-// the origin domain (no subdomain/path overwrite attacks). Requires the
-// Secure flag (set below in production) and rejects the Domain attribute.
 export const SESSION_COOKIE = process.env.NODE_ENV === 'production' ? '__Host-addis-session' : 'addis-session';
 const CSRF_COOKIE = process.env.NODE_ENV === 'production' ? '__Host-addis-csrf' : 'addis-csrf';
 const CSRF_HEADER = 'x-csrf-token';
@@ -29,16 +24,6 @@ export type ApiContext = {
 };
 
 // Phase 3 fix: typed ApiHandler so handler bodies get compile-time type
-// checking on session, body, params, query. Previously every handler was
-// typed ({ session, body, params, query }: any) which let typos like
-// params.pymentId propagate to runtime 500s.
-//
-// Usage:
-//   export async function POST_create(ctx: ApiHandler<CreateInput>) { ... }
-//   export async function GET_list(ctx: ApiHandler) { ... }  // no body type
-//
-// The identity module is migrated as a pattern. Other modules can migrate
-// incrementally — the `any` fallback still works.
 export type ApiHandler<I = unknown> = {
   requestId: string;
   ipAddress: string | undefined;
@@ -53,23 +38,12 @@ export type ApiOptions = {
   requireAuth?: boolean;
   requireRole?: Array<'rider' | 'contractor' | 'corporate_admin' | 'platform_admin'>;
   exemptFromTosGate?: boolean;
-  // Idempotency is auto-applied to POST with an Idempotency-Key header.
-  // Optional deprecation marker. When set, the api() wrapper emits `Sunset`
-  // (RFC 8594) and `Deprecation: true` (RFC 9745) headers so clients can
-  // detect that a route is being phased out. No routes use this yet — the
-  // machinery is in place for future removals.
   deprecated?: {
     sunset?: Date;   // when the route will stop responding
     link?: string;   // docs URL for the migration path
   };
 };
 
-// Walk X-Forwarded-For right-to-left, skipping entries that match a trusted
-// proxy (configured via TRUSTED_PROXIES). The rightmost non-trusted entry is
-// treated as the real client IP. If TRUSTED_PROXIES is empty, the XFF header
-// is ignored entirely and the socket peer (x-real-ip) is used — this is the
-// safest default because an attacker cannot forge XFF when the app is
-// directly exposed.
 function parseTrustedProxies(): Set<string> {
   const raw = process.env.TRUSTED_PROXIES || '';
   return new Set(raw.split(',').map(s => s.trim()).filter(Boolean));
@@ -80,11 +54,9 @@ export function clientIp(req: NextRequest): string | undefined {
   const trusted = parseTrustedProxies();
   if (xff && trusted.size > 0) {
     const parts = xff.split(',').map(s => s.trim()).filter(Boolean);
-    // Walk right-to-left; the rightmost non-trusted entry is the real client.
     for (let i = parts.length - 1; i >= 0; i--) {
       if (!trusted.has(parts[i]!)) return parts[i];
     }
-    // All entries are trusted — return the leftmost (closest to the origin client).
     if (parts.length > 0) return parts[0];
   }
   return req.headers.get('x-real-ip') ?? undefined;
@@ -97,15 +69,11 @@ type RateRule = {
   pattern: RegExp;
   limit: number;
   windowSec: number;
-  // returns the bucket key suffix; if it returns null, the rule is skipped
   keyFn: (ctx: { session: Session | null; body: any; ip: string | undefined }) => string | null;
 };
 
 const RATE_RULES: RateRule[] = [
   { pattern: /\/api\/v1\/auth\/token$/, limit: 100, windowSec: 60, keyFn: ({ ip }) => ip ? `ip:${ip}` : null },
-  // tightened from 10/min to 5/min per phone. A 6-digit TOTP
-  // has 10^6 possibilities; at 5 attempts/min across rotating 30s windows,
-  // a sustained brute-force takes ~140 days for a 50% success chance.
   { pattern: /\/api\/v1\/auth\/token$/, limit: 5, windowSec: 60, keyFn: ({ body }) => body?.phone ? `phone:${body.phone}` : null },
   { pattern: /\/api\/v1\/auth\/register$/, limit: 50, windowSec: 3600, keyFn: ({ ip }) => ip ? `ip:${ip}` : null },
   { pattern: /\/api\/v1\/auth\/otp\/send$/, limit: 3, windowSec: 600, keyFn: ({ ip }) => ip ? `ip:${ip}` : null },
@@ -114,13 +82,7 @@ const RATE_RULES: RateRule[] = [
   { pattern: /\/api\/v1\/auth\/password\/reset$/, limit: 3, windowSec: 600, keyFn: ({ body }) => `phone:${body?.phone ?? 'unknown'}` },
   { pattern: /\/api\/v1\/auth\/password\/reset\/confirm$/, limit: 5, windowSec: 600, keyFn: ({ body }) => `phone:${body?.phone ?? 'unknown'}` },
   { pattern: /\/api\/v1\/subscriptions$/, limit: 10, windowSec: 3600, keyFn: ({ session }) => session ? `user:${session.id}` : null },
-  // Corporate invite generation — a rogue admin could generate unlimited
-  // invite codes without this. Cap at 50/hour per admin.
   { pattern: /\/api\/v1\/corporate\/invites$/, limit: 50, windowSec: 3600, keyFn: ({ session }) => session ? `user:${session.id}` : null },
-  // Webhook-specific rule. Telebirr can burst payment notifications during
-  // peak hours — the default 60/min anonymous cap could drop real settlement
-  // events. Allow 600/min per IP (high enough for legit bursts, low enough
-  // to blunt a naive flood).
   { pattern: /\/api\/v1\/webhooks\//, limit: 600, windowSec: 60, keyFn: ({ ip }) => ip ? `ip:${ip}` : null },
 ];
 
@@ -132,13 +94,8 @@ const DEFAULT_ANON_GET = { limit: 120, windowSec: 60 };
 
 export type RateLimitInfo = { limit: number; remaining: number; resetAt: number };
 
-
 // H-16 fix: normalize the path for rate-limit bucketing so parameterized routes
-// share a bucket. /subscriptions/abc/cancel and /subscriptions/def/cancel both
-// become /subscriptions/:id/cancel. Without this, a user with N subscriptions
-// could issue N × 100 mutations/min by hitting each subscription's URL.
 function normalizePathForRateLimit(path: string): string {
-  // Replace cuid-like (24+ char alphanumeric) and numeric segments with :id
   return path.replace(/\/[a-zA-Z0-9]{20,}/g, '/:id').replace(/\/\d+(?=\/|$)/g, '/:id');
 }
 
@@ -192,9 +149,6 @@ export async function rateLimitCheck(
   return info;
 }
 
-// Shared rate-limit bucket: tries Redis first (distributed), falls back to
-// in-memory (single-instance). This ensures multi-instance deployments with
-// REDIS_URL set get correct cross-instance throttling.
 async function rateLimitBucket(
   key: string,
   limit: number,
@@ -251,10 +205,7 @@ export async function csrfCheck(req: NextRequest): Promise<void> {
   const sessionToken = readCookie(req, SESSION_COOKIE);
   const bearer = req.headers.get('authorization')?.replace(/^Bearer\s+/i, '');
 
-  // Only skip CSRF when the request uses bearer auth AND no session cookie.
-  // If both are present, the request is browser-like and CSRF must be enforced.
   if (!sessionToken && bearer) return;
-  // If neither credential is present, the request is anonymous — CSRF doesn't apply.
   if (!sessionToken && !bearer) return;
 
   const cookieToken = readCookie(req, CSRF_COOKIE);
@@ -320,7 +271,6 @@ async function idempotencyCheck(req: NextRequest, ctx: ApiContext, bodyText: str
     });
     return { scopedKey, bodyHash };
   } catch {
-    // Collision — fetch existing.
     const existing = await db.idempotencyRecord.findUnique({ where: { key: scopedKey } });
     if (!existing) throw new ConflictError('Idempotency conflict; retry');
     if (existing.requestBodyHash !== bodyHash) {
@@ -332,7 +282,6 @@ async function idempotencyCheck(req: NextRequest, ctx: ApiContext, bodyText: str
     if (existing.responseStatus >= 200 && existing.responseStatus < 300) {
       return { replay: JSON.parse(existing.responseBody), scopedKey };
     }
-    // Non-2xx: allow retry by deleting.
     await db.idempotencyRecord.delete({ where: { key: scopedKey } });
     throw new ConflictError('Previous request with this Idempotency-Key failed; retry now');
   }
@@ -356,17 +305,12 @@ export function api(options: ApiOptions, handler: Handler) {
   return async (req: NextRequest, ctx: { params: Promise<Record<string, string>> }): Promise<NextResponse> => {
     const requestId = crypto.randomUUID();
     const requestStart = Date.now();
-    // Start the background scheduler on first API request (no-op if already started).
     ensureSchedulerStarted();
     const ip = clientIp(req);
     const ua = req.headers.get('user-agent') ?? undefined;
 
-    // structured request logging with requestId correlation.
-    // The child logger is available to handlers via ctx, but we also log a
-    // completion line at the end of every request for access-log analysis.
     const requestLogger = logger.child({ requestId, method: req.method, path: req.nextUrl.pathname, ip, userId: undefined as string | undefined });
 
-    // Ensure CSRF cookie exists for safe methods.
     if (SAFE_METHODS.has(req.method)) {
       const c = await cookies();
       if (!c.get(CSRF_COOKIE)) {
@@ -378,10 +322,8 @@ export function api(options: ApiOptions, handler: Handler) {
 
     let idem: { replay?: any; scopedKey?: string; bodyHash?: string } | undefined;
     try {
-      // ── Auth ──
       let session: Session | null = null;
       const bearer = req.headers.get('authorization')?.replace(/^Bearer\s+/i, '');
-      // Read the session cookie from the request's Cookie header directly —
       const cookieHeader = req.headers.get('cookie') ?? '';
       let cookieToken: string | undefined;
       for (const part of cookieHeader.split(';')) {
@@ -390,22 +332,15 @@ export function api(options: ApiOptions, handler: Handler) {
       }
       const token = bearer ?? cookieToken;
       if (token) {
-        // Failed credential verification MUST propagate as 401 — never silently
         session = await verifySession(token);
       }
-      // Update the requestLogger with the resolved userId for completion logging.
       if (session) (requestLogger as any).bindings.userId = session.id;
 
-      // ── CSRF ──
       await csrfCheck(req);
 
       let body: any = undefined;
       let bodyText = '';
       if (req.method !== 'GET' && req.method !== 'HEAD') {
-        // enforce a max body size to prevent memory-exhaustion
-        // DoS (a 1GB JSON body would be buffered entirely in memory).
-        // 1MB is generous for all current endpoints (file uploads bypass this
-        // via the raw handler path). Override via MAX_BODY_BYTES env var.
         const contentLength = parseInt(req.headers.get('content-length') ?? '0', 10);
         const maxBodyBytes = parseInt(process.env.MAX_BODY_BYTES ?? '1048576', 10); // 1MB default
         if (contentLength > maxBodyBytes) {
@@ -420,7 +355,7 @@ export function api(options: ApiOptions, handler: Handler) {
           return res;
         }
         if (bodyText && bodyText.length > 0) {
-          try { body = JSON.parse(bodyText); } catch { /* leave body undefined */ }
+          try { body = JSON.parse(bodyText); } catch {  }
         }
       }
 
@@ -441,8 +376,6 @@ export function api(options: ApiOptions, handler: Handler) {
       }
 
       const params = await ctx.params;
-      // Extract query params from the URL search string so handlers can
-      // read ?corporateId= etc. without needing a separate req object.
       const query: Record<string, string> = {};
       req.nextUrl.searchParams.forEach((value, key) => { query[key] = value; });
       const result = await handler({ requestId, ipAddress: ip, userAgent: ua, session, body, params, query });
@@ -458,7 +391,6 @@ export function api(options: ApiOptions, handler: Handler) {
       const status = (result && typeof result === 'object' && 'status' in result) ? (result as any).status ?? 200 : 200;
       const data = (result && typeof result === 'object' && 'data' in result) ? (result as any).data : result;
       const headers = (result && typeof result === 'object' && 'headers' in result) ? (result as any).headers : undefined;
-      // pass through pagination metadata if present.
       const pagination = (result && typeof result === 'object' && 'pagination' in result) ? (result as any).pagination : undefined;
 
       if (idem.scopedKey) {
@@ -467,31 +399,26 @@ export function api(options: ApiOptions, handler: Handler) {
 
       const responseBody = data === undefined ? null : (pagination ? { data, pagination } : { data });
       const res = NextResponse.json(responseBody, { status });
-    try { recordRequest(req.method, status); } catch { /* metrics must never break the request */ }
+    try { recordRequest(req.method, status); } catch {  }
       if (headers) {
         for (const [k, v] of Object.entries(headers)) res.headers.set(k, String(v));
       }
       // #10: deprecation headers (RFC 8594 Sunset + RFC 9745 Deprecation).
-      // Emitted only when the route was registered with `deprecated: {...}`.
       if (options.deprecated) {
         res.headers.set('Deprecation', 'true');
         if (options.deprecated.sunset) {
-          // RFC 8594: IMF-fixdate format, e.g. "Sun, 31 Dec 2025 23:59:59 GMT".
           res.headers.set('Sunset', options.deprecated.sunset.toUTCString());
         }
         if (options.deprecated.link) {
-          // Link: <https://...>; rel="deprecation"
           res.headers.set('Link', `<${options.deprecated.link}>; rel="deprecation"`);
         }
       }
       res.headers.set('x-request-id', requestId);
-      // X-RateLimit-* headers so clients can proactively back off.
       if (rateInfo) {
         res.headers.set('X-RateLimit-Limit', String(rateInfo.limit));
         res.headers.set('X-RateLimit-Remaining', String(rateInfo.remaining));
         res.headers.set('X-RateLimit-Reset', String(rateInfo.resetAt));
       }
-      // request completion log.
       const durationMs = Date.now() - requestStart;
       if (durationMs > 1000) {
         requestLogger.warn({ status, durationMs }, '[api] slow request');
@@ -502,10 +429,6 @@ export function api(options: ApiOptions, handler: Handler) {
     } catch (err) {
       logger.error({ err: err instanceof Error ? { message: err.message, stack: err.stack } : err, requestId }, '[api] unhandled error');
       const { status, body } = toErrorEnvelope(err, requestId);
-      // If we reserved an idempotency-record lock and the handler threw,
-      // release it so the client can retry with the same key. ConflictError
-      // (409) is the exception — it's already a "retry" signal so we keep
-      // the row for the existing conflict to surface.
       if (idem?.scopedKey && !(err instanceof ConflictError)) {
         await db.idempotencyRecord.delete({ where: { key: idem.scopedKey } }).catch(() => {});
       }
@@ -514,7 +437,6 @@ export function api(options: ApiOptions, handler: Handler) {
       if (err instanceof RateLimitError) {
         res.headers.set('retry-after', String(err.retryAfterSec));
       }
-      // error completion log (5xx at error, 4xx at info).
       const durationMs = Date.now() - requestStart;
       if (status >= 500) {
         requestLogger.error({ status, durationMs, err: (err as Error).message }, '[api] server error');
@@ -527,8 +449,6 @@ export function api(options: ApiOptions, handler: Handler) {
 }
 
 export async function setSessionCookie(res: NextResponse, token: string): Promise<void> {
-  // __Host- prefix requires Secure + path=/ + no Domain attribute.
-  // sameSite='lax' is preserved (browser still sends it on top-level navigations).
   res.cookies.set(SESSION_COOKIE, token, {
     httpOnly: true,
     secure: process.env.NODE_ENV === 'production',
@@ -541,3 +461,4 @@ export async function setSessionCookie(res: NextResponse, token: string): Promis
 export async function clearSessionCookie(res: NextResponse): Promise<void> {
   res.cookies.delete(SESSION_COOKIE);
 }
+

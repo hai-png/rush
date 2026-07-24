@@ -1,4 +1,3 @@
-
 type Env = {
   NODE_ENV: 'development' | 'production' | 'test';
   DATABASE_URL: string;
@@ -26,25 +25,16 @@ type Env = {
   RESEND_API_KEY: string;
   RESEND_FROM: string;
   RESEND_WEBHOOK_SECRET: string;
-  // CRITICAL FIX (H-14): Resend webhook signature verification secret.
-  // Without this, the Resend webhook endpoint accepts arbitrary POSTs.
   TELEBIRR_WEBHOOK_IPS: string;
   SENTRY_DSN: string;
   REDIS_URL: string;
-  // Dedicated field-level encryption key (used by crypto-field.ts). Falls
-  // back to AUTH_SECRET if unset so existing deployments keep working.
   FIELD_ENCRYPTION_KEY: string;
-  // Comma-separated list of trusted proxy IP/CIDR strings. The rightmost XFF
-  // entry not coming from a trusted proxy is treated as the real client IP.
-  // Empty = trust no proxies (use socket peer).
   TRUSTED_PROXIES: string;
 };
 
 let cachedEnv: Env | null = null;
 
 export function loadEnv(): Env {
-  // Cached on first call — env var changes after startup are ignored.
-  // This is intentional: runtime secret rotation requires a process restart.
   if (cachedEnv) return cachedEnv;
 
   const authSecret = process.env.AUTH_SECRET;
@@ -53,16 +43,10 @@ export function loadEnv(): Env {
       throw new Error('AUTH_SECRET must be set in production (>= 32 chars)');
     }
   }
-  // reject the dev fallback string in production even if it's >= 32 chars.
   if (process.env.NODE_ENV === 'production' && (authSecret === 'dev-only-insecure-secret-32-chars-min' || authSecret === 'dev-only-insecure-secret-32-chars-minimum-length')) {
     throw new Error('AUTH_SECRET must not equal the dev fallback string in production');
   }
 
-  // in production, if TELEBIRR_ENV is set to 'production' or
-  // 'testbed' but the required Telebirr credentials are missing, fail loudly
-  // instead of silently falling back to the mock provider. The mock provider
-  // accepts 'sign: mock-signature' on webhooks — silently using it in prod
-  // would let any attacker forge payment-settlement webhooks for free.
   const telebirrEnv: Env['TELEBIRR_ENV'] =
     (process.env.TELEBIRR_ENV as any) === 'production' ? 'production'
     : (process.env.TELEBIRR_ENV as any) === 'testbed' ? 'testbed'
@@ -88,12 +72,6 @@ export function loadEnv(): Env {
       `Refusing to start without explicit acknowledgment.`
     );
   }
-  // CRITICAL FIX (C-4): refuse to run mock Telebirr in production unless the
-  // operator has explicitly set ALLOW_MOCK_PAYMENTS_IN_PRODUCTION. The mock
-  // provider accepts `sign: 'mock-signature'` as a valid signature, which
-  // means any attacker can settle any pending payment for free if mock is
-  // active in prod. The flag is intentionally long and alarming so it can't
-  // be set by accident.
   if (
     process.env.NODE_ENV === 'production' &&
     effectiveTelebirr === 'mock' &&
@@ -109,11 +87,6 @@ export function loadEnv(): Env {
     );
   }
 
-  // in production, CRON_SECRET must be set and must NOT equal
-  // the dev fallback string. The cron endpoint is CSRF-exempt, TOS-exempt,
-  // idempotency-exempt, and requires no session — accepting the dev secret
-  // in production would let any attacker trigger refund storms and mass
-  // subscription expirations.
   const cronSecret = process.env.CRON_SECRET;
   const DEV_CRON_FALLBACK = 'dev-only-cron-secret-32-chars';
   if (process.env.NODE_ENV === 'production') {
@@ -153,8 +126,6 @@ export function loadEnv(): Env {
     RESEND_FROM: process.env.RESEND_FROM || '',
     RESEND_WEBHOOK_SECRET: process.env.RESEND_WEBHOOK_SECRET || '',
     TELEBIRR_WEBHOOK_IPS: process.env.TELEBIRR_WEBHOOK_IPS || '',
-    // Reserved for production hardening — currently read but not wired up.
-    // See DEPLOYMENT.md "Production hardening status" table.
     SENTRY_DSN: process.env.SENTRY_DSN || '',
     REDIS_URL: process.env.REDIS_URL || '',
     FIELD_ENCRYPTION_KEY: process.env.FIELD_ENCRYPTION_KEY || '',
@@ -164,12 +135,6 @@ export function loadEnv(): Env {
 }
 
 // CI fix: do NOT call loadEnv() at module load time. Previously this was
-// `export const CURRENT_TOS_VERSION = loadEnv().CURRENT_TOS_VERSION;` which
-// triggered the full env validation (including the C-4 Telebirr mock-in-prod
-// check) whenever any module transitively imported env.ts. This broke
-// `openapi:gen` and `next build` in CI where NODE_ENV=production but no
-// real Telebirr creds are set. Now we read the env var directly — the full
-// loadEnv() validation only fires when a handler explicitly calls loadEnv()
-// at request time.
 export const CURRENT_TOS_VERSION = process.env.CURRENT_TOS_VERSION || '2026-01-01';
 export const TWO_FA_REQUIRED_ROLES = ['corporate_admin', 'platform_admin'] as const;
+

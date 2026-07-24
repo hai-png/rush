@@ -1,18 +1,4 @@
 // Phase 3 fix: i18n infrastructure for en + am (Amharic) locales.
-// Full next-intl integration requires middleware.ts + [locale] routing,
-// which is a larger refactor. This lightweight version provides a useT()
-// hook that reads the locale from a cookie and returns the translation.
-//
-// Usage in a client component:
-//   const t = useT();
-//   <h1>{t('auth.login.title')}</h1>
-//
-// Usage in a server component:
-//   const t = await getT();
-//   <h1>{t('auth.login.title')}</h1>
-//
-// The locale is determined by the `locale` cookie (set by a language switcher
-// in the UI). Default is 'en'.
 
 import { cookies } from 'next/headers';
 import en from '@/messages/en.json';
@@ -24,14 +10,12 @@ export const DEFAULT_LOCALE: Locale = 'en';
 
 const messages: Record<Locale, any> = { en, am };
 
-// Server-side locale getter. In Next.js 16, cookies() returns a Promise.
 export async function getLocale(): Promise<Locale> {
   const cookieStore = await cookies();
   const locale = cookieStore.get('locale')?.value as Locale | undefined;
   return locale && LOCALES.includes(locale) ? locale : DEFAULT_LOCALE;
 }
 
-// Server-side translation function.
 export async function getT() {
   const locale = await getLocale();
   const msgs = messages[locale];
@@ -46,7 +30,6 @@ export async function getT() {
   };
 }
 
-// Client-side translation hook (reads cookie via document.cookie).
 export function useT() {
   function getCookieLocale(): Locale {
     if (typeof document === 'undefined') return DEFAULT_LOCALE;
@@ -67,9 +50,9 @@ export function useT() {
   };
 }
 
-// Set the locale cookie (called from a language switcher).
 export function setLocale(locale: Locale) {
   if (typeof document !== 'undefined') {
     document.cookie = `locale=${locale}; path=/; max-age=${60 * 60 * 24 * 365}; samesite=lax`;
   }
 }
+

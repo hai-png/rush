@@ -30,8 +30,6 @@ export default async function AccountExportPage() {
     notifications,
     sessions,
   };
-  // Pre-serialize so the client download button can embed the JSON in a Blob
-  // without re-fetching or re-serializing server-side data.
   const json = JSON.stringify(exportData, null, 2);
 
   return (

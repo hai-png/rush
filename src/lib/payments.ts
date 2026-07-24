@@ -1,4 +1,3 @@
-
 import { Money } from '@/lib/money';
 import { loadEnv } from '@/lib/env';
 import { createSign, createVerify, randomUUID, constants as cryptoConstants } from "node:crypto";
@@ -68,9 +67,7 @@ export interface PaymentProvider {
   verifyPayment?(reference: string): Promise<PaymentStatusResult>;
   refund?(req: RefundRequest): Promise<RefundResult>;
   parseWebhook?(req: Request): Promise<WebhookEvent>;
-  // InApp SDK (mobile only)
   createInAppOrder?(intent: PaymentIntent): Promise<InAppCheckoutResult>;
-  // Subscription Payment
   buildMandateSignUrl?(opts: { mctContractNo: string; mandateTemplateId: string }): MandateSignUrlResult;
   queryMandate?(mctContractNo: string): Promise<MandateQueryResult>;
   cancelMandate?(mctContractNo: string): Promise<{ ok: boolean }>;
@@ -87,7 +84,6 @@ class MockTelebirrProvider implements PaymentProvider {
     return { status: 'checkout', checkoutUrl: url.toString(), prepayId: `mock-${intent.merchOrderId}` };
   }
   async verifyPayment(_reference: string): Promise<PaymentStatusResult> {
-    // The mock doesn't have a query endpoint — settlements come via webhook only.
     return { status: 'pending' };
   }
   async refund(req: RefundRequest): Promise<RefundResult> {
@@ -103,7 +99,6 @@ class MockTelebirrProvider implements PaymentProvider {
     };
   }
   buildMandateSignUrl(opts: { mctContractNo: string; mandateTemplateId: string }): MandateSignUrlResult {
-    // In mock mode, point at a local stub page that simulates the mandate-sign
     const env = loadEnv();
     const url = new URL('/telebirr-stub', env.APP_BASE_URL);
     url.searchParams.set('mandate', opts.mctContractNo);
@@ -140,9 +135,7 @@ class MockTelebirrProvider implements PaymentProvider {
     }
 
     const signatureValid = payload.sign === 'mock-signature';
-    // Reject payloads missing out_request_no — falling back to a unique value
     // would defeat the (merch_order_id, out_request_no) dedup PK and allow
-    // the same payment to be settled twice via two deliveries.
     const outRequestNo = payload.out_request_no;
     if (!outRequestNo) {
       throw new Error('Telebirr webhook missing out_request_no — cannot dedup');
@@ -159,8 +152,6 @@ class MockTelebirrProvider implements PaymentProvider {
   }
 }
 
-// Real Telebirr H5 C2B provider. Signs requests with RSA-PSS-SHA256, verifies
-// webhook signatures with the Telebirr public key. See README for the flow.
 class TelebirrProvider implements PaymentProvider {
   readonly name = 'telebirr' as const;
   private env = loadEnv();
@@ -172,13 +163,11 @@ class TelebirrProvider implements PaymentProvider {
   }
 
   private get webBase(): string {
-    // Testbed ends with `?` (the URL builder appends `&field=...`).
     return this.env.TELEBIRR_ENV === 'production'
       ? 'https://superapp.ethiomobilemoney.et:38443/payment/web/paygate?'
       : 'https://developerportal.ethiotelebirr.et:38443/payment/web/paygate?';
   }
 
-  // Excluded from signing per Telebirr docs. Note: `biz_content` is excluded
   private static EXCLUDE_FIELDS = new Set([
     'sign', 'sign_type', 'header', 'refund_info',
     'openType', 'raw_request', 'biz_content', 'wallet_reference_data',
@@ -191,7 +180,6 @@ class TelebirrProvider implements PaymentProvider {
       if (v === undefined || v === null || v === '') continue;
       flat[k] = String(v);
     }
-    // biz_content is excluded as a key, but its children are flattened + signed.
     const biz = req.biz_content;
     if (biz && typeof biz === 'object') {
       for (const [k, v] of Object.entries(biz)) {
@@ -259,14 +247,12 @@ class TelebirrProvider implements PaymentProvider {
       throw new Error(`applyFabricToken HTTP ${res.status}: ${await res.text()}`);
     }
     const data = await res.json() as { token: string; expirationDate?: string };
-    // expirationDate is yyyyMMddHHmmss; fall back to 1h if absent.
     const expiresAt = data.expirationDate ? this.parseTelebirrDate(data.expirationDate) : Date.now() + 3600_000;
     this.cachedToken = { token: data.token, expiresAt };
     return data.token;
   }
 
   private parseTelebirrDate(s: string): number {
-    // yyyyMMddHHmmss -> epoch ms
     const y = +s.slice(0, 4);
     const mo = +s.slice(4, 6) - 1;
     const d = +s.slice(6, 8);
@@ -342,7 +328,6 @@ class TelebirrProvider implements PaymentProvider {
   }
 
   private buildCheckoutUrl(prepayId: string, sign: string): string {
-    // Per the docs, the checkout URL is the webBase + a sorted query string
     const timestamp = this.createTimestamp();
     const nonceStr = this.createNonceStr();
     const queryString = [
@@ -370,7 +355,6 @@ class TelebirrProvider implements PaymentProvider {
       payee_type: '3000', // InApp uses 3000 (H5 uses 5000) per docs
     };
 
-    // Note: docs have an inconsistency — spec table says /payment/v1/inapp/createOrder,
     let response: any;
     try {
       response = await this.callBusinessApi<{
@@ -380,7 +364,6 @@ class TelebirrProvider implements PaymentProvider {
         biz_content: { prepay_id: string; receive_code: string; merch_order_id: string };
       }>('/payment/v1/inapp/createOrder', bizContent, 'payment.inapp.createOrder');
     } catch (e) {
-      // Fall back to the sample-code path on 404.
       response = await this.callBusinessApi<{
         result: string;
         code: string;
@@ -421,7 +404,6 @@ class TelebirrProvider implements PaymentProvider {
       return { status: 'pending', raw: response };
     }
 
-    // ORDER_CLOSED, ACCEPTED, REFUNDING, REFUND_SUCCESS, REFUND_FAILED
     let status: 'pending' | 'completed' | 'failed' = 'pending';
     if (response.biz_content.trade_status === 'PAY_SUCCESS') status = 'completed';
     else if (response.biz_content.trade_status === 'PAY_FAILED' || response.biz_content.trade_status === 'ORDER_CLOSED') status = 'failed';
@@ -589,16 +571,12 @@ class TelebirrProvider implements PaymentProvider {
       signatureValid = this.verifyTelebirr(payload, payload.sign);
     }
 
-    // Reject payloads missing out_request_no (and trans_id as a fallback for
-    // Telebirr's older payload format). A unique fallback would defeat the
-    // (merch_order_id, out_request_no) dedup PK.
     const outRequestNo = payload.out_request_no ?? payload.trans_id;
     if (!outRequestNo) {
       throw new Error('Telebirr webhook missing out_request_no + trans_id — cannot dedup');
     }
 
     if (payload.refund_request_no) {
-      // Refund notify (rare — refunds usually sync via refund() response)
       return payload.trade_status === 'Completed' || payload.trade_status === 'REFUND_SUCCESS'
         ? { type: 'refund.succeeded', refundRequestNo: payload.refund_request_no, raw: payload, signatureValid, timestampMs }
         : { type: 'refund.failed', refundRequestNo: payload.refund_request_no, raw: payload, signatureValid, timestampMs };
@@ -626,23 +604,13 @@ class CbeProvider implements PaymentProvider {
     return { status: 'manual', instructions };
   }
 
-  // CBE has no realtime payment-status API — admins reconcile manually against
-  // bank statements. We can still answer status queries by looking up the
-  // Payment row by reference. A row marked 'completed' means an admin has
-  // already confirmed the bank transfer.
   async verifyPayment(reference: string): Promise<PaymentStatusResult> {
     const { db } = await import('@/lib/db');
     const row = await db.payment.findFirst({ where: { reference, method: 'cbe' } });
     if (!row) return { status: 'pending' };
-    // Map internal statuses to provider-level statuses. 'completed' on our
-    // side = the bank transfer was confirmed; everything else is treated as
-    // pending until manual reconciliation flips it.
     return { status: row.status === 'completed' ? 'completed' : 'pending' };
   }
 
-  // CBE has no webhook — admins reconcile against bank statements. parseWebhook
-  // returns a 'manual' marker so payment-service can route these to the manual
-  // reconciliation queue without crashing if a stray POST hits the webhook URL.
   async parseWebhook(_req: Request): Promise<WebhookEvent> {
     return {
       type: 'payment.settled',
@@ -655,10 +623,6 @@ class CbeProvider implements PaymentProvider {
     } as WebhookEvent;
   }
 
-  // CBE has no API for refunds — the admin must manually
-  // transfer back via bank. This method marks the refund as "processing"
-  // so the admin knows to do the manual transfer. The payment status is
-  // then manually updated to 'refunded' after the admin confirms the transfer.
   async refund(req: RefundRequest): Promise<RefundResult> {
     logger.warn(
       { refundRequestNo: req.refundRequestNo, merchOrderId: req.merchOrderId, amount: req.amount.toString() },
@@ -679,3 +643,4 @@ export function getPaymentProvider(method: 'telebirr' | 'cbe'): PaymentProvider 
   }
   return cachedProviders[method]!;
 }
+

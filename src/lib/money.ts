@@ -11,10 +11,6 @@ export class Money {
   }
   static fromETBString(s: string | null | undefined): Money | undefined {
     if (!s) return undefined;
-    // Avoid floating-point precision loss. Parse the string directly into
-    // integer cents by splitting on '.' rather than going through Number(s) *
-    // 100 (which can introduce binary-float rounding errors for values like
-    // "0.1" or large amounts).
     const trimmed = s.trim();
     if (!/^-?\d+(\.\d+)?$/.test(trimmed)) return undefined;
     const negative = trimmed.startsWith('-');
@@ -39,3 +35,4 @@ export class Money {
   toString(): string { return `${(this.cents / 100).toFixed(2)} ETB`; }
   toDecimalString(): string { return (this.cents / 100).toFixed(2); }
 }
+

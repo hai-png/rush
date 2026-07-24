@@ -1,13 +1,3 @@
-// api-admin.ts — CRUD and list endpoints for admin-managed resources
-// (users, contractors, shuttles, routes, plans, faqs, holidays, pickups).
-// Each handler does a single DB operation. Side-effect orchestration
-// (impersonation, CSV export, bulk ops, settings, corporate admin) lives in
-// api-admin-advanced.ts.
-//
-// This file is intentionally narrow. Adding a new admin CRUD endpoint? It
-// belongs here. Adding a new admin ACTION that triggers outbox events, audit
-// chains, or external API calls? It belongs in api-admin-advanced.ts.
-
 import { db } from '@/lib/db';
 import { z } from 'zod';
 import { Money } from '@/lib/money';
@@ -96,7 +86,6 @@ const PlanInput = z.object({
 
 export async function POST_plans({ body, ipAddress, userAgent }: any) {
   const input = PlanInput.parse(body);
-  // No `before` snapshot — this is a create.
   const plan = await db.subscriptionPlan.create({ data: input });
   await audit({ action: 'plan.created', entityType: 'subscription_plan', entityId: plan.id, after: input, ipAddress, userAgent });
   return { status: 201, data: plan };
@@ -166,7 +155,6 @@ export async function POST_shuttles({ body, session, ipAddress, userAgent }: any
   } else if (!input.contractorId) {
     throw new BadRequestError('contractorId is required');
   }
-  // No `before` snapshot — this is a create.
   const shuttle = await db.shuttle.create({ data: input });
   await audit({ actorId: session.id, action: 'shuttle.created', entityType: 'shuttle', entityId: shuttle.id, after: input, ipAddress, userAgent });
   return { status: 201, data: shuttle };
@@ -197,7 +185,6 @@ const RouteInput = z.object({
 
 export async function POST_routes({ body, session, ipAddress, userAgent }: any) {
   const input = RouteInput.parse(body);
-  // No `before` snapshot — this is a create.
   const route = await db.route.create({ data: input });
   await audit({ actorId: session.id, action: 'route.created', entityType: 'route', entityId: route.id, after: input, ipAddress, userAgent });
   return { status: 201, data: route };
@@ -277,7 +264,6 @@ const RefundInput = z.object({
 export async function POST_refund({ session, params, body, ipAddress, userAgent }: any) {
   const input = RefundInput.parse(body);
   // admins cannot refund their own payments — conflict of interest
-  // and a direct self-enrichment vector if the admin has a personal subscription.
   const payment = await db.payment.findUnique({ where: { id: params.id }, select: { userId: true } });
   if (!payment) throw new NotFoundError('Payment not found');
   if (payment.userId === session.id) {
@@ -313,7 +299,6 @@ export async function PATCH_plan({ session, params, body, ipAddress, userAgent }
   if (input.isTrial === true && (input.ridesIncluded ?? existing.ridesIncluded) === -1) {
     throw new BadRequestError('Trial plans cannot be unlimited');
   }
-  // Capture `before` snapshot for the audit log.
   const before = { ...existing };
   const updated = await db.subscriptionPlan.update({ where: { id: params.id }, data: input });
   await audit({ actorId: session.id, action: 'plan.updated', entityType: 'subscription_plan', entityId: params.id, before, after: input, ipAddress, userAgent });
@@ -333,7 +318,6 @@ export async function PATCH_route({ session, params, body, ipAddress, userAgent 
   const input = RouteUpdateInput.parse(body);
   const existing = await db.route.findUnique({ where: { id: params.id } });
   if (!existing) throw new NotFoundError('Route not found');
-  // Capture `before` snapshot for the audit log.
   const before = { ...existing };
   const updated = await db.route.update({ where: { id: params.id }, data: input });
   await audit({ actorId: session.id, action: 'route.updated', entityType: 'route', entityId: params.id, before, after: input, ipAddress, userAgent });
@@ -352,14 +336,11 @@ export async function PATCH_shuttle({ session, params, body, ipAddress, userAgen
   const input = ShuttleUpdateInput.parse(body);
   const existing = await db.shuttle.findUnique({ where: { id: params.id } });
   if (!existing) throw new NotFoundError('Shuttle not found');
-  // Capture `before` snapshot for the audit log.
   const before = { ...existing };
   const updated = await db.shuttle.update({ where: { id: params.id }, data: input });
   await audit({ actorId: session.id, action: 'shuttle.updated', entityType: 'shuttle', entityId: params.id, before, after: input, ipAddress, userAgent });
   return { data: updated };
 }
-
-// Trip creation is handled by POST /trips in api-operations.ts.
 
 export async function GET_my_shuttles({ session }: any) {
   if (session.role !== 'contractor') throw new ForbiddenError('Contractor only');
@@ -379,9 +360,6 @@ export async function GET_my_trips({ session }: any) {
 }
 
 export async function recomputeContractorRating(contractorId: string): Promise<void> {
-  // Wrap the count reads + rating write in a single transaction so a
-  // concurrent ride-state transition can't slip in between the read and the
-  // write, producing a rating computed from a stale snapshot.
   await db.$transaction(async (tx) => {
     const completedRides = await tx.ride.count({
       where: { status: 'completed', trip: { driverId: contractorId } },
@@ -392,9 +370,7 @@ export async function recomputeContractorRating(contractorId: string): Promise<v
     });
 
     // Enhanced rating formula. Blends rider ratings (70%) with operational
-    // metrics (30%: cancellation ratio + no-show rate over the last 90 days).
     // Falls back to the legacy cancellation-only formula when the contractor
-    // has no rider ratings yet.
     const ninetyDaysAgo = new Date(Date.now() - 90 * 24 * 3600_000);
 
     const ratingAgg = await tx.rideRating.aggregate({
@@ -411,15 +387,12 @@ export async function recomputeContractorRating(contractorId: string): Promise<v
 
     let rating: number;
     if (avgRating === null) {
-      // No rider ratings yet — fall back to the legacy formula:
-      // 5.0 minus 2× the cancellation ratio, clamped to [3.0, 5.0].
       const ratio = cancelledRides / totalRides;
       rating = Math.max(3.0, Math.min(5.0, 5.0 - ratio * 2));
     } else {
       // Enhanced formula:
       //   operationalScore = 5.0 - cancelRatio*1.0 - noShowRatio*1.5
       //   final = avgRating*0.7 + operationalScore*0.3
-      // Clamped to [1.0, 5.0].
       const recentTotal = completedRides + cancelledRides + noShowRides;
       const cancelRatio = recentTotal > 0 ? cancelledRides / recentTotal : 0;
       const noShowRatio = recentTotal > 0 ? noShowRides / recentTotal : 0;
@@ -444,14 +417,11 @@ const FaqInput = z.object({
 
 export async function POST_faq({ session, body, ipAddress, userAgent }: any) {
   const input = FaqInput.parse(body);
-  // No `before` snapshot — this is a create.
   const faq = await db.faqArticle.create({ data: input });
   await audit({ actorId: session.id, action: 'faq.created', entityType: 'faq_article', entityId: faq.id, after: input, ipAddress, userAgent });
   return { status: 201, data: faq };
 }
 
-// soft-delete a plan (set isActive=false). Blocks if there are
-// active subscriptions on it.
 export async function DELETE_plan({ session, params, ipAddress, userAgent }: any) {
   const plan = await db.subscriptionPlan.findUnique({ where: { id: params.id } });
   if (!plan) throw new NotFoundError('Plan not found');
@@ -465,7 +435,6 @@ export async function DELETE_plan({ session, params, ipAddress, userAgent }: any
   return { status: 204 };
 }
 
-// hard-delete a FAQ (no FK dependencies).
 export async function DELETE_faq({ session, params, ipAddress, userAgent }: any) {
   const faq = await db.faqArticle.findUnique({ where: { id: params.id } });
   if (!faq) throw new NotFoundError('FAQ not found');
@@ -474,8 +443,6 @@ export async function DELETE_faq({ session, params, ipAddress, userAgent }: any)
   await audit({ actorId: session.id, action: 'faq.deleted', entityType: 'faq_article', entityId: params.id, before, ipAddress, userAgent });
   return { status: 204 };
 }
-
-// Holiday management
 
 export async function GET_holidays() {
   const holidays = await db.holiday.findMany({ where: { isActive: true }, orderBy: { date: 'asc' } });
@@ -491,8 +458,6 @@ export async function POST_holiday({ session, body, ipAddress, userAgent }: any)
   const input = HolidayInput.parse(body);
   const date = new Date(input.date);
   date.setHours(0, 0, 0, 0); // normalize to midnight
-  // Capture `before` for the upsert — look up any existing row for this date
-  // (the upsert's `where` clause uses date as the key).
   const existing = await db.holiday.findUnique({ where: { date } });
   const before = existing ? { ...existing } : null;
   const holiday = await db.holiday.upsert({
@@ -513,7 +478,6 @@ export async function DELETE_holiday({ session, params, ipAddress, userAgent }: 
   return { status: 204 };
 }
 
-
 export async function GET_user({ params }: any) {
   const user = await db.user.findUnique({
     where: { id: params.id },
@@ -522,3 +486,4 @@ export async function GET_user({ params }: any) {
   if (!user) throw new NotFoundError('User not found');
   return { data: user };
 }
+

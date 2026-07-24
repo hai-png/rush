@@ -1,9 +1,6 @@
 import { Card, CardContent, CardHeader } from '@/components/ui/card';
 import { Skeleton } from '@/components/ui/skeleton';
 
-// loading.tsx for /dashboard/rider.
-// Without this, every navigation to a dashboard page flashed blank for
-// 200-800ms while the server component awaited DB queries.
 export default function RiderLoading() {
   return (
     <div className="min-h-screen bg-muted/30 p-4 md:p-8">

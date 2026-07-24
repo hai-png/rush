@@ -24,3 +24,4 @@ export async function POST_accept({ session, ipAddress, userAgent }: any) {
   });
   return { data: { ok: true, version: CURRENT_TOS_VERSION } };
 }
+

@@ -12,12 +12,6 @@ import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import { api } from '@/lib/api-client';
 
-// An admin must not be able to suspend, reactivate, or change the role of
-// their own account — that's how an admin locks themselves out or accidentally
-// degrades their own privileges. The current user's id is passed in as
-// `currentUserId` and compared against the row's `userId`. (Server-side
-// enforcement is the backend agent's responsibility; this is the client-side
-// guard.)
 export function UserActions({
   userId,
   currentRole,
@@ -51,7 +45,6 @@ export function UserActions({
     } finally { setLoading(null); }
   }
 
-  // impersonation with a UI button + confirmation dialog + 2FA code field.
   async function impersonate() {
     setLoading('impersonate');
     try {
@@ -59,12 +52,10 @@ export function UserActions({
         `/api/v1/admin/users/${userId}/impersonate`,
         { code: twoFactorCode },
       );
-      // Store the impersonation token and redirect to the target user's dashboard.
       document.cookie = `addis-session=${res.accessToken}; path=/; max-age=3600; samesite=lax`;
       toast.success(`Impersonating ${res.targetUser.phone} (expires in 1 hour)`);
       setImpersonateOpen(false);
       setTwoFactorCode('');
-      // Redirect based on target user's role.
       const dash = res.targetUser.role === 'rider' ? '/dashboard/rider'
         : res.targetUser.role === 'contractor' ? '/dashboard/contractor'
         : res.targetUser.role === 'corporate_admin' ? '/dashboard/corporate'
@@ -121,7 +112,6 @@ export function UserActions({
           {loading === 'reactivate' ? '…' : 'Reactivate'}
         </Button>
       )}
-      {/* H5 FIX: impersonation button with confirmation dialog + 2FA code field */}
       <Dialog open={impersonateOpen} onOpenChange={setImpersonateOpen}>
         <DialogTrigger asChild>
           <Button size="sm" variant="ghost" className="h-8 text-xs" disabled={loading !== null || currentRole === 'platform_admin'}>

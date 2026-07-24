@@ -1,8 +1,3 @@
-// Shared formatting helpers for ETB currency and dates. Used across app pages
-// and components so amounts are rendered consistently with Intl (en-ET / en-GB).
-// Standalone (no other project imports) so it can be imported from both client
-// components and server code.
-
 const ETB_FORMATTER = new Intl.NumberFormat('en-ET', {
   style: 'currency',
   currency: 'ETB',
@@ -35,3 +30,4 @@ export function formatDateTime(date: Date | string): string {
 export function formatDate(date: Date | string): string {
   return DATE_FORMATTER.format(new Date(date));
 }
+

@@ -13,7 +13,6 @@ import { logger } from '@/lib/logger';
 import { timingSafeEqual } from 'node:crypto';
 
 // #9: per-job trigger — accepts ?job=drain-outbox|refund-retries|expire-stale|hourly
-// and runs ONLY that job. When omitted, runs all jobs (the historical behavior).
 const JOB_NAMES = new Set(['drain-outbox', 'refund-retries', 'expire-stale', 'hourly']);
 
 async function runJob(job: string | undefined): Promise<{ job: string; ok: boolean }> {
@@ -43,7 +42,6 @@ export async function POST_run(ctx: any) {
   const requestId = ctx.requestId ?? crypto.randomUUID();
   try {
     const env = loadEnv();
-    // use constant-time comparison instead of !==.
     const provided = ctx.body?._cronSecret ?? '';
     const expected = env.CRON_SECRET;
     if (!provided || provided.length !== expected.length || !timingSafeEqual(Buffer.from(provided), Buffer.from(expected))) {
@@ -57,9 +55,6 @@ export async function POST_run(ctx: any) {
       return NextResponse.json({ error: { code: 'BAD_REQUEST', message: `Unknown job: ${requestedJob}. Valid: drain-outbox, refund-retries, expire-stale, hourly`, requestId } }, { status: 400 });
     }
 
-    // Run the requested job(s). runAllJobs returns aggregate counts that we
-    // mirror back to the caller (kept under stable keys for backward-compat
-    // with the e2e suite and any external monitors).
     const allResult = requestedJob
       ? null
       : await runAllJobs();
@@ -99,3 +94,4 @@ export async function GET_cron_jobs() {
     ],
   };
 }
+

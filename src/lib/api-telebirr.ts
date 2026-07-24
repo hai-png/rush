@@ -1,4 +1,3 @@
-
 import { z } from 'zod';
 import { db } from '@/lib/db';
 import { Money } from '@/lib/money';
@@ -17,10 +16,6 @@ const InAppInput = z.object({
 export async function POST_inapp_checkout({ session, body }: any) {
   const input = InAppInput.parse(body);
 
-  // Resolve the expected amount from the linked entity and verify ownership.
-  // We never trust a client-supplied amount — it must match the plan price or
-  // route fare exactly, otherwise a 1-cent payment could activate a 1500-ETB
-  // subscription.
   let amountCents: number;
   let description: string;
   let subscriptionId: string | undefined;
@@ -51,9 +46,6 @@ export async function POST_inapp_checkout({ session, body }: any) {
     if (!claim) throw new NotFoundError('Seat claim not found');
     if (claim.claimantUserId !== session.id) throw new ForbiddenError('Not your seat claim');
     // H-7 fix: honor the marketplace priceCents override if the seller set one.
-    // Previously, the InApp path always used the route fare, ignoring any
-    // discount the seller offered. The web checkout path (POST_claim) was
-    // already correct.
     amountCents = claim.seatRelease.priceCents ?? claim.seatRelease.trip.route.fareCents;
     description = input.description ?? `Seat claim for ${claim.seatRelease.trip.route.origin} → ${claim.seatRelease.trip.route.destination}`;
     seatClaimId = claim.id;
@@ -77,11 +69,6 @@ export async function POST_inapp_checkout({ session, body }: any) {
   };
 
   // H-6 fix: create the Payment row BEFORE calling Telebirr. Previously, the
-  // order was: (1) call createInAppOrder, (2) create Payment. If step 2 failed
-  // (DB error, unique constraint), the Telebirr prepay_id existed with no local
-  // Payment — the user paid via the SDK, the webhook arrived, settlePayment
-  // found no Payment row, and the money was stuck. Now we create Payment first;
-  // if createInAppOrder fails, we mark the Payment as failed.
   await db.payment.create({
     data: {
       reference,
@@ -117,7 +104,6 @@ export async function POST_inapp_checkout({ session, body }: any) {
 
 const MandateSignInput = z.object({
   mandateTemplateId: z.string().min(1),
-  // Optional: link this mandate to a subscription for our records
   subscriptionId: z.string().optional(),
 });
 
@@ -128,15 +114,11 @@ export async function POST_mandate_sign_url({ session, body }: any) {
     throw new BadRequestError('Subscription Payment not supported by current provider');
   }
 
-  // use crypto.randomInt instead of Math.random for the
   // mandate contract number. Math.random is not cryptographically secure —
-  // an attacker who observes a few outputs can predict future ones.
   const { randomInt } = await import('node:crypto');
   let mctContractNo = '';
   for (let i = 0; i < 32; i++) mctContractNo += randomInt(0, 10).toString();
 
-  // Persist the mandate so we have a per-user ownership record.
-  // Ownership is enforced via mandate.userId check in GET_mandate.
   const mandate = await db.mandate.create({
     data: {
       userId: session.id,
@@ -167,8 +149,6 @@ export async function POST_mandate_sign_url({ session, body }: any) {
 }
 
 export async function GET_mandate({ session, params }: any) {
-  // check ownership via the Mandate table. The user who created
-  // the mandate can query it; platform_admin can query any.
   const mandate = await db.mandate.findUnique({
     where: { mctContractNo: params.mctContractNo },
   });
@@ -177,21 +157,18 @@ export async function GET_mandate({ session, params }: any) {
     throw new ForbiddenError('Not your mandate');
   }
 
-  // If Telebirr supports mandate queries, fetch the live status from their API.
   const provider = getPaymentProvider('telebirr');
   if (provider.queryMandate) {
     try {
       const remote = await provider.queryMandate(params.mctContractNo);
       return { data: { ...mandate, remote } };
     } catch {
-      // Remote query failed — return local record only.
     }
   }
   return { data: mandate };
 }
 
 export async function POST_mandate_cancel({ session, params, ipAddress, userAgent }: any) {
-  // ownership check — only the mandate owner or admin can cancel.
   const mandate = await db.mandate.findUnique({
     where: { mctContractNo: params.mctContractNo },
   });
@@ -207,7 +184,6 @@ export async function POST_mandate_cancel({ session, params, ipAddress, userAgen
   }
   const result = await provider.cancelMandate(params.mctContractNo);
 
-  // Update local mandate record.
   await db.mandate.update({
     where: { id: mandate.id },
     data: { status: 'cancelled', cancelledAt: new Date() },
@@ -231,8 +207,6 @@ const DisburseInput = z.object({
 });
 
 export async function POST_disburse({ session, body, ipAddress, userAgent }: any) {
-  // Route is already requireRole: ['platform_admin'] in the route table;
-  // this is a defensive check in case the handler is ever called directly.
   if (session?.role !== 'platform_admin') {
     throw new ForbiddenError('Admin only — disburse is for the scheduler or admin testing');
   }
@@ -245,11 +219,6 @@ export async function POST_disburse({ session, body, ipAddress, userAgent }: any
   const merchOrderId = `DIS${createId()}`;
 
   // H-5 fix: create a Payment record BEFORE calling Telebirr so we have a
-  // local record for reconciliation + idempotency. Previously, no Payment row
-  // was created — a network failure after Telebirr accepted the disburse but
-  // before the response was received would cause a retry to generate a new
-  // merchOrderId and disburse twice. Now the Payment row's reference is the
-  // merchOrderId, so a retry hitting the same reference is deduped.
   await db.payment.create({
     data: {
       reference: merchOrderId,
@@ -269,7 +238,6 @@ export async function POST_disburse({ session, body, ipAddress, userAgent }: any
       reason: input.reason,
     });
   } catch (err) {
-    // Telebirr call failed — mark the Payment as failed so it's not left pending.
     await db.payment.updateMany({
       where: { reference: merchOrderId, status: 'pending' },
       data: { status: 'failed' },
@@ -277,7 +245,6 @@ export async function POST_disburse({ session, body, ipAddress, userAgent }: any
     throw err;
   }
 
-  // Mark the Payment as completed — the disbursement was accepted by Telebirr.
   await db.payment.updateMany({
     where: { reference: merchOrderId, status: 'pending' },
     data: { status: 'completed' },
@@ -294,3 +261,4 @@ export async function POST_disburse({ session, body, ipAddress, userAgent }: any
 
   return { status: 201, data: { merchOrderId, ...result } };
 }
+

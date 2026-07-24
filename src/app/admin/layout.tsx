@@ -6,9 +6,6 @@ import { Button } from '@/components/ui/button';
 import { SignOutButton } from '@/components/sign-out-button';
 import { Bus, Users, CreditCard, Ticket, FileText, Truck, Route, CalendarDays, Building2, HelpCircle, Settings, ScrollText, ClipboardList } from 'lucide-react';
 
-// 13 nav buttons in the top bar with no mobile nav and no active state. Now
-// there's a persistent sidebar (collapsible on mobile via CSS) with icons +
-// active-link highlighting.
 const navItems = [
   { href: '/admin/users', label: 'Users', icon: Users },
   { href: '/admin/payments', label: 'Payments', icon: CreditCard },
@@ -30,7 +27,6 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
 
   return (
     <div className="min-h-screen bg-muted/30 flex flex-col md:flex-row">
-      {/* Sidebar */}
       <aside className="md:w-64 md:min-h-screen border-r bg-background flex-shrink-0">
         <div className="p-4 border-b flex items-center gap-2">
           <Bus className="h-5 w-5 text-primary" />
@@ -65,7 +61,6 @@ export default function AdminLayout({ children }: { children: React.ReactNode })
         </div>
       </aside>
 
-      {/* Main content */}
       <main className="flex-1 p-4 md:p-8 overflow-x-auto">
         {children}
       </main>

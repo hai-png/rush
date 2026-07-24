@@ -17,12 +17,6 @@ export async function getSession(): Promise<SessionUser | null> {
 export async function requireSession(): Promise<SessionUser> {
   const s = await getSession();
   if (!s) redirect('/login');
-  // CRITICAL FIX (H-31): Enforce ToS gate at every protected page load,
-  // not just at login. Previously, after login the client was *asked* to
-  // navigate to /tos/accept, but if the user typed /dashboard/rider directly
-  // (or closed the tab and revisited), the page rendered with a stale ToS
-  // version. This was a legal/compliance exposure if the ToS was updated
-  // post-launch.
   if (s.tosVersion !== CURRENT_TOS_VERSION) {
     const path = typeof window !== 'undefined' ? window.location.pathname : '';
     redirect(`/tos/accept?next=${encodeURIComponent(path)}`);
@@ -35,3 +29,4 @@ export async function requireRole(...roles: string[]): Promise<SessionUser> {
   if (!roles.includes(s.role)) redirect('/');
   return s;
 }
+

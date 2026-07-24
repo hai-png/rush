@@ -7,12 +7,6 @@ import { CheckCircle2, Loader2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { api, ApiError } from '@/lib/api-client';
 
-// Polls /api/v1/subscriptions/:id (preferred) or /api/v1/payments/:id every
-// 2.5s. Redirects to /dashboard/rider when the subscription becomes 'active'
-// or the payment becomes 'confirmed' (or 'completed'). After 60s of polling
-// without a terminal state we surface a "taking longer than expected" message
-// with a support link so the user isn't stuck on a spinner.
-
 const POLL_INTERVAL_MS = 2500;
 const POLL_TIMEOUT_MS = 60_000;
 
@@ -31,7 +25,6 @@ export function CheckoutCompletePoller() {
   const [state, setState] = useState<PollState>({ kind: 'polling' });
   const stoppedRef = useRef(false);
 
-  // Skip the effect entirely when there is no id — render the error state directly.
   useEffect(() => {
     if (!id) return;
 
@@ -42,8 +35,6 @@ export function CheckoutCompletePoller() {
     async function tick() {
       if (stoppedRef.current) return;
 
-      // Check the wall-clock timeout first so we don't poll forever even if
-      // the network is fast but the backend never reaches a terminal state.
       if (Date.now() - startedAt > POLL_TIMEOUT_MS) {
         setState({ kind: 'timeout' });
         return;
@@ -57,14 +48,11 @@ export function CheckoutCompletePoller() {
         const data = await api.get<{ status?: string }>(path);
         if (stoppedRef.current) return;
         const status = (data?.status ?? '').toLowerCase();
-        // Subscription: 'active' means payment settled and sub is usable.
-        // Payment: 'confirmed' / 'completed' both mean the money landed.
         const done = type === 'payment'
           ? status === 'confirmed' || status === 'completed'
           : status === 'active';
         if (done) {
           setState({ kind: 'success' });
-          // Brief beat so the success state is visible before the redirect.
           setTimeout(() => {
             if (!stoppedRef.current) router.push('/dashboard/rider');
           }, 600);
@@ -72,14 +60,10 @@ export function CheckoutCompletePoller() {
         }
       } catch (err) {
         if (stoppedRef.current) return;
-        // 404 means the id is wrong / not owned by this user — bail out
-        // with a friendly message. Other transient errors (network, 5xx)
-        // should keep retrying until the timeout fires.
         if (err instanceof ApiError && err.status === 404) {
           setState({ kind: 'error', message: 'We could not find this payment. If you just completed checkout, please refresh in a moment.' });
           return;
         }
-        // Otherwise fall through and schedule the next tick.
       }
 
       timer = setTimeout(tick, POLL_INTERVAL_MS);

@@ -1,8 +1,5 @@
 import { ensureCsrf } from '@/components/csrf-initializer';
 
-// Browser-side API client. Handles JSON encoding, CSRF header injection,
-// error unwrapping, and 401 redirect to /login.
-
 const CSRF_HEADER = 'x-csrf-token';
 const CSRF_COOKIE = 'addis-csrf';
 
@@ -17,9 +14,6 @@ export class ApiError extends Error {
   }
 }
 
-// 401 interceptor. When a session expires, every subsequent
-// API call would throw 'HTTP 401' as a sonner toast and the user would be
-// stranded. Now we redirect to /login?next=<current path> on the first 401.
 let onUnauthorized: (() => void) | null = null;
 export function setOnUnauthorized(cb: () => void) { onUnauthorized = cb; }
 function handleUnauthorized() {
@@ -27,7 +21,6 @@ function handleUnauthorized() {
     onUnauthorized();
     return;
   }
-  // Default behavior: redirect to /login with a next param.
   if (typeof window !== 'undefined') {
     const next = encodeURIComponent(window.location.pathname + window.location.search);
     window.location.href = `/login?next=${next}`;
@@ -40,10 +33,6 @@ export async function apiFetch<T = any>(path: string, opts: RequestInit = {}): P
     headers.set('content-type', 'application/json');
   }
 
-  // CSRF: for non-safe methods, ensure the CSRF cookie exists (await the
-  // initializer's promise) before attaching the token. H-32 fix: previously
-  // a fast-typing user could POST before the cookie was set, causing spurious
-  // "CSRF token missing" errors on login.
   if (opts.method && !['GET', 'HEAD', 'OPTIONS'].includes(opts.method)) {
     await ensureCsrf();
     const csrfToken = getCookie(CSRF_COOKIE);
@@ -52,7 +41,6 @@ export async function apiFetch<T = any>(path: string, opts: RequestInit = {}): P
 
   const res = await fetch(path, { ...opts, headers, credentials: 'same-origin' });
 
-  // intercept 401 before parsing the body — redirect to login.
   if (res.status === 401) {
     handleUnauthorized();
     const err = new ApiError(401, 'UNAUTHORIZED', 'Session expired — please sign in again');
@@ -80,3 +68,4 @@ export const api = {
   put: <T = any>(path: string, body?: any) => apiFetch<T>(path, { method: 'PUT', body: body !== undefined ? JSON.stringify(body) : undefined }),
   del: <T = any>(path: string) => apiFetch<T>(path, { method: 'DELETE' }),
 };
+

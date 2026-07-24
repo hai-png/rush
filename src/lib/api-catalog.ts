@@ -1,7 +1,4 @@
 // H-40 fix: add cursor-based pagination to public catalog endpoints.
-// Previously, GET_routes had no limit and GET_trips only had a bare `take: 50`
-// without cursor/offset, causing unbounded response payloads and full table scans
-// under scale. Now both endpoints support ?cursor= and ?limit= query params.
 
 import { db } from '@/lib/db';
 
@@ -68,7 +65,6 @@ export async function GET_route({ params }: any) {
   return { data: route };
 }
 
-// single-trip detail endpoint.
 export async function GET_trip({ params }: any) {
   const trip = await db.trip.findUnique({
     where: { id: params.id },
@@ -80,3 +76,4 @@ export async function GET_trip({ params }: any) {
   if (!trip) throw new NotFoundError('Trip not found');
   return { data: trip };
 }
+

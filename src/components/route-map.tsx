@@ -4,10 +4,6 @@ import { MapContainer, TileLayer, Marker, Popup, Polyline } from 'react-leaflet'
 import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 
-// self-host leaflet marker icons instead of loading from
-// Cloudflare CDN. The CDN is blocked in Ethiopia (common internet restriction),
-// which made markers disappear. Copy the images to /public/leaflet/ during
-// the build — they ship with the leaflet npm package.
 delete (L.Icon.Default.prototype as any)._getIconUrl;
 L.Icon.Default.mergeOptions({
   iconRetinaUrl: '/leaflet/marker-icon-2x.png',
@@ -31,7 +27,7 @@ export function RouteMap({
 }) {
   const center: [number, number] = pickups.length > 0 && pickups[0].lat != null && pickups[0].lng != null
     ? [pickups[0].lat, pickups[0].lng]
-    : [9.03, 38.74]; // Addis Ababa center
+    : [9.03, 38.74];
 
   const hasCoords = pickups.filter(p => p.lat != null && p.lng != null);
   const routeCoords: [number, number][] = hasCoords.map(p => [p.lat!, p.lng!]);

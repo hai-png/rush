@@ -1,4 +1,3 @@
-
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { saveFile, deleteFile, FileUploadError } from '@/lib/file-storage';
@@ -9,8 +8,6 @@ import { logger } from '@/lib/logger';
 const DOC_TYPES = new Set(['registration', 'insurance', 'inspection']);
 
 // H-20 fix: accept ctx param (4th arg from dispatcher) and use ctx.requestId
-// instead of generating a new UUID. This keeps log correlation intact across
-// the x-request-id header, Sentry captures, and JSON error bodies.
 export async function handleDocumentUpload(req: NextRequest, session: any, params: any, ctx: { requestId?: string }): Promise<NextResponse> {
   const requestId = ctx?.requestId ?? crypto.randomUUID();
   try {
@@ -55,7 +52,6 @@ export async function handleDocumentUpload(req: NextRequest, session: any, param
       });
 
       if (existing) {
-        // Reset verification status to 'pending' so an admin re-reviews the new file.
         const updated = await tx.contractorDocument.update({
           where: { id: existing.id },
           data: { fileId: uploaded.id, uploadedAt: new Date() },
@@ -72,15 +68,11 @@ export async function handleDocumentUpload(req: NextRequest, session: any, param
             },
           });
         }
-        // The old UploadedFile row is deleted after the tx commits (queueMicrotask
-        // below). The FK on ContractorDocument.fileId is Restrict, so we point the
-        // doc at the new file above before the old file can be removed.
         const oldFileId = existing.fileId;
         const oldStorageKey = await tx.uploadedFile
           .findUnique({ where: { id: oldFileId }, select: { storageKey: true } })
           .then((r) => r?.storageKey);
         if (oldStorageKey) {
-          // Fire-and-forget cleanup outside the tx.
           queueMicrotask(async () => {
             try {
               await deleteFile(oldStorageKey);
@@ -149,3 +141,4 @@ export async function GET_documents_for({ session, params }: any) {
   if (!profile) throw new NotFoundError('Contractor not found');
   return { data: profile.documents };
 }
+

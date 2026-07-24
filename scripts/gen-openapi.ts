@@ -1,11 +1,4 @@
 #!/usr/bin/env bun
-// Generate an OpenAPI 3.1 spec from the route table.
-// Output: openapi.json (in repo root)
-//
-// Phase 3 fix: import ROUTES directly from api-routes.ts instead of regex-
-// parsing the source. This is more robust and picks up route options
-// (requireAuth, requireRole) for richer OpenAPI metadata.
-
 import { writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { ROUTES } from '../src/lib/api-routes';
@@ -34,10 +27,8 @@ for (const entry of ROUTES) {
     .replace(/^\^/, '')
     .replace(/\$$/, '')
     .replace(/\(\[\^\/\]\+\)/g, (m, _, offset, str) => {
-      // Replace capture groups with {paramName} — need to track param names
       return `{${entry.paramNames.shift()}}`;
     });
-  // Rebuild path with param names (the above shift approach is fragile; do it properly)
   let pathStr = entry.pattern.source.replace(/^\^/, '').replace(/\$$/, '');
   const paramNames = [...entry.paramNames];
   pathStr = pathStr.replace(/\(\[\^\/\]\+\)/g, () => `{${paramNames.shift()}}`);

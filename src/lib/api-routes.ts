@@ -1,10 +1,3 @@
-// Route table for the catch-all API dispatcher.
-// Each module's routes are declared in a clearly-labeled block below.
-// Future refactor: move each block into its module's own routes.ts file.
-//
-// The `r()` function and `RouteEntry` type are imported from route-builder.ts
-// so they can be shared across per-module route files when extracted.
-
 import { r, type RouteEntry } from '@/lib/route-builder';
 import type { ApiOptions } from '@/lib/api';
 
@@ -32,9 +25,7 @@ import * as metrics from '@/lib/api-metrics';
 import * as assignments from '@/lib/api-assignments';
 import * as ratings from '@/lib/api-ratings';
 
-// Note: the catch-all mounts at /api/v1, so paths here are relative to that.
 export const ROUTES: RouteEntry[] = [
-  // ── Identity / auth ──────────────────────────────────────────────
   r('POST', '/auth/register', { exemptFromTosGate: true }, identity.POST_register),
   r('POST', '/auth/token', { exemptFromTosGate: true }, identity.POST_token),
   r('POST', '/auth/logout', {}, identity.POST_logout),
@@ -58,7 +49,6 @@ export const ROUTES: RouteEntry[] = [
   r('POST', '/auth/2fa/verify', { requireAuth: true }, identity.POST_2fa_verify),
   r('POST', '/auth/2fa/disable', { requireAuth: true }, identity.POST_2fa_disable),
 
-  // ── Catalog (public) ─────────────────────────────────────────────
   r('GET', '/plans', {}, catalog.GET_plans),
   r('GET', '/routes', {}, catalog.GET_routes),
   r('GET', '/routes/:id', {}, catalog.GET_route),
@@ -70,7 +60,6 @@ export const ROUTES: RouteEntry[] = [
   r('GET', '/trips/:id', {}, catalog.GET_trip),
   r('GET', '/faqs', {}, catalog.GET_faqs),
 
-  // ── Assignments ──────────────────────────────────────────────────
   r('GET', '/assignments', { requireAuth: true }, assignments.GET_assignments),
   r('GET', '/assignments/:id', { requireAuth: true }, assignments.GET_assignment),
   r('POST', '/admin/assignments', { requireAuth: true, requireRole: ['platform_admin'] }, assignments.POST_assignment),
@@ -78,7 +67,6 @@ export const ROUTES: RouteEntry[] = [
   r('POST', '/assignments/:id/reject', { requireAuth: true, requireRole: ['contractor', 'platform_admin'] }, assignments.POST_reject_assignment),
   r('GET', '/contractor/assignments', { requireAuth: true, requireRole: ['contractor', 'platform_admin'] }, assignments.GET_my_assignments),
 
-  // ── Subscriptions ────────────────────────────────────────────────
   r('GET', '/subscriptions', { requireAuth: true }, subscriptions.GET_list),
   r('POST', '/subscriptions', { requireAuth: true }, subscriptions.POST_create),
   r('GET', '/subscriptions/:id', { requireAuth: true }, subscriptions.GET_one),
@@ -86,12 +74,10 @@ export const ROUTES: RouteEntry[] = [
   r('POST', '/subscriptions/:id/renew', { requireAuth: true }, subscriptions.POST_renew),
   r('POST', '/subscriptions/:id/change-payment-method', { requireAuth: true }, subscriptions.POST_change_payment_method),
 
-  // ── Payments ─────────────────────────────────────────────────────
   r('POST', '/payments/checkout', { requireAuth: true }, payments.POST_checkout),
   r('GET', '/payments/:id', { requireAuth: true }, payments.GET_one),
   r('GET', '/payments', { requireAuth: true }, payments.GET_list),
 
-  // ── Marketplace ──────────────────────────────────────────────────
   r('GET', '/marketplace/seat-releases', { requireAuth: true }, marketplace.GET_releases),
   r('GET', '/marketplace/seat-releases/:id', { requireAuth: true }, marketplace.GET_release),
   r('GET', '/marketplace/my-releases', { requireAuth: true }, marketplace.GET_my_releases),
@@ -102,7 +88,6 @@ export const ROUTES: RouteEntry[] = [
   r('GET', '/marketplace/seat-claims', { requireAuth: true }, marketplace.GET_claims),
   r('GET', '/marketplace/seat-claims/:id', { requireAuth: true }, marketplace.GET_claim),
 
-  // ── Rides + trips + shuttle positions ────────────────────────────
   r('GET', '/rides', { requireAuth: true }, operations.GET_rides),
   r('GET', '/rides/:id', { requireAuth: true }, operations.GET_ride),
   r('POST', '/rides', { requireAuth: true }, operations.POST_ride),
@@ -119,7 +104,6 @@ export const ROUTES: RouteEntry[] = [
   r('POST', '/shuttle-positions', { requireAuth: true, requireRole: ['contractor', 'platform_admin'] }, operations.POST_shuttle_position),
   r('GET', '/shuttle-positions/stream', { requireAuth: true }, operations.handleShuttlePositionStream, true),
 
-  // ── Support tickets ──────────────────────────────────────────────
   r('GET', '/tickets', { requireAuth: true }, support.GET_list),
   r('POST', '/tickets', { requireAuth: true }, support.POST_create),
   r('GET', '/tickets/:id', { requireAuth: true }, support.GET_one),
@@ -128,7 +112,6 @@ export const ROUTES: RouteEntry[] = [
   r('POST', '/tickets/:id/messages', { requireAuth: true }, support.POST_message),
   r('POST', '/tickets/:id/messages/with-attachment', { requireAuth: true }, support.handleTicketMessageWithAttachment, true),
 
-  // ── Notifications + engagement ───────────────────────────────────
   r('GET', '/notifications', { requireAuth: true }, engagement.GET_notifications),
   r('GET', '/notifications/unread-count', { requireAuth: true }, engagement.GET_unread_count),
   r('GET', '/notifications/preferences', { requireAuth: true }, engagement.GET_preferences),
@@ -138,24 +121,20 @@ export const ROUTES: RouteEntry[] = [
   r('POST', '/devices', { requireAuth: true }, engagement.POST_device),
   r('DELETE', '/devices', { requireAuth: true }, engagement.DELETE_device),
 
-  // ── Account ──────────────────────────────────────────────────────
   r('GET', '/account', { requireAuth: true }, account.GET_account),
   r('PATCH', '/account', { requireAuth: true }, account.PATCH_account),
   r('PATCH', '/contractor/profile', { requireAuth: true }, account.PATCH_contractor_profile),
   r('GET', '/account/export', { requireAuth: true }, account.GET_export),
   r('POST', '/account/delete', { requireAuth: true }, account.POST_delete),
 
-  // ── Dashboard ────────────────────────────────────────────────────
   r('GET', '/dashboard/rider', { requireAuth: true }, dashboard.GET_rider),
   r('GET', '/dashboard/contractor', { requireAuth: true, requireRole: ['contractor', 'platform_admin'] }, dashboard.GET_contractor),
   r('GET', '/dashboard/admin', { requireAuth: true, requireRole: ['platform_admin'] }, dashboard.GET_admin),
   r('GET', '/dashboard/rider/active-trip', { requireAuth: true }, dashboard.GET_rider_active_trip),
 
-  // ── ToS ──────────────────────────────────────────────────────────
   r('GET', '/tos/current', { exemptFromTosGate: true }, tos.GET_current),
   r('POST', '/tos/accept', { requireAuth: true, exemptFromTosGate: true }, tos.POST_accept),
 
-  // ── Admin ────────────────────────────────────────────────────────
   r('GET', '/admin/users', { requireAuth: true, requireRole: ['platform_admin'] }, admin.GET_users),
   r('GET', '/admin/users/:id', { requireAuth: true, requireRole: ['platform_admin'] }, admin.GET_user),
   r('GET', '/admin/payments', { requireAuth: true, requireRole: ['platform_admin'] }, admin.GET_payments),
@@ -206,12 +185,10 @@ export const ROUTES: RouteEntry[] = [
   r('GET', '/contractor/shuttles', { requireAuth: true, requireRole: ['contractor'] }, admin.GET_my_shuttles),
   r('GET', '/contractor/trips', { requireAuth: true, requireRole: ['contractor'] }, admin.GET_my_trips),
 
-  // ── Webhooks ─────────────────────────────────────────────────────
   r('POST', '/webhooks/telebirr/notify', { exemptFromTosGate: true }, webhooks.handleTelebirrNotify, true),
   r('POST', '/webhooks/twilio/sms-status', { exemptFromTosGate: true }, webhooks.handleTwilioStatus, true),
   r('POST', '/webhooks/resend/email-status', { exemptFromTosGate: true }, webhooks.handleResendStatus, true),
 
-  // ── Health + metrics + cron ──────────────────────────────────────
   r('GET', '/health', { exemptFromTosGate: true }, health.GET_health),
   r('GET', '/healthz', { exemptFromTosGate: true }, health.GET_healthz),
   r('GET', '/ready', { exemptFromTosGate: true }, health.GET_ready),
@@ -220,14 +197,12 @@ export const ROUTES: RouteEntry[] = [
   r('POST', '/cron/run', { exemptFromTosGate: true }, cron.POST_run),
   r('GET', '/cron', { requireAuth: true, requireRole: ['platform_admin'], exemptFromTosGate: true }, cron.GET_cron_jobs),
 
-  // ── Telebirr mandates + disburse ─────────────────────────────────
   r('POST', '/payments/telebirr/inapp-checkout', { requireAuth: true }, telebirr.POST_inapp_checkout),
   r('POST', '/payments/telebirr/mandate/sign-url', { requireAuth: true }, telebirr.POST_mandate_sign_url),
   r('GET',  '/payments/telebirr/mandate/:mctContractNo', { requireAuth: true }, telebirr.GET_mandate),
   r('POST', '/payments/telebirr/mandate/:mctContractNo/cancel', { requireAuth: true }, telebirr.POST_mandate_cancel),
   r('POST', '/payments/telebirr/disburse', { requireAuth: true, requireRole: ['platform_admin'] }, telebirr.POST_disburse),
 
-  // ── Corporate ────────────────────────────────────────────────────
   r('POST', '/corporate/onboard', { requireAuth: true, requireRole: ['rider', 'platform_admin'] }, corporate.POST_onboard),
   r('GET',  '/corporate', { requireAuth: true, requireRole: ['corporate_admin', 'platform_admin'] }, corporate.GET_current),
   r('GET',  '/corporate/me', { requireAuth: true, requireRole: ['corporate_admin', 'platform_admin'] }, corporate.GET_me),
@@ -244,7 +219,6 @@ export const ROUTES: RouteEntry[] = [
   r('DELETE', '/corporate/members/:id', { requireAuth: true, requireRole: ['corporate_admin', 'platform_admin'] }, corporate.DELETE_member),
   r('GET', '/corporate/invoices', { requireAuth: true, requireRole: ['corporate_admin', 'platform_admin'] }, corporate.GET_invoices),
 
-  // ── Contractor documents + files ─────────────────────────────────
   r('GET',  '/contractor/documents', { requireAuth: true, requireRole: ['contractor', 'platform_admin'] }, documents.GET_documents),
   r('GET',  '/contractor/documents/:contractorId', { requireAuth: true, requireRole: ['platform_admin'] }, documents.GET_documents_for),
   r('POST', '/contractor/documents', { requireAuth: true, requireRole: ['contractor', 'platform_admin'] }, documents.handleDocumentUpload, true),
@@ -258,7 +232,6 @@ export function findRoute(method: string, path: string): { entry: RouteEntry; pa
     if (!m) continue;
     const params: Record<string, string> = {};
     // H-19 fix: decodeURIComponent can throw URIError on malformed percent-
-    // encoded sequences. Treat malformed input as a non-match.
     for (let i = 0; i < entry.paramNames.length; i++) {
       try {
         params[entry.paramNames[i]] = decodeURIComponent(m[i + 1]!);
@@ -270,3 +243,4 @@ export function findRoute(method: string, path: string): { entry: RouteEntry; pa
   }
   return null;
 }
+

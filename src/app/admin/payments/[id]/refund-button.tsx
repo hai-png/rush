@@ -14,9 +14,6 @@ import { api } from '@/lib/api-client';
 import { formatETB } from '@/lib/format';
 
 export function RefundButton({ paymentId, maxAmount }: { paymentId: string; maxAmount: number }) {
-  // maxAmount is in ETB (already divided by 100 in the parent page). Convert
-  // back to cents for formatETB so the display stays consistent with the rest
-  // of the admin UI.
   const router = useRouter();
 
   const [open, setOpen] = useState(false);

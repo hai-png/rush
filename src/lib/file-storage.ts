@@ -1,4 +1,3 @@
-
 import { createHash, randomUUID } from 'node:crypto';
 import { mkdir, writeFile, readFile, stat, unlink } from 'node:fs/promises';
 import { join, extname } from 'node:path';
@@ -32,9 +31,7 @@ function uploadDir(): string {
   return dir;
 }
 
-
 // M-5 fix: magic-byte validation for uploaded files. Prevents MIME/extension
-// spoofing (e.g. evil.pdf with Content-Type: application/pdf whose content is HTML).
 function validateMagicBytes(bytes: Uint8Array, ext: string): string | null {
   if (bytes.length < 4) return 'File too small';
   const sig = Array.from(bytes.slice(0, 8)).map(b => b.toString(16).padStart(2, '0')).join('');
@@ -68,7 +65,6 @@ export async function saveFile(
   if (!ALLOWED_EXTENSIONS.has(ext)) {
     throw new FileUploadError(`File extension "${ext}" not allowed. Allowed: ${[...ALLOWED_EXTENSIONS].join(', ')}`);
   }
-  // require a MIME type — don't allow empty/undefined to bypass the check.
   const mimeType = file.type || 'application/octet-stream';
   if (!ALLOWED_MIME.has(mimeType)) {
     throw new FileUploadError(`MIME type "${mimeType}" not allowed. Allowed: ${[...ALLOWED_MIME].join(', ')}`);
@@ -78,8 +74,6 @@ export async function saveFile(
   const checksum = createHash('sha256').update(bytes).digest('hex');
 
   // M-5 fix: validate magic bytes so a renamed HTML file can't pass as a PDF.
-  // The client-supplied MIME type and extension are easy to spoof; the magic
-  // bytes are not. We check the first few bytes against known signatures.
   const magicError = validateMagicBytes(bytes, ext);
   if (magicError) {
     throw new FileUploadError(magicError);
@@ -126,6 +120,6 @@ export async function deleteFile(storageKey: string): Promise<void> {
   try {
     await unlink(fullPath);
   } catch {
-    // Already gone — fine.
   }
 }
+

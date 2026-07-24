@@ -6,12 +6,6 @@ import { Label } from '@/components/ui/label';
 import { toast } from 'sonner';
 import { api } from '@/lib/api-client';
 
-// The settings table is a generic key/value store, so without a client-side
-// allowlist an admin could write arbitrary keys (typos, internal names,
-// anything). This allowlist mirrors the keys the backend actually reads, so
-// the form refuses to submit unknown keys with an inline error before the
-// request is sent. The backend should still re-validate server-side — this is
-// defense-in-depth plus a better UX.
 const ALLOWED_SETTING_KEYS = new Set<string>([
   'otp_expiry_seconds',
   'telebirr_merchant_id',
@@ -33,10 +27,8 @@ export function SettingsForm() {
     api.get('/api/v1/admin/settings').then(d => setSettings(d || {})).catch(() => {});
   }, []);
 
-  // Validate the key against the allowlist on every keystroke so the user
-  // gets immediate inline feedback and the Save button stays disabled.
   function validateKey(k: string): string | null {
-    if (!k) return null; // empty is handled by the save-button disabled state
+    if (!k) return null;
     if (!ALLOWED_SETTING_KEYS.has(k)) {
       return `Unknown setting key "${k}". Allowed: ${Array.from(ALLOWED_SETTING_KEYS).join(', ')}.`;
     }
@@ -89,7 +81,6 @@ export function SettingsForm() {
             aria-invalid={!!keyError}
             list="setting-key-suggestions"
           />
-          {/* Suggest allowed keys so admins don't have to memorise them. */}
           <datalist id="setting-key-suggestions">
             {Array.from(ALLOWED_SETTING_KEYS).map(k => <option key={k} value={k} />)}
           </datalist>

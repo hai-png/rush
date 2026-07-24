@@ -74,7 +74,6 @@ export async function GET_admin() {
 }
 
 export async function GET_rider_active_trip({ session }: any) {
-  // Find rides that are 'boarded' (in transit) for this rider.
   const activeRide = await db.ride.findFirst({
     where: { userId: session.id, status: 'boarded' },
     include: { trip: { include: { route: true, shuttle: { include: { contractor: { select: { name: true } } } } } } },
@@ -82,3 +81,4 @@ export async function GET_rider_active_trip({ session }: any) {
   });
   return { data: activeRide };
 }
+

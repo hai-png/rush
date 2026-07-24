@@ -1,4 +1,3 @@
-
 import { db } from '@/lib/db';
 import { Money } from '@/lib/money';
 import { BadRequestError, NotFoundError } from '@/lib/errors';
@@ -10,7 +9,6 @@ import { Prisma } from '@prisma/client';
 import { logger } from '@/lib/logger';
 
 export async function settlePayment(reference: string, reportedAmount: Money | undefined, outRequestNo: string, tradeStatus: string, rawPayload: unknown): Promise<boolean> {
-  // Side effects (notifications, audit) collected during the tx and run AFTER
   // the tx commits — calling them inside would deadlock SQLite's single writer.
   const sideEffects: Array<() => Promise<void>> = [];
 
@@ -41,9 +39,6 @@ export async function settlePayment(reference: string, reportedAmount: Money | u
     const p = await tx.payment.findUnique({ where: { reference } });
     if (!p) return false;
 
-    // if the webhook payload omitted `total_amount`, the amount-mismatch
-    // recorded — a malicious or buggy Telebirr could send a no-amount
-    // webhook for a 1-ETB payment on a 1500-ETB order and settle it.
     if (!reportedAmount) {
       await tx.payment.update({ where: { id: p.id }, data: { status: 'failed' } });
       sideEffects.push(async () => {
@@ -71,8 +66,6 @@ export async function settlePayment(reference: string, reportedAmount: Money | u
     }
 
     if (p.subscriptionId) {
-      // Inline the subscription transition to avoid enqueueNotification inside
-      // the transaction (which would deadlock SQLite).
       const sub = await tx.subscription.findUnique({ where: { id: p.subscriptionId } });
       if (sub && sub.status === 'pending_payment') {
         await tx.subscription.update({
@@ -90,9 +83,6 @@ export async function settlePayment(reference: string, reportedAmount: Money | u
         });
       }
       // CRITICAL FIX (C-1): Apply pending renewal extension atomically when
-      // the renewal payment settles. Previously the renewal handler extended
-      // endDate + reset ridesUsed BEFORE payment, so users could get free
-      // rides by never paying. Now we apply the pending fields here.
       if (sub && sub.status === 'active' && (sub.pendingEndDate || sub.pendingRidesReset)) {
         const updateData: any = { pendingEndDate: null, pendingRidesReset: false };
         if (sub.pendingEndDate) updateData.endDate = sub.pendingEndDate;
@@ -140,7 +130,6 @@ export async function settlePayment(reference: string, reportedAmount: Money | u
     return true;
   }, { timeout: 15_000, maxWait: 20_000 });
 
-  // Run side effects after the tx commits.
   for (const fx of sideEffects) {
     try { await fx(); } catch (e) { logger.error({ err: (e as Error).message }, '[settlePayment] side effect failed'); }
   }
@@ -173,7 +162,6 @@ export async function failPayment(reference: string, reasonRaw: unknown, outRequ
       const claim = await tx.seatClaim.findUnique({ where: { id: p.seatClaimId } });
       if (claim) {
         const release = await tx.seatRelease.findUnique({ where: { id: claim.seatReleaseId } });
-        // Mark the failed claim as 'refunded' and reopen the release.
         await tx.seatClaim.update({ where: { id: p.seatClaimId }, data: { status: 'refunded' } });
         // CAS on status:'claimed' so concurrent paths can't double-open.
         await tx.seatRelease.updateMany({
@@ -181,23 +169,6 @@ export async function failPayment(reference: string, reasonRaw: unknown, outRequ
           data: { status: 'open' },
         });
         // CRITICAL FIX (H-2/H-3): Do NOT restore the seller's ride here.
-        // Previously, failPayment both reopened the release AND restored the
-        // seller's ride + incremented seatsBooked. This double-counted the
-        // seat: the release was 'open' (allowing another buyer to claim it)
-        // AND the seller's seat was 'booked' (consuming capacity). Under
-        // concurrent direct booking + failPayment, this caused overbooking.
-        //
-        // Now: only reopen the release. The seller's seat stays 'released'
-        // until either (a) another buyer claims it (settlePayment transitions
-        // the seller's ride to 'cancelled' via the marketplace flow), or
-        // (b) the release expires (scheduler.expireStale restores the seller).
-        // This matches the semantics of POST_cancel_release and
-        // scheduler.expireStale, which are the only legitimate paths to
-        // restore a released ride.
-        //
-        // If you need to restore the seller's ride on payment failure, use
-        // POST_cancel_release or DELETE_release instead — both correctly
-        // increment seatsBooked with a capacity CAS.
       }
     }
 
@@ -217,7 +188,6 @@ export async function failPayment(reference: string, reasonRaw: unknown, outRequ
 
 export async function scheduleRefund(paymentId: string, amount: Money, reason: string): Promise<void> {
   // Side effects (audit) collected during the tx and run AFTER the tx commits
-  // — calling audit() inside would deadlock SQLite's single writer.
   const sideEffects: Array<() => Promise<void>> = [];
 
   await db.$transaction(async (tx) => {
@@ -246,16 +216,10 @@ export async function scheduleRefund(paymentId: string, amount: Money, reason: s
       },
     });
     // reserve the refund amount atomically with a CAS on
-    // refundAmountCents. Two concurrent scheduleRefund calls both read the
-    // same refundAmountCents and both pass the gt(original) check, but only
-    // one CAS succeeds — the loser's tx rolls back (the RefundRetry row is
-    // also rolled back, so no orphaned retry is scheduled).
     const reserveCas = await tx.payment.updateMany({
       where: {
         id: paymentId,
         // SQLite doesn't support expression-based where-clauses, so we re-read
-        // the refundAmountCents we just saw — if a concurrent refund bumped
-        // it, this CAS won't match and we throw.
         refundAmountCents: payment.refundAmountCents,
       },
       data: {
@@ -278,16 +242,11 @@ export async function scheduleRefund(paymentId: string, amount: Money, reason: s
     });
   });
 
-  // Run side effects after the tx commits.
   for (const fx of sideEffects) {
     try { await fx(); } catch (e) { logger.error({ err: (e as Error).message }, '[scheduleRefund] side effect failed'); }
   }
 }
 
-// Cancel a mid-flight refund. Only refunds still in 'pending' state (not yet
-// picked up by processRefundRetries) can be cancelled. Reverses the
-// refundAmountCents reservation made by scheduleRefund so the payment's
-// available-for-refund balance is restored.
 export async function cancelRefund(paymentId: string, refundRetryId: string, actorId: string): Promise<void> {
   const sideEffects: Array<() => Promise<void>> = [];
 
@@ -299,8 +258,6 @@ export async function cancelRefund(paymentId: string, refundRetryId: string, act
       throw new BadRequestError(`Refund is already ${retry.status} and cannot be cancelled`);
     }
 
-    // CAS the status to 'cancelled' so concurrent cancel attempts or the
-    // scheduler picking it up don't double-process.
     const cas = await tx.refundRetry.updateMany({
       where: { id: refundRetryId, status: 'pending' },
       data: { status: 'permanent_failure', lastError: 'cancelled by admin' },
@@ -309,7 +266,6 @@ export async function cancelRefund(paymentId: string, refundRetryId: string, act
       throw new BadRequestError('Refund is no longer pending (already picked up for processing)');
     }
 
-    // Reverse the refundAmountCents reservation.
     const payment = await tx.payment.findUnique({ where: { id: paymentId } });
     if (!payment) throw new NotFoundError(`Payment ${paymentId} not found`);
     const newRefundAmount = Math.max(0, payment.refundAmountCents - retry.amountCents);
@@ -340,10 +296,6 @@ export async function cancelRefund(paymentId: string, refundRetryId: string, act
 const BACKOFF_MIN = [1, 5, 15, 60, 240]; // shorter for dev
 
 export async function processRefundRetries(limit = 10): Promise<{ processed: number }> {
-  // Reset stale 'processing' rows. Before resetting, we mark them as 'pending'
-  // WITHOUT immediately retrying — the next loop iteration will pick them up,
-  // and the refund call itself is idempotent on the Telebirr side (duplicate
-  // refund_request_no values are deduped by Telebirr and return REFUND_DUPLICATED).
   await db.refundRetry.updateMany({
     where: { status: 'processing', updatedAt: { lt: new Date(Date.now() - 15 * 60_000) } },
     data: { status: 'pending' },
@@ -393,7 +345,6 @@ export async function processRefundRetries(limit = 10): Promise<{ processed: num
 
         // refundAmountCents was ALREADY reserved at scheduleRefund time
         // (line 222-235). Do NOT add retry.amountCents again — that would double-count.
-        // Just update the status based on the already-reserved amount.
         const fresh = await tx.payment.findUnique({ where: { id: payment.id } });
         if (!fresh) return;
         const allRefunded = fresh.refundAmountCents >= fresh.amountCents;
@@ -441,3 +392,4 @@ export async function processRefundRetries(limit = 10): Promise<{ processed: num
   }
   return { processed };
 }
+

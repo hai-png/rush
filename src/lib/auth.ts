@@ -90,11 +90,6 @@ export async function verifySession(token: string): Promise<SessionUser> {
   }
 
   // H-37 fix: batch lastSeenAt updates in-memory and flush to DB every 60s
-  // instead of firing a non-awaited DB write on every authenticated request.
-  // Under load, the old fire-and-forget approach accumulated hundreds of
-  // untracked promises and caused SQLite write contention with actual business
-  // transactions. The batched approach coalesces updates per-jti so the DB is
-  // written at most once per minute per session.
   recordLastSeen(jti);
 
   return {
@@ -128,11 +123,6 @@ export async function assertTwoFactorEnabled(userId: string, role: string): Prom
   if (!u.twoFactorEnabled) throw new ForbiddenError('Two-factor authentication required for this role. Enable it at /api/v1/auth/2fa/setup.');
 }
 
-// H-37 fix: batched lastSeenAt updates.
-// Instead of firing a non-awaited DB write on every authenticated request,
-// we accumulate pending updates in a Map and flush them to the DB every 60s.
-// This reduces write contention under load from hundreds of untracked promises
-// to at most one batched UPDATE per second per session jti.
 const pendingLastSeen = new Map<string, number>();
 let lastSeenTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -160,3 +150,4 @@ async function flushLastSeen(): Promise<void> {
     }
   }
 }
+

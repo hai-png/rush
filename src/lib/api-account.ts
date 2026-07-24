@@ -30,8 +30,6 @@ export async function GET_export({ session }: any) {
 }
 
 export async function POST_delete({ session, ipAddress, userAgent }: any) {
-  // Soft-delete: nullify PII immediately. Hard-delete runs after 30-day grace
-  // period via the scheduler's hardDeleteStaleUsers job.
   await db.user.update({
     where: { id: session.id },
     data: {
@@ -42,7 +40,6 @@ export async function POST_delete({ session, ipAddress, userAgent }: any) {
       name: 'Deleted User',
       passwordHash: 'DELETED',
       tokenVersion: { increment: 1 },
-      // also scrub 2FA secret + disable 2FA + clear lockout state.
       twoFactorSecret: null,
       twoFactorEnabled: false,
       phoneVerified: false,
@@ -50,7 +47,6 @@ export async function POST_delete({ session, ipAddress, userAgent }: any) {
       lockedUntil: null,
     },
   });
-  // Also delete 2FA backup codes immediately.
   await db.twoFactorBackupCode.deleteMany({ where: { userId: session.id } }).catch(() => {});
   await audit({
     actorId: session.id,
@@ -59,7 +55,6 @@ export async function POST_delete({ session, ipAddress, userAgent }: any) {
     entityId: session.id,
     ipAddress, userAgent,
   });
-  // No notification enqueued — the user can no longer log in to see it.
   return { data: { ok: true } };
 }
 
@@ -73,13 +68,10 @@ export async function GET_account({ session }: any) {
   return { data: safe };
 }
 
-
 const UpdateAccountInput = z.object({
   name: z.string().min(2).max(100).optional(),
   email: z.string().email().optional().nullable(),
   // #4: optional rider profile fields. If provided, we upsert the RiderProfile
-  // (creating it if missing) so riders can record their home/work areas for
-  // route matching.
   homeArea: z.string().min(1).max(100).optional(),
   workArea: z.string().min(1).max(100).optional(),
 });
@@ -96,25 +88,16 @@ export async function PATCH_account({ session, body, ipAddress, userAgent }: any
     if (input.email) {
       const existing = await db.user.findFirst({ where: { email: input.email, NOT: { id: session.id } } });
       // H-23 fix: don't reveal that the email is already registered via a
-      // 409/400 error — an authenticated insider could enumerate the user base.
-      // Instead, silently ignore the change and return 200. The caller can't
-      // tell whether the email was taken or successfully updated. (A proper fix
-      // would send a verification email to the new address and only swap after
-      // verification, but that's a larger feature.)
       if (existing) {
-        // Drop the email from the update payload so it's not written.
         input.email = user.email;
       }
     }
   }
 
-  // #4: if homeArea or workArea provided, upsert the rider profile.
   const profileData: Record<string, string> = {};
   if (input.homeArea !== undefined) profileData.homeArea = input.homeArea;
   if (input.workArea !== undefined) profileData.workArea = input.workArea;
   if (Object.keys(profileData).length > 0) {
-    // When creating, both fields are required by the schema — fall back to
-    // empty string if only one is supplied on first creation.
     if (!user.riderProfile) {
       await db.riderProfile.create({
         data: {
@@ -154,8 +137,6 @@ export async function PATCH_account({ session, body, ipAddress, userAgent }: any
 }
 
 // #5: PATCH /contractor/profile — contractor self-edits their profile.
-// licenseNumber is unique; experienceYears must be non-negative; vehicleType
-// is free-form (kept consistent with Shuttle.vehicleType values).
 const ContractorProfileInput = z.object({
   licenseNumber: z.string().min(1).max(100).optional(),
   experienceYears: z.number().int().min(0).max(80).optional(),
@@ -171,8 +152,6 @@ export async function PATCH_contractor_profile({ session, body, ipAddress, userA
   const profile = await db.contractorProfile.findUnique({ where: { userId: session.id } });
   if (!profile) throw new NotFoundError('Contractor profile not found');
 
-  // licenseNumber is @unique — check for collisions BEFORE updating so we can
-  // raise a clean 409 instead of letting Prisma throw P2002.
   if (input.licenseNumber !== undefined && input.licenseNumber !== profile.licenseNumber) {
     const clash = await db.contractorProfile.findUnique({ where: { licenseNumber: input.licenseNumber } });
     if (clash) throw new ConflictError('License number already in use');
@@ -199,3 +178,4 @@ export async function PATCH_contractor_profile({ session, body, ipAddress, userA
   });
   return { data: updated };
 }
+

@@ -1,18 +1,10 @@
-
 import { db } from '@/lib/db';
 import { Prisma } from '@prisma/client';
 import { BadRequestError, ConflictError } from '@/lib/errors';
 
 type TxClient = Prisma.TransactionClient;
 
-// consumeRide atomically increments subscription.ridesUsed with a CAS guard
-// so two concurrent POST /rides calls can't both consume the last ride.
-// include status:'active' in the CAS where-clause so a sub that
-// was cancelled or expired between the read and the CAS still fails cleanly.
-//
-// fix: when the subscription has a corporateId, also enforce
 // the corporate monthly seat allowance via a CAS on CorporateMember.ridesUsedThisMonth.
-// The quota is per-member-per-corporate-per-month.
 export async function consumeRide(
   tx: TxClient | typeof db,
   subscriptionId: string,
@@ -24,10 +16,8 @@ export async function consumeRide(
   if (!sub) throw new BadRequestError('Subscription not found');
   if (sub.status !== 'active') throw new BadRequestError('Subscription not active');
 
-  // enforce corporate seat allowance.
   if (sub.corporateId && sub.corporate) {
     const allowance = sub.corporate.monthlySeatAllowance;
-    // Find the member row inside the same tx.
     const member = await tx.corporateMember.findUnique({
       where: { corporateId_userId: { corporateId: sub.corporateId, userId: sub.userId } },
       select: { id: true, isActive: true, deletedAt: true, approvalStatus: true, ridesUsedThisMonth: true },
@@ -47,7 +37,6 @@ export async function consumeRide(
   }
 
   if (sub.plan.ridesIncluded === -1) {
-    // Unlimited plan — no cap to enforce, just increment for reporting.
     await tx.subscription.update({
       where: { id: subscriptionId },
       data: { ridesUsed: { increment: 1 } },
@@ -64,18 +53,12 @@ export async function consumeRide(
     data: { ridesUsed: { increment: 1 } },
   });
   if (updated.count === 0) {
-    // Re-read to give a more accurate error.
     const fresh = await tx.subscription.findUnique({ where: { id: subscriptionId }, select: { status: true, ridesUsed: true, plan: { select: { ridesIncluded: true } } } });
     if (fresh && fresh.status !== 'active') throw new BadRequestError('Subscription is no longer active');
     throw new BadRequestError('No rides remaining in subscription');
   }
 }
 
-// releaseRide atomically decrements subscription.ridesUsed when a ride is cancelled.
-// Safe to call outside a transaction (uses its own atomic updateMany).
-// Never decrements below zero (CAS guard).
-// also decrements CorporateMember.ridesUsedThisMonth so cancelled rides
-// give the member their quota back.
 export async function releaseRide(subscriptionId: string): Promise<void> {
   if (!subscriptionId) return;
   const sub = await db.subscription.findUnique({
@@ -98,4 +81,5 @@ export async function releaseRide(subscriptionId: string): Promise<void> {
     }).catch(() => {});
   }
 }
+
 

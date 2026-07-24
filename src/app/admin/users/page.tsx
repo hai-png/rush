@@ -15,10 +15,6 @@ export const metadata: Metadata = { title: 'Users · Admin' };
 
 const PAGE_SIZE = 20;
 
-// Reads `page`, `q` (free-text search across name/phone/email), and `role`
-// (filter) from searchParams and feeds them to findMany + count. The shared
-// <Pagination> component renders the prev/next controls and preserves the
-// search/role filters when moving between pages.
 export default async function AdminUsersPage({ searchParams }: { searchParams: Promise<{ page?: string; q?: string; role?: string }> }) {
   const session = await requireRole('platform_admin');
   const sp = await searchParams;
@@ -54,7 +50,6 @@ export default async function AdminUsersPage({ searchParams }: { searchParams: P
     <div className="min-h-screen flex flex-col">
       <DashboardHeader title="Admin · Users" backHref="/dashboard/admin" />
       <main className="flex-1 container mx-auto px-4 py-8 max-w-6xl">
-        {/* Filter form — GET so it's shareable and bookmarkable. */}
         <form className="mb-4 flex flex-wrap gap-2 items-center">
           <input
             name="q"

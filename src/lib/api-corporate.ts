@@ -1,4 +1,3 @@
-
 import { db } from '@/lib/db';
 import { z } from 'zod';
 import { BadRequestError, NotFoundError, ForbiddenError, ConflictError } from '@/lib/errors';
@@ -24,9 +23,6 @@ export async function POST_onboard({ session, body, ipAddress, userAgent }: any)
 
   const code = await generateUniqueCode();
 
-  // Move the 2FA + phone-verification check INSIDE the promotion transaction
-  // so a user can't disable 2FA between the check and the role update. The
-  // check reads from tx (the same transaction that does the promotion).
   const corp = await db.$transaction(async (tx) => {
     if (session.role !== 'platform_admin') {
       const u = await tx.user.findUnique({
@@ -87,8 +83,6 @@ async function generateUniqueCode(): Promise<string> {
   throw new Error('Failed to generate unique corporate code');
 }
 
-// platform_admin MUST supply a corporateId — prevents cross-tenant data bugs
-// when multiple corporates exist (no silent findFirst({}) fallback).
 async function resolveCorporate(session: any, corporateId?: string) {
   if (session.role === 'platform_admin') {
     if (!corporateId) {
@@ -96,7 +90,6 @@ async function resolveCorporate(session: any, corporateId?: string) {
     }
     return db.corporate.findUnique({ where: { id: corporateId } });
   }
-  // corporate_admin → their own corporate (ignore any corporateId param).
   return db.corporate.findUnique({ where: { adminUserId: session.id } });
 }
 
@@ -104,7 +97,6 @@ export async function GET_current({ session, query }: any) {
   if (session.role !== 'corporate_admin' && session.role !== 'platform_admin') {
     throw new ForbiddenError('Corporate admin only');
   }
-  // platform_admin must supply ?corporateId= via resolveCorporate.
   const baseCorp = await resolveCorporate(session, query?.corporateId);
   if (!baseCorp) throw new NotFoundError('No corporate found');
   const corp = await db.corporate.findUnique({
@@ -133,8 +125,6 @@ export async function POST_invite({ session, body, query, ipAddress, userAgent }
   const corp = await resolveCorporate(session, query?.corporateId);
   if (!corp) throw new NotFoundError('No corporate found');
 
-  // Retry on collision (matches generateUniqueCode pattern for corporate codes).
-  // No `before` snapshot — this is a create.
   const { randomInt } = await import('node:crypto');
   const alphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
   let invite;
@@ -184,8 +174,6 @@ export async function GET_invites({ session, query }: any) {
   return { data: invites };
 }
 
-// revoke a corporate invite (set isActive=false). A revoked
-// invite can no longer be used to sign up.
 export async function DELETE_invite({ session, params, query, ipAddress, userAgent }: any) {
   if (session.role !== 'corporate_admin' && session.role !== 'platform_admin') {
     throw new ForbiddenError('Corporate admin only');
@@ -211,21 +199,16 @@ export async function POST_signup({ session, body, ipAddress, userAgent }: any) 
   }
   const input = SignupInput.parse(body);
 
-  // Pre-flight invite lookup (re-validated inside the tx below).
   const invite = await db.corporateInvite.findUnique({ where: { code: input.inviteCode } });
   if (!invite || !invite.isActive) throw new BadRequestError('Invalid invite code');
   if (invite.expiresAt && invite.expiresAt < new Date()) throw new BadRequestError('Invite expired');
 
-  // Enforce single corporate membership — a user may only belong to one
-  // corporate at a time. The (corporateId, userId) unique constraint allows
-  // multiple corporates, so we enforce the single-membership rule here.
   const existingAnyCorp = await db.corporateMember.findFirst({
     where: { userId: session.id, deletedAt: null, approvalStatus: { in: ['pending', 'approved'] } },
     select: { id: true, corporateId: true, approvalStatus: true },
   });
   if (existingAnyCorp) {
     if (existingAnyCorp.approvalStatus === 'rejected') {
-      // rejected members can re-apply to a different corporate
     } else if (existingAnyCorp.approvalStatus === 'approved') {
       throw new ConflictError('You are already an approved member of a corporate. Leave that corporate before joining another.');
     } else {
@@ -242,10 +225,6 @@ export async function POST_signup({ session, body, ipAddress, userAgent }: any) 
     throw new ConflictError('You already have a pending request');
   }
 
-  // Move the maxUses check INSIDE the transaction with a CAS guard so two
-  // concurrent signups can't both pass and exceed maxUses. The updateMany
-  // only succeeds if usesCount is still below maxUses; otherwise we throw
-  // and the member row (created in the same tx) is rolled back.
   const member = await db.$transaction(async (tx) => {
     const freshInvite = await tx.corporateInvite.findUnique({ where: { id: invite.id } });
     if (!freshInvite || !freshInvite.isActive) throw new BadRequestError('Invalid invite code');
@@ -368,10 +347,8 @@ export async function GET_me({ session, query }: any) {
   if (session.role !== 'corporate_admin' && session.role !== 'platform_admin') {
     throw new ForbiddenError('Corporate admin only');
   }
-  // platform_admin can fetch any corporate via resolveCorporate + ?corporateId=.
   const corp = await resolveCorporate(session, query?.corporateId);
   if (!corp) throw new NotFoundError('No corporate found');
-  // resolveCorporate returns a minimal corp object; re-fetch with counts.
   const full = await db.corporate.findUnique({
     where: { id: corp.id },
     include: {
@@ -398,7 +375,6 @@ export async function PATCH_corporate({ session, body, query, ipAddress, userAge
   const corp = await resolveCorporate(session, query?.corporateId);
   if (!corp) throw new NotFoundError('No corporate found');
 
-  // Capture `before` snapshot for the audit log.
   const before = { ...corp };
   const updated = await db.corporate.update({ where: { id: corp.id }, data: input });
   await audit({ actorId: session.id, action: 'corporate.updated', entityType: 'corporate', entityId: corp.id, before, after: input, ipAddress, userAgent });
@@ -414,11 +390,8 @@ export async function DELETE_member({ session, params, query, ipAddress, userAge
   const member = await db.corporateMember.findUnique({ where: { id: params.id } });
   if (!member || member.corporateId !== corp.id) throw new NotFoundError('Member not found');
 
-  // Capture `before` snapshot.
   const before = { ...member };
 
-  // Cancel the removed member's corporate-linked subscriptions so they can no
-  // longer ride at the subsidized rate. Non-corporate subscriptions are
   // untouched. CAS-guarded so concurrent removals don't double-cancel.
   await db.$transaction(async (tx) => {
     await tx.corporateMember.update({
@@ -434,7 +407,6 @@ export async function DELETE_member({ session, params, query, ipAddress, userAge
       data: { status: 'cancelled', cancelledAt: new Date() },
     });
   });
-  // Notify the removed member (best-effort).
   const { enqueueNotification } = await import('@/lib/outbox');
   enqueueNotification({
     userId: member.userId,
@@ -447,10 +419,6 @@ export async function DELETE_member({ session, params, query, ipAddress, userAge
   return { status: 204 };
 }
 
-// `ridesUsedThisMonth` is intentionally NOT admin-editable — allowing a
-// corporate admin to set it directly would bypass the corporate seat-allowance
-// quota (enforced in consumeRide). If a manual reset is needed, a dedicated
-// /members/:id/reset-usage endpoint with stronger audit should be added.
 const UpdateMemberInput = z.object({
   employeeId: z.string().min(1).max(50).optional(),
   isActive: z.boolean().optional(),
@@ -472,9 +440,6 @@ export async function PATCH_member({ session, params, body, query, ipAddress, us
   return { data: updated };
 }
 
-// GET /corporate/invoices — list invoices for the caller's corporate
-// (or, for platform_admin, optionally another corporate via ?corporateId=).
-// Includes only issued/paid/void invoices — drafts are admin-internal.
 export async function GET_invoices({ session, query }: any) {
   if (session.role !== 'corporate_admin' && session.role !== 'platform_admin') {
     throw new ForbiddenError('Corporate admin only');
@@ -497,3 +462,4 @@ export async function GET_invoices({ session, query }: any) {
   ]);
   return paginatedResponse(invoices, total, page);
 }
+

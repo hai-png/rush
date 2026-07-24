@@ -1,24 +1,9 @@
-/**
- * Integration tests for the race-condition fixes from the audit remediation.
- *
- * These tests directly exercise the database layer + business logic to verify
- * that concurrent operations are correctly serialized. They use a real SQLite
- * database (temp file) and the actual Prisma client — no mocks.
- *
- * Run with: `bun test scripts/race-condition-tests.test.ts`
- *
- * Env: DATABASE_URL must point to a writable SQLite file. AUTH_SECRET + CRON_SECRET
- * must be set (any value >= 32 chars). The test creates its own isolated DB.
- *
- * Note: bun:test default timeout is 5s; we override to 30s for DB-heavy tests.
- */
 import { describe, beforeAll, afterAll, beforeEach, it, expect } from 'bun:test';
 import { PrismaClient, Prisma } from '@prisma/client';
 import { spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import { rmSync } from 'node:fs';
 
-// ─── Test DB setup ───────────────────────────────────────────────────────────
 const TEST_DB = resolve(process.cwd(), 'db/race-test.db');
 process.env.DATABASE_URL = `file:${TEST_DB}`;
 process.env.AUTH_SECRET = process.env.AUTH_SECRET || 'race-test-auth-secret-32-chars-minimum-length';
@@ -27,11 +12,9 @@ process.env.NODE_ENV = 'development';
 
 const db = new PrismaClient();
 
-// All tests get a 30s timeout (DB-heavy).
 const TIMEOUT = 30000;
 
 beforeAll(async () => {
-  // Create schema in the test DB.
   spawnSync('bunx', ['prisma', 'db', 'push', '--skip-generate', '--schema', 'prisma/schema.prisma'], {
     env: { ...process.env, DATABASE_URL: `file:${TEST_DB}` },
     stdio: 'pipe',
@@ -46,8 +29,6 @@ afterAll(async () => {
 }, TIMEOUT);
 
 beforeEach(async () => {
-  // Clean all tables between tests. Order matters for FK constraints.
-  // Disable FK enforcement during cleanup so order doesn't matter.
   await db.$executeRawUnsafe('PRAGMA foreign_keys=OFF');
   const tables = [
     'ride', 'seatClaim', 'seatRelease', 'refundRetry', 'telebirrNotifyEvent',
@@ -64,7 +45,6 @@ beforeEach(async () => {
   await db.$executeRawUnsafe('PRAGMA foreign_keys=ON');
 }, TIMEOUT);
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
 async function createPlan(opts: { id?: string; ridesIncluded?: number; isTrial?: boolean; priceCents?: number } = {}) {
   return db.subscriptionPlan.create({
     data: {
@@ -136,8 +116,6 @@ async function createActiveSubscription(userId: string, planId: string, opts: { 
   }, TIMEOUT);
 }
 
-// ─── Tests ───────────────────────────────────────────────────────────────────
-
 describe('P0-1: double-book prevention', () => {
   it('rejects a second booked ride for the same user on the same trip', async () => {
     const user = await createUser();
@@ -147,17 +125,14 @@ describe('P0-1: double-book prevention', () => {
     const trip = await createTrip(route.id, shuttle.id);
     const sub = await createActiveSubscription(user.id, plan.id);
 
-    // Import the handler (we test the logic directly, not via HTTP).
     const { POST_ride } = await import('../src/lib/api-operations');
 
     const ctx = { session: { id: user.id, role: 'rider' }, ipAddress: '127.0.0.1', userAgent: 'test' };
 
-    // First booking succeeds.
     const r1 = await POST_ride({ ...ctx, body: { tripId: trip.id, subscriptionId: sub.id } });
     expect(r1.status).toBe(201);
     expect(r1.data.status).toBe('booked');
 
-    // Second booking for the same trip+user must fail with ConflictError.
     let secondError: any;
     try {
       await POST_ride({ ...ctx, body: { tripId: trip.id, subscriptionId: sub.id } });
@@ -167,15 +142,12 @@ describe('P0-1: double-book prevention', () => {
     expect(secondError).toBeDefined();
     expect(secondError.message).toContain('already have a booked ride');
 
-    // Verify only 1 ride row exists.
     const rides = await db.ride.findMany({ where: { tripId: trip.id, userId: user.id } });
     expect(rides.length).toBe(1);
 
-    // Verify subscription.ridesUsed is 1, not 2.
     const freshSub = await db.subscription.findUnique({ where: { id: sub.id } });
     expect(freshSub?.ridesUsed).toBe(1);
 
-    // Verify trip.seatsBooked is 1, not 2.
     const freshTrip = await db.trip.findUnique({ where: { id: trip.id } });
     expect(freshTrip?.seatsBooked).toBe(1);
   }, TIMEOUT);
@@ -192,7 +164,6 @@ describe('P0-1: double-book prevention', () => {
     const ctx = { session: { id: user.id, role: 'rider' }, ipAddress: '127.0.0.1', userAgent: 'test' };
     const body = { tripId: trip.id, subscriptionId: sub.id };
 
-    // Fire 5 parallel booking attempts.
     const results = await Promise.allSettled(
       Array.from({ length: 5 }, () => POST_ride({ ...ctx, body })),
     );
@@ -200,11 +171,9 @@ describe('P0-1: double-book prevention', () => {
     const fulfilled = results.filter(r => r.status === 'fulfilled');
     const rejected = results.filter(r => r.status === 'rejected');
 
-    // Exactly one should succeed.
     expect(fulfilled.length).toBe(1);
     expect(rejected.length).toBe(4);
 
-    // Verify DB state is consistent.
     const rides = await db.ride.findMany({ where: { tripId: trip.id, userId: user.id } });
     expect(rides.length).toBe(1);
 
@@ -218,7 +187,6 @@ describe('P0-1: double-book prevention', () => {
 
 describe('P0-19: corporate seat allowance enforcement', () => {
   it('enforces the monthly seat allowance via CAS on ridesUsedThisMonth', async () => {
-    // Create a corporate with allowance=3.
     const admin = await createUser('corporate_admin');
     const corp = await db.corporate.create({
       data: {
@@ -254,14 +222,12 @@ describe('P0-19: corporate seat allowance enforcement', () => {
     const { POST_ride } = await import('../src/lib/api-operations');
     const ctx = { session: { id: rider.id, role: 'rider' }, ipAddress: '127.0.0.1', userAgent: 'test' };
 
-    // Book 3 rides (should all succeed — within allowance).
     for (let i = 0; i < 3; i++) {
       const t = await createTrip(route.id, shuttle.id, { departureAt: new Date(Date.now() + (i + 2) * 24 * 3600_000) });
       const r = await POST_ride({ ...ctx, body: { tripId: t.id, subscriptionId: sub.id } });
       expect(r.status).toBe(201);
     }
 
-    // 4th ride should fail with corporate allowance reached.
     const trip4 = await createTrip(route.id, shuttle.id, { departureAt: new Date(Date.now() + 5 * 24 * 3600_000) });
     let err: any;
     try {
@@ -270,7 +236,6 @@ describe('P0-19: corporate seat allowance enforcement', () => {
     expect(err).toBeDefined();
     expect(err.message).toContain('Corporate monthly seat allowance');
 
-    // Verify ridesUsedThisMonth is exactly 3.
     const freshMember = await db.corporateMember.findUnique({ where: { id: member.id } });
     expect(freshMember?.ridesUsedThisMonth).toBe(3);
   }, TIMEOUT);
@@ -284,7 +249,7 @@ describe('P1-25: refund double-count prevention', () => {
         reference: `POTEST-${Date.now()}`,
         userId: user.id,
         method: 'telebirr',
-        amountCents: 150000, // 1500 ETB
+        amountCents: 150000,
         status: 'completed',
       },
     });
@@ -292,8 +257,6 @@ describe('P1-25: refund double-count prevention', () => {
     const { scheduleRefund } = await import('../src/lib/payment-service');
     const { Money } = await import('../src/lib/money');
 
-    // Two concurrent refund requests of 1000 ETB each.
-    // Total would be 2000 > 1500, so one must be rejected.
     const results = await Promise.allSettled([
       scheduleRefund(payment.id, Money.fromETB(1000), 'refund 1'),
       scheduleRefund(payment.id, Money.fromETB(1000), 'refund 2'),
@@ -302,16 +265,13 @@ describe('P1-25: refund double-count prevention', () => {
     const fulfilled = results.filter(r => r.status === 'fulfilled');
     const rejected = results.filter(r => r.status === 'rejected');
 
-    // Exactly one should succeed.
     expect(fulfilled.length).toBe(1);
     expect(rejected.length).toBe(1);
 
-    // Verify refundAmountCents is exactly 100000 (1000 ETB), not 200000.
     const freshPayment = await db.payment.findUnique({ where: { id: payment.id } });
     expect(freshPayment?.refundAmountCents).toBe(100000);
     expect(freshPayment?.status).toBe('partially_refunded');
 
-    // Verify only 1 RefundRetry row was created (the loser's tx rolled back).
     const retries = await db.refundRetry.findMany({ where: { paymentId: payment.id } });
     expect(retries.length).toBe(1);
   }, TIMEOUT);
@@ -329,22 +289,17 @@ describe('P0-1 + P0-6: ride cancel restores seat', () => {
     const { POST_ride, PATCH_ride } = await import('../src/lib/api-operations');
     const ctx = { session: { id: user.id, role: 'rider' }, ipAddress: '127.0.0.1', userAgent: 'test' };
 
-    // Book a ride.
     const r = await POST_ride({ ...ctx, body: { tripId: trip.id, subscriptionId: sub.id } });
     const rideId = r.data.id;
 
-    // Verify seatsBooked = 1.
     let t = await db.trip.findUnique({ where: { id: trip.id } });
     expect(t?.seatsBooked).toBe(1);
 
-    // Cancel the ride.
     await PATCH_ride({ ...ctx, params: { id: rideId }, body: { status: 'cancelled' } });
 
-    // Verify seatsBooked = 0 (restored).
     t = await db.trip.findUnique({ where: { id: trip.id } });
     expect(t?.seatsBooked).toBe(0);
 
-    // Verify subscription credit was restored.
     const freshSub = await db.subscription.findUnique({ where: { id: sub.id } });
     expect(freshSub?.ridesUsed).toBe(0);
   }, TIMEOUT);
@@ -365,10 +320,8 @@ describe('P1-29: ride state machine', () => {
     const r = await POST_ride({ ...ctx, body: { tripId: trip.id, subscriptionId: sub.id } });
     const rideId = r.data.id;
 
-    // Cancel the ride (legal: booked → cancelled).
     await PATCH_ride({ ...ctx, params: { id: rideId }, body: { status: 'cancelled' } });
 
-    // Try to revert cancelled → booked (illegal — terminal state).
     let err: any;
     try {
       await PATCH_ride({ ...ctx, params: { id: rideId }, body: { status: 'booked' } });
@@ -391,10 +344,6 @@ describe('P1-29: ride state machine', () => {
     const r = await POST_ride({ ...ctx, body: { tripId: trip.id, subscriptionId: sub.id } });
     const rideId = r.data.id;
 
-    // Rider tries to mark their own ride as 'completed' — should be rejected.
-    // The state machine rejects 'booked → completed' (only 'boarded → completed'
-    // is allowed), so the error is the transition error, not the permission error.
-    // Either error is acceptable — the point is the rider can't self-complete.
     let err: any;
     try {
       await PATCH_ride({ ...ctx, params: { id: rideId }, body: { status: 'completed' } });
@@ -412,7 +361,6 @@ describe('P0-5: trip board transactional + departure check', () => {
     const user = await createUser('contractor');
     const route = await createRoute();
     const shuttle = await createShuttle(user.id);
-    // Trip departs in 2 hours — boarding opens 30 min before, so this is too early.
     const trip = await createTrip(route.id, shuttle.id, { departureAt: new Date(Date.now() + 2 * 3600_000) });
 
     const { POST_board } = await import('../src/lib/api-operations');
@@ -425,7 +373,6 @@ describe('P0-5: trip board transactional + departure check', () => {
     expect(err).toBeDefined();
     expect(err.message).toContain('Too early to board');
 
-    // Verify trip status is still 'scheduled' (not changed).
     const t = await db.trip.findUnique({ where: { id: trip.id } });
     expect(t?.status).toBe('scheduled');
   }, TIMEOUT);
@@ -445,25 +392,20 @@ describe('P0-3: subscription cancel cascades to rides', () => {
     const { POST_cancel } = await import('../src/lib/api-subscriptions');
     const ctx = { session: { id: user.id, role: 'rider' }, ipAddress: '127.0.0.1', userAgent: 'test' };
 
-    // Book 2 rides on future trips.
     await POST_ride({ ...ctx, body: { tripId: trip1.id, subscriptionId: sub.id } });
     await POST_ride({ ...ctx, body: { tripId: trip2.id, subscriptionId: sub.id } });
 
-    // Verify seatsBooked = 1 on each trip.
     expect((await db.trip.findUnique({ where: { id: trip1.id } }))?.seatsBooked).toBe(1);
     expect((await db.trip.findUnique({ where: { id: trip2.id } }))?.seatsBooked).toBe(1);
 
-    // Cancel the subscription.
     const result = await POST_cancel({ ...ctx, params: { id: sub.id } });
     expect(result.data.status).toBe('cancelled');
     expect(result.data.cancelledRides).toBe(2);
 
-    // Verify both rides are cancelled.
     const rides = await db.ride.findMany({ where: { subscriptionId: sub.id } });
     expect(rides.length).toBe(2);
     expect(rides.every(r => r.status === 'cancelled')).toBe(true);
 
-    // Verify seatsBooked = 0 on each trip (restored).
     expect((await db.trip.findUnique({ where: { id: trip1.id } }))?.seatsBooked).toBe(0);
     expect((await db.trip.findUnique({ where: { id: trip2.id } }))?.seatsBooked).toBe(0);
   }, TIMEOUT);

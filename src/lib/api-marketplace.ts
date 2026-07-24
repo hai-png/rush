@@ -33,10 +33,6 @@ const ReleaseInput = z.object({
   window: z.enum(['morning', 'evening']),
   expiresAt: z.string().datetime(),
   // #8: optional override for the route fare. When null/undefined the buyer
-  // pays the route's canonical fareCents at claim time. When set, the buyer
-  // pays this amount. Must be positive (a 0-ETB release would let a buyer
-  // claim a seat for free, which is the seller's choice but should be
-  // explicit rather than the result of a typo).
   priceCents: z.number().int().positive().optional().nullable(),
 });
 
@@ -45,17 +41,13 @@ export async function POST_create_release({ session, body, ipAddress, userAgent 
   const trip = await db.trip.findUnique({ where: { id: input.tripId }, include: { shuttle: true } });
   if (!trip) throw new NotFoundError('Trip not found');
   if (trip.status !== 'scheduled') throw new BadRequestError('Trip is not scheduled');
-  // cannot release a seat on a trip that has already departed.
   if (trip.departureAt.getTime() < Date.now()) {
     throw new BadRequestError('Cannot release a seat on a trip that has already departed');
   }
-  // expiresAt must be before trip departure (otherwise the
-  // release outlives the trip and a buyer could pay for a seat they can't use).
   const expiresAtDate = new Date(input.expiresAt);
   if (expiresAtDate > trip.departureAt) {
     throw new BadRequestError('Release expiry must be before trip departure');
   }
-  // window must match the trip's window.
   if (input.window !== trip.window) {
     throw new BadRequestError(`Release window (${input.window}) does not match trip window (${trip.window})`);
   }
@@ -66,9 +58,6 @@ export async function POST_create_release({ session, body, ipAddress, userAgent 
   if (!ride) throw new BadRequestError('You have no booked ride on this trip');
 
   const release = await db.$transaction(async (tx) => {
-    // Mark the seller's ride as 'released' and decrement trip.seatsBooked
-    // so the freed seat is visible to other riders. The buyer will later
-    // re-occupy it via POST_claim with a fresh Ride row + re-increment.
     // CAS-guarded so concurrent releases can't double-decrement.
     const rideCas = await tx.ride.updateMany({
       where: { id: ride.id, status: 'booked' },
@@ -129,13 +118,7 @@ export async function POST_claim({ session, body, params, ipAddress, userAgent }
   const provider = getPaymentProvider(input.paymentMethod);
   const env = loadEnv();
 
-  // create the SeatRelease claim + Payment row BEFORE calling
-  // below rolled back (e.g. release already claimed by another buyer), the
-  // Telebirr order had been created with no matching Payment row. When the
-  // buyer completed payment at Telebirr, the webhook arrived for an unknown
-  // merchOrderId and the money was stuck with no record on our side.
   const claim = await db.$transaction(async (tx) => {
-    // Mark release as claimed (atomic — only if still open).
     const updated = await tx.seatRelease.updateMany({
       where: { id: release.id, status: 'open' },
       data: { status: 'claimed' },
@@ -160,16 +143,10 @@ export async function POST_claim({ session, body, params, ipAddress, userAgent }
         status: 'pending',
       },
     });
-    // Link the payment back to the claim so settlePayment() can promote the
-    // claim to 'confirmed' when the webhook arrives. Without this, the payment
-    // settles but the claim stays 'pending' forever.
     await tx.payment.update({ where: { id: payment.id }, data: { seatClaimId: newClaim.id } });
     return newClaim;
   });
 
-  // Now that the Payment row has committed, create the Telebirr checkout.
-  // If this throws, mark the Payment failed + reopen the release so the
-  // user can retry cleanly.
   let checkout: any;
   try {
     checkout = await provider.createCheckout({
@@ -180,7 +157,6 @@ export async function POST_claim({ session, body, params, ipAddress, userAgent }
       redirectUrl: env.TELEBIRR_REDIRECT_URL || `${env.APP_BASE_URL}/checkout/complete`,
     });
   } catch (err) {
-    // Reopen the release + fail the payment + fail the claim.
     await db.$transaction(async (tx) => {
       await tx.payment.updateMany({ where: { reference }, data: { status: 'failed' } });
       await tx.seatClaim.updateMany({ where: { id: claim.id }, data: { status: 'refunded' } });
@@ -229,9 +205,6 @@ export async function POST_cancel_release({ session, params, ipAddress, userAgen
   if (!release) throw new NotFoundError('Seat release not found');
   if (release.userId !== session.id) throw new NotFoundError('Seat release not found');
   if (release.status !== 'open') throw new BadRequestError(`Cannot cancel a ${release.status} release`);
-  // Refuse to cancel a release after the trip has departed. Without this, a
-  // seller could "restore" their seat on a trip that's already left, getting
-  // credit for a ride they didn't take.
   if (release.trip && release.trip.departureAt.getTime() < Date.now()) {
     throw new BadRequestError('Cannot cancel a release after the trip has departed');
   }
@@ -241,8 +214,6 @@ export async function POST_cancel_release({ session, params, ipAddress, userAgen
       where: { id: release.id },
       data: { status: 'cancelled' },
     });
-    // Restore the seller's ride: flip back from 'released' to 'booked'
-    // and re-increment trip.seatsBooked so the seat is occupied again.
     const sellerRide = await tx.ride.findFirst({
       where: { tripId: release.tripId, userId: release.userId, status: 'released' },
     });
@@ -274,13 +245,10 @@ export async function GET_release({ session, params }: any) {
     },
   });
   if (!release) throw new NotFoundError('Seat release not found');
-  // Only the seller or any authenticated user can view (marketplace is open).
   return { data: release };
 }
 
 export async function DELETE_release({ session, params, ipAddress, userAgent }: any) {
-  // DELETE mirrors POST_cancel_release but also allows platform_admin to
-  // cancel any release (POST_cancel_release is seller-only).
   const release = await db.seatRelease.findUnique({ where: { id: params.id } });
   if (!release) throw new NotFoundError('Seat release not found');
   if (release.userId !== session.id && session.role !== 'platform_admin') {
@@ -293,7 +261,6 @@ export async function DELETE_release({ session, params, ipAddress, userAgent }: 
       where: { id: release.id },
       data: { status: 'cancelled' },
     });
-    // Restore the seller's ride (same as POST_cancel_release).
     const sellerRide = await tx.ride.findFirst({
       where: { tripId: release.tripId, userId: release.userId, status: 'released' },
     });
@@ -343,11 +310,9 @@ const ClaimCreateInput = z.object({
 });
 
 export async function POST_claim_direct({ session, body, ipAddress, userAgent }: any) {
-  // Identical to POST /marketplace/seat-releases/:id/claim — kept as a
-  // convenience for clients that prefer a single endpoint with body params
-  // over a path-param + body. Delegates to POST_claim to avoid drift.
   const input = ClaimCreateInput.parse(body);
   return POST_claim(
     { session, body: { paymentMethod: input.paymentMethod }, params: { id: input.seatReleaseId }, ipAddress, userAgent },
   );
 }
+

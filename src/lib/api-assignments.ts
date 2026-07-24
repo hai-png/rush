@@ -1,4 +1,3 @@
-
 import { db } from '@/lib/db';
 import { z } from 'zod';
 import { BadRequestError, NotFoundError, ForbiddenError, ConflictError } from '@/lib/errors';
@@ -26,7 +25,6 @@ export async function POST_pickup({ session, params, body, ipAddress, userAgent 
   const input = PickupInput.parse(body);
   const route = await db.route.findUnique({ where: { id: params.id } });
   if (!route) throw new NotFoundError('Route not found');
-  // Strip undefined optionals so Prisma doesn't choke on { lat: undefined, lng: undefined }.
   const data: Record<string, unknown> = { name: input.name, sortOrder: input.sortOrder, routeId: params.id };
   if (input.lat !== undefined) data.lat = input.lat;
   if (input.lng !== undefined) data.lng = input.lng;
@@ -85,9 +83,6 @@ const AssignmentInput = z.object({
   schedulePattern: z.object({
     days: z.array(z.enum(['mon', 'tue', 'wed', 'thu', 'fri', 'sat', 'sun'])),
     windows: z.array(z.enum(['morning', 'evening'])),
-    // Optional per-window departure times in "HH:MM" format (24h, server-local
-    // time — the Dockerfile pins TZ=Africa/Addis_Ababa). When omitted,
-    // defaults to 07:30 for morning and 17:30 for evening.
     morningTime: z.string().regex(/^\d{2}:\d{2}$/).optional(),
     eveningTime: z.string().regex(/^\d{2}:\d{2}$/).optional(),
   }),
@@ -118,16 +113,12 @@ export async function POST_assignment({ session, body, ipAddress, userAgent }: a
     throw new BadRequestError('Contractor is not verified');
   }
 
-  // Compute month start/end
   const now = new Date();
   const monthStart = input.monthStart ? new Date(input.monthStart) : new Date(now.getFullYear(), now.getMonth(), 1);
   const startOfCurrentMonth = new Date(now.getFullYear(), now.getMonth(), 1);
   if (monthStart < startOfCurrentMonth) throw new BadRequestError('Cannot create assignments for past months');
   const monthEnd = new Date(monthStart.getFullYear(), monthStart.getMonth() + 1, 0, 23, 59, 59);
 
-  // Reject past-month assignments — generating trips for historical dates is
-  // wasteful and could trigger retroactive scheduling side effects. Allow the
-  // current month + future months only.
   const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
   if (monthStart < currentMonthStart) {
     throw new BadRequestError('Cannot create an assignment for a past month. Use the current month or a future month.');
@@ -160,11 +151,6 @@ export async function POST_assignment({ session, body, ipAddress, userAgent }: a
 }
 
 export async function generateTripsFromAssignment(assignment: any): Promise<number> {
-  // Validate the schedulePattern JSON before using it. The schema matches
-  // what POST_assignment accepts, but the row may have been written by an
-  // older code path or hand-edited. An invalid pattern logs a warning and
-  // returns 0 — the caller (POST_assignment / scheduler) treats a 0-return as
-  // "no trips generated", which is safe.
   const SchedulePattern = z.object({
     days: z.array(z.string()),
     windows: z.array(z.string()),
@@ -182,7 +168,6 @@ export async function generateTripsFromAssignment(assignment: any): Promise<numb
   if (!days || !windows || days.length === 0 || windows.length === 0) return 0;
 
   // Parse configurable departure times. Fall back to defaults of 07:30
-  // (morning) and 17:30 (evening) for backward compat.
   const parseTime = (t: string | undefined, fallback: [number, number]): [number, number] => {
     if (!t) return fallback;
     const [h, m] = t.split(':').map(n => parseInt(n, 10));
@@ -192,14 +177,12 @@ export async function generateTripsFromAssignment(assignment: any): Promise<numb
   const morningHM = parseTime(morningTime, [7, 30]);
   const eveningHM = parseTime(eveningTime, [17, 30]);
 
-  // load active holidays so we skip trip generation on those dates.
   const holidays = await db.holiday.findMany({
     where: { isActive: true, date: { gte: assignment.monthStart, lte: assignment.monthEnd } },
     select: { date: true },
   });
   const holidayDates = new Set(holidays.map(h => h.date.toDateString()));
 
-  // Walk through each day from monthStart to monthEnd
   const trips: any[] = [];
   const dayMap: Record<string, number> = { sun: 0, mon: 1, tue: 2, wed: 3, thu: 4, fri: 5, sat: 6 };
   const targetDays = new Set(days.map((d: string) => dayMap[d]));
@@ -211,14 +194,6 @@ export async function generateTripsFromAssignment(assignment: any): Promise<numb
     if (targetDays.has(cursor.getDay()) && !holidayDates.has(cursor.toDateString())) {
       for (const window of windows) {
         const departureAt = new Date(cursor);
-        // Pin departure to Africa/Addis_Ababa local time (UTC+3, no DST).
-        // setHours(h, m, 0, 0) uses the server's local TZ — when the server's
-        // TZ matches the Dockerfile's pinned TZ=Africa/Addis_Ababa this is
-        // correct, but a misconfigured deployment would silently shift every
-        // trip by the offset. We use setUTCHours(h + 3, m, 0, 0) so the trip's
-        // wall-clock time in Addis is always 07:30 / 17:30 regardless of the
-        // server's TZ. (The +3 offset is Africa/Addis_Ababa's fixed UTC
-        // offset — Addis does not observe DST.)
         const [h, m] = window === 'morning' ? morningHM : eveningHM;
         departureAt.setUTCHours(h + 3, m, 0, 0);
         trips.push({
@@ -258,20 +233,13 @@ export async function POST_accept_assignment({ session, params, ipAddress, userA
   }
   if (assignment.status !== 'assigned') throw new ConflictError(`Assignment is ${assignment.status}, not assigned`);
 
-  // Transition assigned → accepted (contractor acknowledged) → active (trips
-  // generated). Accept + activate in one step; the 'accepted' intermediate
-  // status is preserved per the schema's status comment.
   await db.routeAssignment.update({
     where: { id: params.id },
     data: { status: 'accepted', acceptedAt: new Date() },
   });
-  // Pass the FULL assignment object (re-fetched with the new status), not
-  // the ID string — generateTripsFromAssignment reads assignment.schedulePattern,
-  // assignment.monthStart, etc.
   const freshAssignment = await db.routeAssignment.findUnique({ where: { id: params.id } });
   if (freshAssignment) {
     await generateTripsFromAssignment(freshAssignment).catch((err) => {
-      // Don't silently swallow — log loudly. Trip generation failing is a real problem.
       logger.error({ err: (err as Error).message, assignmentId: params.id }, '[assignment.accept] trip generation failed');
     });
   }
@@ -296,7 +264,6 @@ export async function POST_reject_assignment({ session, params, body, ipAddress,
     where: { id: params.id },
     data: { status: 'cancelled' },
   });
-  // Cancel all generated trips AND their booked rides. Notify affected riders.
   const tripsToCancel = await db.trip.findMany({
     where: { assignmentId: params.id, status: 'scheduled' },
     select: { id: true },
@@ -319,11 +286,6 @@ export async function POST_reject_assignment({ session, params, body, ipAddress,
       });
     });
 
-    // Schedule refunds for affected riders who paid via seat claims
-    // (subscription-booked rides don't have a per-ride payment to refund —
-    // their subscription credit will be restored by the existing releaseRide
-    // path). For seat-claim rides, look up the linked Payment + schedule a
-    // full refund of any unrefunded amount.
     const { scheduleRefund } = await import('@/lib/payment-service');
     const { Money } = await import('@/lib/money');
     const seatClaimIds = ridesToCancel.map(r => r.seatClaimId).filter(Boolean) as string[];
@@ -349,8 +311,6 @@ export async function POST_reject_assignment({ session, params, body, ipAddress,
       }
     }
 
-    // Restore subscription credits for cancelled subscription-booked rides.
-    // Mirrors the pattern in api-operations.ts:POST_trip_cancel.
     const { releaseRide } = await import('@/lib/subscription');
     for (const r of ridesToCancel) {
       if (r.subscriptionId) {
@@ -360,7 +320,6 @@ export async function POST_reject_assignment({ session, params, body, ipAddress,
       }
     }
 
-    // Notify each affected rider (best-effort).
     const { enqueueNotification } = await import('@/lib/outbox');
     for (const r of ridesToCancel) {
       enqueueNotification({
@@ -392,3 +351,4 @@ export async function GET_my_assignments({ session }: any) {
   });
   return { data: assignments };
 }
+

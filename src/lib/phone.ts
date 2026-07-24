@@ -6,13 +6,10 @@ export const EthiopianPhone = {
   },
   normalize(input: string): string {
     let s = input.trim();
-    // Strip spaces, dashes, parens.
     s = s.replace(/[\s\-()]/g, '');
-    // 09XXXXXXXX -> +2519XXXXXXXX
     if (/^0?(9|7)\d{8}$/.test(s)) {
       return `+251${s.replace(/^0/, '')}`;
     }
-    // 2519XXXXXXXX -> +2519XXXXXXXX
     if (/^251(9|7)\d{8}$/.test(s)) {
       return `+${s}`;
     }
@@ -24,3 +21,4 @@ export const EthiopianPhone = {
 export function isValidPhone(input: string): boolean {
   try { EthiopianPhone.normalize(input); return true; } catch { return false; }
 }
+
